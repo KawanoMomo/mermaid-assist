@@ -718,6 +718,49 @@ function deleteTask(text, lineNum) {
   return lines.join('\n');
 }
 
+// ── After-dependency date sanitization ────────────────────────────────────
+// When a task's dates are changed, dependent tasks (after <id>) may end up
+// with their end date before the referenced task's end date, causing
+// mermaid.js to render negative-width bars.
+// This function adjusts dependent task end dates to maintain validity.
+function sanitizeAfterDependencies(text) {
+  var p = parseGantt(text);
+  var lines = text.split('\n');
+  var changed = false;
+
+  for (var i = 0; i < p.tasks.length; i++) {
+    var t = p.tasks[i];
+    if (!t.after) continue;
+
+    // Find the referenced task
+    var ref = null;
+    for (var j = 0; j < p.tasks.length; j++) {
+      if (p.tasks[j].id === t.after) { ref = p.tasks[j]; break; }
+    }
+    if (!ref) continue;
+
+    // Resolve the referenced task's end date
+    var refEnd = ref.endDate;
+    if (!refEnd || !DATE_RE.test(refEnd)) continue;
+
+    // Check if this task's end date is before the ref's end date
+    if (t.endDate && DATE_RE.test(t.endDate)) {
+      if (daysBetween(refEnd, t.endDate) < 1) {
+        // Push end date to refEnd + 1 day
+        var newEnd = addDays(refEnd, 1);
+        var parsed = parseTaskLine(lines[t.line - 1]);
+        if (parsed) {
+          var meta = rebuildTaskMeta(parsed.status, parsed.id, parsed.startDate, newEnd, parsed.after);
+          lines[t.line - 1] = parsed.indent + parsed.label + ' :' + meta;
+          changed = true;
+        }
+      }
+    }
+  }
+
+  return changed ? lines.join('\n') : text;
+}
+
 // ── Section management ────────────────────────────────────────────────────
 function addSection(text, name) {
   var lines = text.split('\n');
@@ -2044,6 +2087,9 @@ function init() {
           mmdText = updateTaskDates(mmdText, dragState.lineNum, null, newEnd2);
         }
       }
+
+      // Fix after-dependent task dates to prevent negative widths in mermaid
+      mmdText = sanitizeAfterDependencies(mmdText);
 
       // Update text + editor immediately (no mermaid re-render)
       suppressSync = true;
