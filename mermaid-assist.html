@@ -762,6 +762,213 @@ function deleteTask(text, lineNum) {
   return lines.join('\n');
 }
 
+// ── Date Helpers ──────────────────────────────────────────────────────────
+function daysBetween(dateStr1, dateStr2) {
+  var d1 = new Date(dateStr1), d2 = new Date(dateStr2);
+  return Math.round((d2 - d1) / (1000 * 60 * 60 * 24));
+}
+
+function addDays(dateStr, days) {
+  var d = new Date(dateStr);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().substring(0, 10);
+}
+
+// ── Calibration (ADR-010) ─────────────────────────────────────────────────
+var calibration = { pxPerDay: 0, originX: 0, baseDate: '', barRects: [] };
+
+function calibrateScale(svgEl, parsedData) {
+  calibration = { pxPerDay: 0, originX: 0, baseDate: '', barRects: [] };
+  if (!svgEl || !parsedData || !parsedData.tasks || parsedData.tasks.length === 0) return;
+
+  // Collect task bar rects from SVG
+  var rects = [];
+  var selectors = ['rect.task', 'rect.task0', 'rect.task1', 'rect.task2', 'rect.task3'];
+  for (var si = 0; si < selectors.length; si++) {
+    var found = svgEl.querySelectorAll(selectors[si]);
+    for (var fi = 0; fi < found.length; fi++) {
+      rects.push(found[fi]);
+    }
+  }
+
+  // Fallback: section groups
+  if (rects.length === 0) {
+    var sectionSelectors = ['.section0', '.section1', '.section2', '.section3'];
+    for (var ssi = 0; ssi < sectionSelectors.length; ssi++) {
+      var groups = svgEl.querySelectorAll(sectionSelectors[ssi]);
+      for (var gi = 0; gi < groups.length; gi++) {
+        var groupRects = groups[gi].querySelectorAll('rect');
+        for (var gri = 0; gri < groupRects.length; gri++) {
+          rects.push(groupRects[gri]);
+        }
+      }
+    }
+  }
+
+  // Last fallback: all rects with height 10-50px and width >10px
+  if (rects.length === 0) {
+    var allRects = svgEl.querySelectorAll('rect');
+    for (var ari = 0; ari < allRects.length; ari++) {
+      var bbox;
+      try { bbox = allRects[ari].getBBox(); } catch (e) { continue; }
+      if (bbox.height >= 10 && bbox.height <= 50 && bbox.width > 10) {
+        rects.push(allRects[ari]);
+      }
+    }
+  }
+
+  // Store barRects with bounding boxes
+  var barRects = [];
+  for (var bri = 0; bri < rects.length; bri++) {
+    try {
+      var bb = rects[bri].getBBox();
+      barRects.push({ el: rects[bri], x: bb.x, y: bb.y, width: bb.width, height: bb.height });
+    } catch (e) { /* skip */ }
+  }
+  calibration.barRects = barRects;
+
+  // Need tasks with known dates for calibration
+  var tasksWithDates = [];
+  for (var ti = 0; ti < parsedData.tasks.length; ti++) {
+    var task = parsedData.tasks[ti];
+    if (task.startDate && DATE_RE.test(task.startDate)) {
+      tasksWithDates.push({ task: task, index: ti });
+    }
+  }
+
+  if (tasksWithDates.length === 0 || barRects.length === 0) return;
+
+  // Find two tasks with different startDates and corresponding rects
+  var calibrated = false;
+  for (var ci = 0; ci < tasksWithDates.length && !calibrated; ci++) {
+    for (var cj = ci + 1; cj < tasksWithDates.length && !calibrated; cj++) {
+      var t1 = tasksWithDates[ci], t2 = tasksWithDates[cj];
+      if (t1.task.startDate === t2.task.startDate) continue;
+      if (t1.index >= barRects.length || t2.index >= barRects.length) continue;
+      var r1 = barRects[t1.index], r2 = barRects[t2.index];
+      var dDays = daysBetween(t1.task.startDate, t2.task.startDate);
+      if (dDays === 0) continue;
+      calibration.pxPerDay = (r2.x - r1.x) / dDays;
+      calibration.originX = r1.x;
+      calibration.baseDate = t1.task.startDate;
+      calibrated = true;
+    }
+  }
+
+  // Single-task fallback
+  if (!calibrated && tasksWithDates.length >= 1) {
+    var st = tasksWithDates[0];
+    if (st.index < barRects.length && st.task.endDate && DATE_RE.test(st.task.endDate)) {
+      var dur = daysBetween(st.task.startDate, st.task.endDate);
+      if (dur > 0) {
+        calibration.pxPerDay = barRects[st.index].width / dur;
+        calibration.originX = barRects[st.index].x;
+        calibration.baseDate = st.task.startDate;
+      }
+    }
+  }
+}
+
+function pxToDate(px) {
+  if (calibration.pxPerDay === 0) return null;
+  var daysDelta = Math.round((px - calibration.originX) / calibration.pxPerDay);
+  return addDays(calibration.baseDate, daysDelta);
+}
+
+function dateToPx(dateStr) {
+  if (calibration.pxPerDay === 0) return 0;
+  return calibration.originX + daysBetween(calibration.baseDate, dateStr) * calibration.pxPerDay;
+}
+
+// ── Selection Functions ───────────────────────────────────────────────────
+function isSelected(id) {
+  return sel.some(function(s) { return s.id === id; });
+}
+
+function selectItem(type, id, multi) {
+  if (multi) {
+    var found = false;
+    for (var i = 0; i < sel.length; i++) {
+      if (sel[i].id === id) {
+        sel.splice(i, 1);
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      sel.push({ type: type, id: id });
+    }
+  } else {
+    sel = [{ type: type, id: id }];
+  }
+  renderProps();
+  rebuildOverlay();
+}
+
+function clearSelection() {
+  sel = [];
+  renderProps();
+  rebuildOverlay();
+}
+
+function rebuildOverlay() {
+  if (!currentModule || !overlayEl) return;
+  var svgEl = previewSvgEl ? previewSvgEl.querySelector('svg') : null;
+  if (svgEl) {
+    currentModule.buildOverlay(svgEl, parsed);
+  }
+}
+
+// ── HTML Escape Helper ────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Property Panel Helpers ────────────────────────────────────────────────
+function bindPropInput(elId, lineNum, field) {
+  var el = document.getElementById(elId);
+  if (!el) return;
+  el.addEventListener('change', function() {
+    pushHistory();
+    mmdText = updateTaskField(mmdText, lineNum, field, el.value);
+    suppressSync = true;
+    editorEl.value = mmdText;
+    suppressSync = false;
+    syncLineNumbers();
+    scheduleRefresh();
+  });
+}
+
+function bindPropDate(startId, endId, lineNum) {
+  var startEl = document.getElementById(startId);
+  var endEl = document.getElementById(endId);
+  if (startEl) {
+    startEl.addEventListener('change', function() {
+      pushHistory();
+      mmdText = updateTaskDates(mmdText, lineNum, startEl.value, null);
+      suppressSync = true;
+      editorEl.value = mmdText;
+      suppressSync = false;
+      syncLineNumbers();
+      scheduleRefresh();
+    });
+  }
+  if (endEl) {
+    endEl.addEventListener('change', function() {
+      pushHistory();
+      mmdText = updateTaskDates(mmdText, lineNum, null, endEl.value);
+      suppressSync = true;
+      editorEl.value = mmdText;
+      suppressSync = false;
+      syncLineNumbers();
+      scheduleRefresh();
+    });
+  }
+}
+
+// ── Drag State ────────────────────────────────────────────────────────────
+var dragState = null;
+
 // ── Application State ──────────────────────────────────────────────────────
 var mmdText = '';
 var parsed = { title: '', dateFormat: 'YYYY-MM-DD', axisFormat: '', sections: [], tasks: [] };
@@ -788,8 +995,418 @@ modules.gantt = {
   type: 'gantt',
   detect: function(text) { return text.trim().startsWith('gantt'); },
   parse: parseGantt,
-  buildOverlay: function(svgEl, parsedData) { /* implemented in Task 7 */ },
-  renderProps: function(selData, parsedData) { /* implemented in Task 8 */ },
+  buildOverlay: function(svgEl, parsedData) {
+    if (!overlayEl) return;
+    // Clear previous overlay content
+    while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
+
+    if (!svgEl || !parsedData || !parsedData.tasks || parsedData.tasks.length === 0) return;
+
+    // Calibrate scale
+    calibrateScale(svgEl, parsedData);
+
+    // Match overlay SVG dimensions/viewBox to the mermaid SVG
+    var viewBox = svgEl.getAttribute('viewBox');
+    if (viewBox) {
+      overlayEl.setAttribute('viewBox', viewBox);
+    }
+    var svgW = svgEl.getAttribute('width');
+    var svgH = svgEl.getAttribute('height');
+    if (svgW) overlayEl.setAttribute('width', svgW);
+    if (svgH) overlayEl.setAttribute('height', svgH);
+
+    var NS = 'http://www.w3.org/2000/svg';
+    var barRects = calibration.barRects;
+
+    // For each task (up to barRects.length)
+    var taskCount = Math.min(parsedData.tasks.length, barRects.length);
+    for (var i = 0; i < taskCount; i++) {
+      var task = parsedData.tasks[i];
+      var br = barRects[i];
+      var selected = isSelected(task.id);
+
+      // If selected: add green dashed highlight rect
+      if (selected) {
+        var hlRect = document.createElementNS(NS, 'rect');
+        hlRect.setAttribute('x', br.x - 2);
+        hlRect.setAttribute('y', br.y - 2);
+        hlRect.setAttribute('width', br.width + 4);
+        hlRect.setAttribute('height', br.height + 4);
+        hlRect.setAttribute('fill', 'none');
+        hlRect.setAttribute('stroke', '#7ee787');
+        hlRect.setAttribute('stroke-width', '2');
+        hlRect.setAttribute('stroke-dasharray', '4');
+        hlRect.setAttribute('rx', '3');
+        overlayEl.appendChild(hlRect);
+      }
+
+      // Transparent overlay bar rect
+      var overlayRect = document.createElementNS(NS, 'rect');
+      overlayRect.setAttribute('x', br.x);
+      overlayRect.setAttribute('y', br.y);
+      overlayRect.setAttribute('width', br.width);
+      overlayRect.setAttribute('height', br.height);
+      overlayRect.setAttribute('fill', 'transparent');
+      overlayRect.setAttribute('cursor', 'move');
+      overlayRect.setAttribute('class', 'overlay-bar');
+      overlayRect.setAttribute('data-task-id', task.id);
+      overlayRect.setAttribute('data-type', 'task');
+      overlayRect.setAttribute('data-line', task.line);
+      overlayRect.setAttribute('data-index', i);
+      overlayEl.appendChild(overlayRect);
+
+      // Left resize handle
+      var leftHandle = document.createElementNS(NS, 'rect');
+      leftHandle.setAttribute('x', br.x);
+      leftHandle.setAttribute('y', br.y);
+      leftHandle.setAttribute('width', '6');
+      leftHandle.setAttribute('height', br.height);
+      leftHandle.setAttribute('fill', selected ? '#7ee787' : 'transparent');
+      leftHandle.setAttribute('opacity', selected ? '0.7' : '0');
+      leftHandle.setAttribute('cursor', 'w-resize');
+      leftHandle.setAttribute('class', 'resize-handle');
+      leftHandle.setAttribute('data-task-id', task.id);
+      leftHandle.setAttribute('data-handle', 'left');
+      leftHandle.setAttribute('data-line', task.line);
+      leftHandle.setAttribute('data-index', i);
+      overlayEl.appendChild(leftHandle);
+
+      // Right resize handle
+      var rightHandle = document.createElementNS(NS, 'rect');
+      rightHandle.setAttribute('x', br.x + br.width - 6);
+      rightHandle.setAttribute('y', br.y);
+      rightHandle.setAttribute('width', '6');
+      rightHandle.setAttribute('height', br.height);
+      rightHandle.setAttribute('fill', selected ? '#7ee787' : 'transparent');
+      rightHandle.setAttribute('opacity', selected ? '0.7' : '0');
+      rightHandle.setAttribute('cursor', 'e-resize');
+      rightHandle.setAttribute('class', 'resize-handle');
+      rightHandle.setAttribute('data-task-id', task.id);
+      rightHandle.setAttribute('data-handle', 'right');
+      rightHandle.setAttribute('data-line', task.line);
+      rightHandle.setAttribute('data-index', i);
+      overlayEl.appendChild(rightHandle);
+    }
+  },
+  renderProps: function(selData, parsedData) {
+    if (!propsEl) return;
+
+    // No selection
+    if (!selData || selData.length === 0) {
+      var sectionOptions = '';
+      if (parsedData && parsedData.sections) {
+        for (var si = 0; si < parsedData.sections.length; si++) {
+          sectionOptions += '<option value="' + si + '">' + escHtml(parsedData.sections[si].name) + '</option>';
+        }
+      }
+      if (!sectionOptions) {
+        sectionOptions = '<option value="-1">（セクションなし）</option>';
+      }
+
+      propsEl.innerHTML =
+        '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">タスクを選択するか、新規追加</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label>' +
+          '<input id="prop-add-label" type="text" value="新規タスク" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ID</label>' +
+          '<input id="prop-add-id" type="text" value="t' + (++addCounter) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
+          '<input id="prop-add-start" type="date" value="2026-04-01" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
+          '<input id="prop-add-end" type="date" value="2026-04-15" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション</label>' +
+          '<select id="prop-add-section" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + sectionOptions + '</select>' +
+        '</div>' +
+        '<button id="prop-add-btn" style="width:100%;background:var(--accent);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-bottom:12px;">+ タスク追加</button>' +
+        '<div style="font-size:10px;color:var(--text-secondary);line-height:1.8;">' +
+          '<div><b>Shortcuts:</b></div>' +
+          '<div>Ctrl+Z: Undo</div>' +
+          '<div>Ctrl+Y: Redo</div>' +
+          '<div>Click: Select</div>' +
+          '<div>Shift+Click: Multi-select</div>' +
+          '<div>Drag: Move task</div>' +
+          '<div>Drag handle: Resize</div>' +
+        '</div>';
+
+      // Bind add button
+      var addBtn = document.getElementById('prop-add-btn');
+      if (addBtn) {
+        addBtn.addEventListener('click', function() {
+          var label = document.getElementById('prop-add-label').value || '新規タスク';
+          var id = document.getElementById('prop-add-id').value || '';
+          var start = document.getElementById('prop-add-start').value || '2026-04-01';
+          var end = document.getElementById('prop-add-end').value || '2026-04-15';
+          var secIdx = parseInt(document.getElementById('prop-add-section').value, 10);
+          pushHistory();
+          mmdText = addTask(mmdText, secIdx, label, id, start, end);
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+      return;
+    }
+
+    // Single task selected
+    if (selData.length === 1 && selData[0].type === 'task') {
+      var taskId = selData[0].id;
+      var task = null;
+      if (parsedData && parsedData.tasks) {
+        for (var ti = 0; ti < parsedData.tasks.length; ti++) {
+          if (parsedData.tasks[ti].id === taskId) { task = parsedData.tasks[ti]; break; }
+        }
+      }
+      if (!task) {
+        propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">タスクが見つかりません</p>';
+        return;
+      }
+
+      var statusBtns = ['none', 'done', 'active', 'crit'].map(function(s) {
+        var isActive = (s === 'none' && !task.status) || (task.status === s);
+        var bg = isActive ? 'var(--accent)' : 'var(--bg-tertiary)';
+        var val = s === 'none' ? '' : s;
+        return '<button class="prop-status-btn" data-status="' + val + '" style="flex:1;background:' + bg + ';color:var(--text-primary);border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">' + s + '</button>';
+      }).join('');
+
+      propsEl.innerHTML =
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label>' +
+          '<input id="prop-label" type="text" value="' + escHtml(task.label) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ID</label>' +
+          '<input id="prop-id" type="text" value="' + escHtml(task.id.indexOf('__auto_') === 0 ? '' : task.id) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
+          '<input id="prop-start" type="date" value="' + escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
+          '<input id="prop-end" type="date" value="' + escHtml(task.endDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ステータス</label>' +
+          '<div style="display:flex;gap:2px;">' + statusBtns + '</div>' +
+        '</div>' +
+        (task.after ? '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">after依存 (読み取り専用)</label>' +
+          '<input type="text" value="' + escHtml(task.after) + '" readonly style="width:100%;background:var(--bg-primary);border:1px solid var(--border);color:var(--text-secondary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' : '') +
+        '<button id="prop-delete-btn" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">タスク削除</button>';
+
+      // Bind handlers
+      bindPropInput('prop-label', task.line, 'label');
+      bindPropInput('prop-id', task.line, 'id');
+      bindPropDate('prop-start', 'prop-end', task.line);
+
+      // Status buttons
+      var statusBtnEls = propsEl.querySelectorAll('.prop-status-btn');
+      for (var sbi = 0; sbi < statusBtnEls.length; sbi++) {
+        (function(btn) {
+          btn.addEventListener('click', function() {
+            pushHistory();
+            mmdText = updateTaskField(mmdText, task.line, 'status', btn.getAttribute('data-status'));
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            syncLineNumbers();
+            scheduleRefresh();
+          });
+        })(statusBtnEls[sbi]);
+      }
+
+      // Delete button
+      var delBtn = document.getElementById('prop-delete-btn');
+      if (delBtn) {
+        delBtn.addEventListener('click', function() {
+          pushHistory();
+          mmdText = deleteTask(mmdText, task.line);
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          sel = [];
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+      return;
+    }
+
+    // Multiple tasks selected
+    if (selData.length > 1) {
+      var selectedTasks = [];
+      if (parsedData && parsedData.tasks) {
+        for (var mi = 0; mi < selData.length; mi++) {
+          for (var mj = 0; mj < parsedData.tasks.length; mj++) {
+            if (parsedData.tasks[mj].id === selData[mi].id) {
+              selectedTasks.push(parsedData.tasks[mj]);
+              break;
+            }
+          }
+        }
+      }
+
+      var batchStatusBtns = ['done', 'active', 'crit', 'none'].map(function(s) {
+        var val = s === 'none' ? '' : s;
+        return '<button class="batch-status-btn" data-status="' + val + '" style="flex:1;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">' + s + '</button>';
+      }).join('');
+
+      propsEl.innerHTML =
+        '<div style="margin-bottom:8px;font-size:11px;color:var(--text-secondary);">' + selData.length + ' タスク選択中</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">一括ステータス変更</label>' +
+          '<div style="display:flex;gap:2px;">' + batchStatusBtns + '</div>' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">一括日付シフト（日数）</label>' +
+          '<div style="display:flex;gap:4px;">' +
+            '<input id="batch-shift-days" type="number" value="0" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '<button id="batch-shift-btn" style="background:var(--accent);color:#fff;border:none;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:11px;">適用</button>' +
+          '</div>' +
+        '</div>' +
+        '<button id="batch-delete-btn" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">一括削除</button>';
+
+      // Batch status change
+      var batchBtnEls = propsEl.querySelectorAll('.batch-status-btn');
+      for (var bbi = 0; bbi < batchBtnEls.length; bbi++) {
+        (function(btn) {
+          btn.addEventListener('click', function() {
+            pushHistory();
+            var statusVal = btn.getAttribute('data-status');
+            for (var bti = 0; bti < selectedTasks.length; bti++) {
+              mmdText = updateTaskField(mmdText, selectedTasks[bti].line, 'status', statusVal);
+            }
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            syncLineNumbers();
+            scheduleRefresh();
+          });
+        })(batchBtnEls[bbi]);
+      }
+
+      // Batch date shift
+      var shiftBtn = document.getElementById('batch-shift-btn');
+      if (shiftBtn) {
+        shiftBtn.addEventListener('click', function() {
+          var daysVal = parseInt(document.getElementById('batch-shift-days').value, 10);
+          if (isNaN(daysVal) || daysVal === 0) return;
+          pushHistory();
+          for (var sti = 0; sti < selectedTasks.length; sti++) {
+            var st = selectedTasks[sti];
+            var newStart = st.startDate && DATE_RE.test(st.startDate) ? addDays(st.startDate, daysVal) : null;
+            var newEnd = st.endDate && DATE_RE.test(st.endDate) ? addDays(st.endDate, daysVal) : null;
+            if (newStart || newEnd) {
+              mmdText = updateTaskDates(mmdText, st.line, newStart, newEnd);
+            }
+          }
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+
+      // Batch delete (reverse line order to preserve line numbers)
+      var batchDelBtn = document.getElementById('batch-delete-btn');
+      if (batchDelBtn) {
+        batchDelBtn.addEventListener('click', function() {
+          pushHistory();
+          // Sort by line number descending so deletion doesn't shift lines
+          var sorted = selectedTasks.slice().sort(function(a, b) { return b.line - a.line; });
+          for (var di = 0; di < sorted.length; di++) {
+            mmdText = deleteTask(mmdText, sorted[di].line);
+          }
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          sel = [];
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+      return;
+    }
+
+    // Section selected
+    if (selData.length === 1 && selData[0].type === 'section') {
+      var secId = selData[0].id;
+      var section = null;
+      if (parsedData && parsedData.sections) {
+        for (var sci = 0; sci < parsedData.sections.length; sci++) {
+          if (parsedData.sections[sci].name === secId) {
+            section = parsedData.sections[sci];
+            break;
+          }
+        }
+      }
+      if (!section) {
+        propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">セクションが見つかりません</p>';
+        return;
+      }
+
+      // Tasks in this section
+      var secTasks = [];
+      if (parsedData && parsedData.tasks) {
+        var secIndex = parsedData.sections.indexOf(section);
+        for (var sti2 = 0; sti2 < parsedData.tasks.length; sti2++) {
+          if (parsedData.tasks[sti2].sectionIndex === secIndex) {
+            secTasks.push(parsedData.tasks[sti2]);
+          }
+        }
+      }
+
+      var taskList = secTasks.map(function(t) {
+        return '<div style="padding:2px 4px;font-size:11px;color:var(--text-primary);">' + escHtml(t.label) + '</div>';
+      }).join('');
+
+      propsEl.innerHTML =
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション名</label>' +
+          '<input id="prop-sec-name" type="text" value="' + escHtml(section.name) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:4px;">タスク一覧</label>' +
+          taskList +
+        '</div>';
+
+      // Bind section name change
+      var secNameEl = document.getElementById('prop-sec-name');
+      if (secNameEl) {
+        secNameEl.addEventListener('change', function() {
+          pushHistory();
+          var lines = mmdText.split('\n');
+          var idx = section.line - 1;
+          if (idx >= 0 && idx < lines.length) {
+            var indent = lines[idx].match(/^(\s*)/)[1];
+            lines[idx] = indent + 'section ' + secNameEl.value;
+            mmdText = lines.join('\n');
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            syncLineNumbers();
+            scheduleRefresh();
+          }
+        });
+      }
+      return;
+    }
+
+    // Default fallback
+    propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">タスクを選択してください</p>';
+  },
   updateText: function(text, change) {
     if (change.type === 'dates')  return updateTaskDates(text, change.line, change.startDate, change.endDate);
     if (change.type === 'field')  return updateTaskField(text, change.line, change.field, change.value);
@@ -1104,10 +1721,164 @@ function init() {
     setZoom(zoom + delta);
   }, { passive: false });
 
+  // ── Overlay click + drag handling ─────────────────────────────────────────
+  overlayEl.addEventListener('mousedown', function(e) {
+    var target = e.target;
+    var taskId = target.getAttribute('data-task-id');
+    var handle = target.getAttribute('data-handle');
+    var lineNum = target.getAttribute('data-line');
+    var index = target.getAttribute('data-index');
+
+    // Click on empty overlay area (no task): clear selection
+    if (!taskId && !e.shiftKey) {
+      clearSelection();
+      return;
+    }
+
+    if (!taskId) return;
+
+    // Select the task
+    if (!handle) {
+      selectItem('task', taskId, e.shiftKey);
+    }
+
+    // Initiate drag if calibration is available
+    if (calibration.pxPerDay !== 0 && lineNum) {
+      var lineNumInt = parseInt(lineNum, 10);
+      var indexInt = parseInt(index, 10);
+
+      // Find the task data to get original dates
+      var task = null;
+      if (parsed && parsed.tasks) {
+        for (var dti = 0; dti < parsed.tasks.length; dti++) {
+          if (parsed.tasks[dti].id === taskId) { task = parsed.tasks[dti]; break; }
+        }
+      }
+      if (task && task.startDate && DATE_RE.test(task.startDate)) {
+        // Create SVG point from mouse coordinates
+        var svgEl = previewSvgEl.querySelector('svg');
+        if (svgEl && svgEl.createSVGPoint) {
+          var pt = svgEl.createSVGPoint();
+          pt.x = e.clientX;
+          pt.y = e.clientY;
+          try {
+            var ctm = svgEl.getScreenCTM();
+            if (ctm) {
+              var svgPt = pt.matrixTransform(ctm.inverse());
+              var br = calibration.barRects[indexInt];
+              pushHistory();
+              dragState = {
+                taskId: taskId,
+                lineNum: lineNumInt,
+                handle: handle || null,
+                startX: svgPt.x,
+                origStartDate: task.startDate,
+                origEndDate: task.endDate || '',
+                origBarX: br ? br.x : 0,
+                origBarW: br ? br.width : 0,
+              };
+            }
+          } catch (ex) { /* can't get CTM */ }
+        }
+      }
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  // Click on preview-container background: clear selection
+  document.getElementById('preview-container').addEventListener('mousedown', function(e) {
+    if (e.target === this || e.target === previewSvgEl) {
+      clearSelection();
+    }
+  });
+
+  // ── Document mousemove (drag) ───────────────────────────────────────────
+  document.addEventListener('mousemove', function(e) {
+    if (!dragState) return;
+
+    var svgEl = previewSvgEl.querySelector('svg');
+    if (!svgEl || !svgEl.createSVGPoint) return;
+
+    var pt = svgEl.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+
+    try {
+      var ctm = svgEl.getScreenCTM();
+      if (!ctm) return;
+      var svgPt = pt.matrixTransform(ctm.inverse());
+      var dx = svgPt.x - dragState.startX;
+      var daysDelta = Math.round(dx / calibration.pxPerDay);
+
+      if (daysDelta === 0) return;
+
+      if (dragState.handle === null) {
+        // Move: shift both dates
+        var newStart = addDays(dragState.origStartDate, daysDelta);
+        var newEnd = dragState.origEndDate && DATE_RE.test(dragState.origEndDate) ? addDays(dragState.origEndDate, daysDelta) : null;
+        mmdText = updateTaskDates(mmdText, dragState.lineNum, newStart, newEnd);
+      } else if (dragState.handle === 'left') {
+        // Resize left: shift start date only
+        var newStart2 = addDays(dragState.origStartDate, daysDelta);
+        mmdText = updateTaskDates(mmdText, dragState.lineNum, newStart2, null);
+      } else if (dragState.handle === 'right') {
+        // Resize right: shift end date only
+        if (dragState.origEndDate && DATE_RE.test(dragState.origEndDate)) {
+          var newEnd2 = addDays(dragState.origEndDate, daysDelta);
+          mmdText = updateTaskDates(mmdText, dragState.lineNum, null, newEnd2);
+        }
+      }
+
+      suppressSync = true;
+      editorEl.value = mmdText;
+      suppressSync = false;
+      syncLineNumbers();
+      scheduleRefresh();
+    } catch (ex) { /* ignore CTM errors */ }
+  });
+
+  // ── Document mouseup (end drag) ─────────────────────────────────────────
+  document.addEventListener('mouseup', function() {
+    dragState = null;
+  });
+
   // ── Keyboard shortcuts ───────────────────────────────────────────────────
   document.addEventListener('keydown', function(e) {
     if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
     if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
+    // Delete key removes selected tasks
+    if (e.key === 'Delete' && sel.length > 0 && document.activeElement !== editorEl) {
+      e.preventDefault();
+      pushHistory();
+      var taskLines = [];
+      for (var dki = 0; dki < sel.length; dki++) {
+        if (sel[dki].type === 'task') {
+          for (var dkj = 0; dkj < parsed.tasks.length; dkj++) {
+            if (parsed.tasks[dkj].id === sel[dki].id) {
+              taskLines.push(parsed.tasks[dkj].line);
+              break;
+            }
+          }
+        }
+      }
+      // Delete in reverse line order
+      taskLines.sort(function(a, b) { return b - a; });
+      for (var dli = 0; dli < taskLines.length; dli++) {
+        mmdText = deleteTask(mmdText, taskLines[dli]);
+      }
+      suppressSync = true;
+      editorEl.value = mmdText;
+      suppressSync = false;
+      sel = [];
+      syncLineNumbers();
+      scheduleRefresh();
+    }
+    // Escape key clears selection
+    if (e.key === 'Escape' && sel.length > 0) {
+      clearSelection();
+    }
   });
 
   // ── Initial render ───────────────────────────────────────────────────────
@@ -1151,6 +1922,8 @@ if (typeof __exportForTest === 'function') {
     updateTaskField: updateTaskField,
     addTask: addTask,
     deleteTask: deleteTask,
+    daysBetween: daysBetween,
+    addDays: addDays,
   });
 }
 </script>
