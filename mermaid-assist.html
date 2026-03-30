@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>MermaidAssist</title>
+</head>
+<body>
+<script>
+'use strict';
+
+// ── Constants ──────────────────────────────────────────────────────────────
+var STATUS_KEYWORDS = ['done', 'active', 'crit'];
+var DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+var DURATION_RE = /^\d+[dwmyhMs]$/;
+
+// ── parseGantt ─────────────────────────────────────────────────────────────
+// Pure function: text → ParsedData
+// ParsedData = {
+//   title: string,
+//   dateFormat: string,
+//   axisFormat: string,
+//   sections: [{ name: string, line: number }],
+//   tasks: [{
+//     id: string, label: string, status: string|null,
+//     startDate: string|null, endDate: string|null,
+//     after: string|null, line: number, sectionIndex: number
+//   }]
+// }
+function parseGantt(text) {
+  var result = {
+    title: '',
+    dateFormat: 'YYYY-MM-DD',
+    axisFormat: '',
+    sections: [],
+    tasks: [],
+  };
+
+  if (!text || !text.trim()) {
+    return result;
+  }
+
+  var lines = text.split('\n');
+  var autoIdCounter = 0;
+  var currentSectionIndex = -1;
+
+  for (var i = 0; i < lines.length; i++) {
+    var lineNum = i + 1;  // 1-based
+    var raw = lines[i];
+    var trimmed = raw.trim();
+
+    // Skip empty lines, 'gantt' keyword, and comments
+    if (!trimmed || trimmed === 'gantt' || trimmed.indexOf('%%') === 0) {
+      continue;
+    }
+
+    // Directives we acknowledge but don't store
+    if (trimmed.indexOf('excludes') === 0 || trimmed.indexOf('todayMarker') === 0) {
+      continue;
+    }
+
+    // title
+    if (trimmed.indexOf('title ') === 0) {
+      result.title = trimmed.slice('title '.length).trim();
+      continue;
+    }
+
+    // dateFormat
+    if (trimmed.indexOf('dateFormat ') === 0) {
+      result.dateFormat = trimmed.slice('dateFormat '.length).trim();
+      continue;
+    }
+
+    // axisFormat
+    if (trimmed.indexOf('axisFormat ') === 0) {
+      result.axisFormat = trimmed.slice('axisFormat '.length).trim();
+      continue;
+    }
+
+    // section
+    if (trimmed.indexOf('section ') === 0) {
+      var sectionName = trimmed.slice('section '.length).trim();
+      result.sections.push({ name: sectionName, line: lineNum });
+      currentSectionIndex = result.sections.length - 1;
+      continue;
+    }
+
+    // Task line — must contain ':'
+    var colonIdx = trimmed.indexOf(':');
+    if (colonIdx === -1) {
+      continue;
+    }
+
+    var label = trimmed.slice(0, colonIdx).trim();
+    var metaStr = trimmed.slice(colonIdx + 1).trim();
+    var parts = metaStr.split(',').map(function(s) { return s.trim(); });
+
+    var status = null;
+    var id = null;
+    var startDate = null;
+    var endDate = null;
+    var after = null;
+
+    // Parse metadata tokens in order: status? → id? → start (date or after X) → end (date or duration)
+    var idx = 0;
+
+    // Check for status keyword
+    if (idx < parts.length && STATUS_KEYWORDS.indexOf(parts[idx]) !== -1) {
+      status = parts[idx];
+      idx++;
+    }
+
+    // Check for 'after' dependency as start position
+    // Format: "after <id>" occupies one comma-separated token
+    var afterMatch = null;
+    if (idx < parts.length && parts[idx].indexOf('after ') === 0) {
+      afterMatch = parts[idx].slice('after '.length).trim();
+      idx++;
+    } else {
+      // Try to determine if next token is an id or a date/duration
+      // If it doesn't look like a date or duration, treat it as id
+      if (idx < parts.length) {
+        var candidate = parts[idx];
+        if (!DATE_RE.test(candidate) && !DURATION_RE.test(candidate) && candidate.indexOf('after ') !== 0) {
+          id = candidate;
+          idx++;
+        }
+      }
+
+      // After consuming optional id, check again for 'after'
+      if (idx < parts.length && parts[idx].indexOf('after ') === 0) {
+        afterMatch = parts[idx].slice('after '.length).trim();
+        idx++;
+      }
+    }
+
+    if (afterMatch !== null) {
+      after = afterMatch;
+      // remaining token is end date or duration
+      if (idx < parts.length) {
+        endDate = parts[idx];
+        idx++;
+      }
+    } else {
+      // start date or duration
+      if (idx < parts.length) {
+        startDate = parts[idx];
+        idx++;
+      }
+      // end date or duration
+      if (idx < parts.length) {
+        endDate = parts[idx];
+        idx++;
+      }
+    }
+
+    // Auto-generate id if not set
+    if (id === null) {
+      id = '__auto_' + (autoIdCounter++);
+    }
+
+    result.tasks.push({
+      id: id,
+      label: label,
+      status: status,
+      startDate: startDate,
+      endDate: endDate,
+      after: after,
+      line: lineNum,
+      sectionIndex: currentSectionIndex,
+    });
+  }
+
+  return result;
+}
+
+// ── Export hook for tests ──────────────────────────────────────────────────
+if (typeof __exportForTest === 'function') {
+  __exportForTest({ parseGantt: parseGantt });
+}
+</script>
+</body>
+</html>
