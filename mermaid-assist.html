@@ -935,8 +935,8 @@ var future = [];
 var MAX_HISTORY = 80;
 var suppressSync = false;
 var debounceTimer = null;
-var DEBOUNCE_MS = 0;
-var isDragging = false;
+var DRAG_RENDER_INTERVAL = 200; // ms between mermaid re-renders during drag
+var dragRenderTimer = null;
 var renderCounter = 0;
 var clipboard = null;
 var addCounter = 0;
@@ -1922,8 +1922,16 @@ function init() {
         }
       }
 
-      // Lightweight refresh: parse + status only, no mermaid render
+      // Lightweight refresh: parse + status only (instant)
       refresh(true);
+
+      // Throttled mermaid re-render: chart updates progressively during drag
+      if (!dragRenderTimer) {
+        dragRenderTimer = setTimeout(function() {
+          dragRenderTimer = null;
+          refresh();  // full mermaid re-render
+        }, DRAG_RENDER_INTERVAL);
+      }
     } catch (ex) { /* ignore CTM errors */ }
   });
 
@@ -1931,8 +1939,10 @@ function init() {
   document.addEventListener('mouseup', function() {
     if (dragState) {
       dragState = null;
-      // Now do the full mermaid re-render
-      scheduleRefresh();
+      clearTimeout(dragRenderTimer);
+      dragRenderTimer = null;
+      // Final full re-render
+      refresh();
     }
   });
 
