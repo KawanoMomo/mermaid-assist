@@ -490,86 +490,23 @@ function parseGantt(text) {
     }
 
     // Task line — must contain ':'
-    var colonIdx = trimmed.indexOf(':');
-    if (colonIdx === -1) {
+    if (trimmed.indexOf(':') === -1) {
       continue;
     }
 
-    var label = trimmed.slice(0, colonIdx).trim();
-    var metaStr = trimmed.slice(colonIdx + 1).trim();
-    var parts = metaStr.split(',').map(function(s) { return s.trim(); });
-
-    var status = null;
-    var id = null;
-    var startDate = null;
-    var endDate = null;
-    var after = null;
-
-    // Parse metadata tokens in order: status? → id? → start (date or after X) → end (date or duration)
-    var idx = 0;
-
-    // Check for status keyword
-    if (idx < parts.length && STATUS_KEYWORDS.indexOf(parts[idx]) !== -1) {
-      status = parts[idx];
-      idx++;
-    }
-
-    // Check for 'after' dependency as start position
-    // Format: "after <id>" occupies one comma-separated token
-    var afterMatch = null;
-    if (idx < parts.length && parts[idx].indexOf('after ') === 0) {
-      afterMatch = parts[idx].slice('after '.length).trim();
-      idx++;
-    } else {
-      // Try to determine if next token is an id or a date/duration
-      // If it doesn't look like a date or duration, treat it as id
-      if (idx < parts.length) {
-        var candidate = parts[idx];
-        if (!DATE_RE.test(candidate) && !DURATION_RE.test(candidate) && candidate.indexOf('after ') !== 0) {
-          id = candidate;
-          idx++;
-        }
-      }
-
-      // After consuming optional id, check again for 'after'
-      if (idx < parts.length && parts[idx].indexOf('after ') === 0) {
-        afterMatch = parts[idx].slice('after '.length).trim();
-        idx++;
-      }
-    }
-
-    if (afterMatch !== null) {
-      after = afterMatch;
-      // remaining token is end date or duration
-      if (idx < parts.length) {
-        endDate = parts[idx];
-        idx++;
-      }
-    } else {
-      // start date or duration
-      if (idx < parts.length) {
-        startDate = parts[idx];
-        idx++;
-      }
-      // end date or duration
-      if (idx < parts.length) {
-        endDate = parts[idx];
-        idx++;
-      }
-    }
+    var p = parseTaskLine(raw);
+    if (!p) continue;
 
     // Auto-generate id if not set
-    if (id === null) {
-      id = '__auto_' + (autoIdCounter++);
-    }
+    var taskId = p.id !== null ? p.id : '__auto_' + (autoIdCounter++);
 
     result.tasks.push({
-      id: id,
-      label: label,
-      status: status,
-      startDate: startDate,
-      endDate: endDate,
-      after: after,
+      id: taskId,
+      label: p.label,
+      status: p.status,
+      startDate: p.startDate,
+      endDate: p.endDate,
+      after: p.after,
       line: lineNum,
       sectionIndex: currentSectionIndex,
     });
@@ -974,7 +911,7 @@ var mmdText = '';
 var parsed = { title: '', dateFormat: 'YYYY-MM-DD', axisFormat: '', sections: [], tasks: [] };
 var sel = [];
 var zoom = 1.0;
-var history = [];
+var undoStack = [];
 var future = [];
 var MAX_HISTORY = 80;
 var suppressSync = false;
@@ -1111,7 +1048,7 @@ modules.gantt = {
         '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ID</label>' +
-          '<input id="prop-add-id" type="text" value="t' + (++addCounter) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+          '<input id="prop-add-id" type="text" placeholder="t' + (addCounter + 1) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
         '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
@@ -1141,7 +1078,8 @@ modules.gantt = {
       if (addBtn) {
         addBtn.addEventListener('click', function() {
           var label = document.getElementById('prop-add-label').value || '新規タスク';
-          var id = document.getElementById('prop-add-id').value || '';
+          var idEl = document.getElementById('prop-add-id');
+          var id = (idEl && idEl.value) ? idEl.value : ('t' + (++addCounter));
           var start = document.getElementById('prop-add-start').value || '2026-04-01';
           var end = document.getElementById('prop-add-end').value || '2026-04-15';
           var secIdx = parseInt(document.getElementById('prop-add-section').value, 10);
@@ -1414,6 +1352,7 @@ modules.gantt = {
     if (change.type === 'delete') return deleteTask(text, change.line);
     return text;
   },
+  exportMmd: function(parsedData) { return mmdText; },
 };
 
 // ── Line Numbers ───────────────────────────────────────────────────────────
@@ -1429,16 +1368,16 @@ function syncLineNumbers() {
 
 // ── History (Undo / Redo) ──────────────────────────────────────────────────
 function pushHistory() {
-  history.push(mmdText);
-  if (history.length > MAX_HISTORY) history.shift();
+  undoStack.push(mmdText);
+  if (undoStack.length > MAX_HISTORY) undoStack.shift();
   future = [];
   updateHistoryButtons();
 }
 
 function undo() {
-  if (history.length === 0) return;
+  if (undoStack.length === 0) return;
   future.push(mmdText);
-  mmdText = history.pop();
+  mmdText = undoStack.pop();
   suppressSync = true;
   editorEl.value = mmdText;
   suppressSync = false;
@@ -1449,7 +1388,7 @@ function undo() {
 
 function redo() {
   if (future.length === 0) return;
-  history.push(mmdText);
+  undoStack.push(mmdText);
   mmdText = future.pop();
   suppressSync = true;
   editorEl.value = mmdText;
@@ -1462,7 +1401,7 @@ function redo() {
 function updateHistoryButtons() {
   var btnUndo = document.getElementById('btn-undo');
   var btnRedo = document.getElementById('btn-redo');
-  if (btnUndo) btnUndo.disabled = history.length === 0;
+  if (btnUndo) btnUndo.disabled = undoStack.length === 0;
   if (btnRedo) btnRedo.disabled = future.length === 0;
 }
 
@@ -1544,9 +1483,19 @@ async function refresh() {
 // ── Status Bar ─────────────────────────────────────────────────────────────
 function renderStatus() {
   if (!statusInfoEl) return;
-  var lineCount = mmdText.split('\n').length;
-  var taskCount = (parsed && parsed.tasks) ? parsed.tasks.length : 0;
-  statusInfoEl.textContent = lineCount + ' lines  |  ' + taskCount + ' tasks';
+  var info = '';
+  if (parsed && parsed.tasks && parsed.tasks.length > 0) {
+    info = 'タスク: ' + parsed.tasks.length;
+    if (parsed.sections && parsed.sections.length > 0) info += ' | セクション: ' + parsed.sections.length;
+    // Calculate date range
+    var dates = parsed.tasks.filter(function(t) { return t.startDate; }).map(function(t) { return t.startDate; });
+    var endDates = parsed.tasks.filter(function(t) { return t.endDate && DATE_RE.test(t.endDate); }).map(function(t) { return t.endDate; });
+    var allDates = dates.concat(endDates).sort();
+    if (allDates.length >= 2) {
+      info += ' | 期間: ' + allDates[0] + ' ~ ' + allDates[allDates.length - 1];
+    }
+  }
+  statusInfoEl.textContent = info;
 }
 
 // ── Properties Panel ───────────────────────────────────────────────────────
@@ -1757,12 +1706,18 @@ function init() {
     exportClipboard();
   });
 
-  // ── Ctrl+wheel zoom on preview ───────────────────────────────────────────
-  document.getElementById('preview-container').addEventListener('wheel', function(e) {
-    if (!e.ctrlKey) return;
-    e.preventDefault();
-    var delta = e.deltaY < 0 ? 0.1 : -0.1;
-    setZoom(zoom + delta);
+  // ── Ctrl+wheel zoom / Shift+wheel horizontal scroll on preview ───────────
+  var previewContainer = document.getElementById('preview-container');
+  previewContainer.addEventListener('wheel', function(e) {
+    if (e.ctrlKey) {
+      e.preventDefault();
+      var delta = e.deltaY < 0 ? 0.1 : -0.1;
+      setZoom(zoom + delta);
+    } else if (e.shiftKey && !e.ctrlKey) {
+      // Shift+Wheel → horizontal scroll
+      previewContainer.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }
   }, { passive: false });
 
   // ── Overlay click + drag handling ─────────────────────────────────────────
