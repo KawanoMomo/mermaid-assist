@@ -1967,12 +1967,12 @@ function init() {
             if (ctm) {
               var svgPt = pt.matrixTransform(ctm.inverse());
               var br = calibration.barRects[indexInt];
-              pushHistory();
               dragState = {
                 taskId: taskId,
                 lineNum: lineNumInt,
                 handle: handle || null,
                 startX: svgPt.x,
+                historyPushed: false,
                 origStartDate: task.startDate,
                 origEndDate: task.endDate || '',
                 origBarX: br ? br.x : 0,
@@ -2013,6 +2013,12 @@ function init() {
       var daysDelta = Math.round(dx / calibration.pxPerDay);
 
       if (daysDelta === 0) return;
+
+      // Push history only on first actual move
+      if (!dragState.historyPushed) {
+        pushHistory();
+        dragState.historyPushed = true;
+      }
 
       if (dragState.handle === null) {
         // Move: shift both dates equally
@@ -2157,14 +2163,16 @@ function init() {
     var resizer = document.getElementById(resizerId);
     var leftPane = document.getElementById(leftPaneId);
     var rightPane = document.getElementById(rightPaneId);
-    if (!resizer || !leftPane) return;
+    if (!resizer) return;
+    if (direction === 'left' && !leftPane) return;
+    if (direction === 'right' && !rightPane) return;
 
     var startX, startLeftW, startRightW;
 
     resizer.addEventListener('mousedown', function(e) {
       e.preventDefault();
       startX = e.clientX;
-      startLeftW = leftPane.getBoundingClientRect().width;
+      if (leftPane) startLeftW = leftPane.getBoundingClientRect().width;
       if (rightPane) startRightW = rightPane.getBoundingClientRect().width;
       resizer.classList.add('dragging');
       document.body.style.cursor = 'col-resize';
