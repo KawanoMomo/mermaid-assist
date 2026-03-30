@@ -1572,18 +1572,70 @@ function setZoom(z) {
 
 // ── File Open / Save ───────────────────────────────────────────────────────
 function openFile() {
-  var fileInput = document.getElementById('file-input');
-  if (fileInput) fileInput.click();
+  document.getElementById('file-input').click();
 }
 
 function saveFile() {
   var blob = new Blob([mmdText], { type: 'text/plain' });
-  var url = URL.createObjectURL(blob);
   var a = document.createElement('a');
-  a.href = url;
-  a.download = 'diagram.mmd';
+  a.href = URL.createObjectURL(blob);
+  a.download = (parsed.title || 'untitled') + '.mmd';
   a.click();
-  URL.revokeObjectURL(url);
+  URL.revokeObjectURL(a.href);
+}
+
+// ── Export Functions ───────────────────────────────────────────────────────
+function exportSVG() {
+  var svgEl = previewSvgEl.querySelector('svg');
+  if (!svgEl) return;
+  var clone = svgEl.cloneNode(true);
+  var blob = new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (parsed.title || 'untitled') + '.svg';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function svgToCanvas(transparent, callback) {
+  var svgEl = previewSvgEl.querySelector('svg');
+  if (!svgEl) return;
+  var clone = svgEl.cloneNode(true);
+  var svgData = new XMLSerializer().serializeToString(clone);
+  var img = new Image();
+  img.onload = function() {
+    var canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    var ctx = canvas.getContext('2d');
+    if (!transparent) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    ctx.drawImage(img, 0, 0);
+    callback(canvas);
+  };
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData);
+}
+
+function exportPNG(transparent) {
+  svgToCanvas(transparent, function(canvas) {
+    canvas.toBlob(function(blob) {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = (parsed.title || 'untitled') + '.png';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+  });
+}
+
+function exportClipboard() {
+  svgToCanvas(false, function(canvas) {
+    canvas.toBlob(function(blob) {
+      navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    });
+  });
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────
@@ -1684,33 +1736,25 @@ function init() {
     exportMenu.classList.remove('open');
   });
 
-  // Export actions (stubs — full implementation in later tasks)
+  // Export actions
   document.getElementById('exp-svg').addEventListener('click', function() {
     exportMenu.classList.remove('open');
-    var svgEl = previewSvgEl.querySelector('svg');
-    if (!svgEl) return;
-    var blob = new Blob([svgEl.outerHTML], { type: 'image/svg+xml' });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url; a.download = 'diagram.svg'; a.click();
-    URL.revokeObjectURL(url);
+    exportSVG();
   });
 
   document.getElementById('exp-png').addEventListener('click', function() {
     exportMenu.classList.remove('open');
-    exportPng(false);
+    exportPNG(false);
   });
 
   document.getElementById('exp-png-transparent').addEventListener('click', function() {
     exportMenu.classList.remove('open');
-    exportPng(true);
+    exportPNG(true);
   });
 
   document.getElementById('exp-clipboard').addEventListener('click', function() {
     exportMenu.classList.remove('open');
-    var svgEl = previewSvgEl.querySelector('svg');
-    if (!svgEl || !navigator.clipboard) return;
-    navigator.clipboard.writeText(svgEl.outerHTML).catch(function() {});
+    exportClipboard();
   });
 
   // ── Ctrl+wheel zoom on preview ───────────────────────────────────────────
@@ -1846,38 +1890,65 @@ function init() {
 
   // ── Keyboard shortcuts ───────────────────────────────────────────────────
   document.addEventListener('keydown', function(e) {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
-    if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); redo(); }
-    // Delete key removes selected tasks
-    if (e.key === 'Delete' && sel.length > 0 && document.activeElement !== editorEl) {
-      e.preventDefault();
+    var tag = e.target.tagName;
+    var inInput = (tag === 'INPUT' || tag === 'SELECT');
+    var inEditor = (e.target === editorEl);
+
+    if (e.ctrlKey && e.key === 'z') {
+      if (inEditor) return;
+      e.preventDefault(); undo();
+    } else if (e.ctrlKey && e.key === 'y') {
+      if (inEditor) return;
+      e.preventDefault(); redo();
+    } else if (e.ctrlKey && e.key === 's') {
+      e.preventDefault(); saveFile();
+    } else if (e.ctrlKey && e.key === 'o') {
+      e.preventDefault(); openFile();
+    } else if (e.key === 'Delete' && !inInput && !inEditor) {
+      if (sel.length === 0) return;
       pushHistory();
-      var taskLines = [];
-      for (var dki = 0; dki < sel.length; dki++) {
-        if (sel[dki].type === 'task') {
-          for (var dkj = 0; dkj < parsed.tasks.length; dkj++) {
-            if (parsed.tasks[dkj].id === sel[dki].id) {
-              taskLines.push(parsed.tasks[dkj].line);
-              break;
-            }
-          }
-        }
-      }
-      // Delete in reverse line order
-      taskLines.sort(function(a, b) { return b - a; });
-      for (var dli = 0; dli < taskLines.length; dli++) {
-        mmdText = deleteTask(mmdText, taskLines[dli]);
-      }
+      var lines = sel.map(function(s) {
+        var t = parsed.tasks.find(function(tk) { return tk.id === s.id; });
+        return t ? t.line : -1;
+      }).filter(function(l) { return l > 0; }).sort(function(a, b) { return b - a; });
+      lines.forEach(function(l) { mmdText = deleteTask(mmdText, l); });
       suppressSync = true;
       editorEl.value = mmdText;
       suppressSync = false;
       sel = [];
       syncLineNumbers();
       scheduleRefresh();
-    }
-    // Escape key clears selection
-    if (e.key === 'Escape' && sel.length > 0) {
+    } else if (e.key === 'Escape') {
       clearSelection();
+    } else if (e.ctrlKey && e.key === 'a' && !inEditor && !inInput) {
+      e.preventDefault();
+      sel = parsed.tasks.map(function(t) { return { type: 'task', id: t.id }; });
+      renderProps();
+      if (currentModule) {
+        var svgEl = previewSvgEl.querySelector('svg');
+        if (svgEl) currentModule.buildOverlay(svgEl, parsed);
+      }
+    } else if (e.ctrlKey && e.shiftKey && e.key === 'C') {
+      e.preventDefault(); exportClipboard();
+    } else if (e.ctrlKey && e.key === 'c' && !inEditor && !inInput && sel.length > 0) {
+      e.preventDefault();
+      clipboard = sel.map(function(s) {
+        return parsed.tasks.find(function(t) { return t.id === s.id; });
+      }).filter(Boolean);
+    } else if (e.ctrlKey && e.key === 'v' && !inEditor && !inInput && clipboard && clipboard.length > 0) {
+      e.preventDefault();
+      pushHistory();
+      clipboard.forEach(function(t) {
+        var newId = '__new_' + (++addCounter);
+        var newStart = t.startDate ? addDays(t.startDate, 7) : null;
+        var newEnd = t.endDate && !isDuration(t.endDate) ? addDays(t.endDate, 7) : t.endDate;
+        mmdText = addTask(mmdText, t.sectionIndex, t.label, newId, newStart, newEnd);
+      });
+      suppressSync = true;
+      editorEl.value = mmdText;
+      suppressSync = false;
+      syncLineNumbers();
+      scheduleRefresh();
     }
   });
 
@@ -1885,31 +1956,6 @@ function init() {
   scheduleRefresh();
 }
 
-// ── PNG export helper ──────────────────────────────────────────────────────
-function exportPng(transparent) {
-  var svgEl = previewSvgEl.querySelector('svg');
-  if (!svgEl) return;
-  var svgStr = new XMLSerializer().serializeToString(svgEl);
-  var img = new Image();
-  var blob = new Blob([svgStr], { type: 'image/svg+xml' });
-  var url = URL.createObjectURL(blob);
-  img.onload = function() {
-    var canvas = document.createElement('canvas');
-    canvas.width  = img.naturalWidth  || svgEl.getBoundingClientRect().width;
-    canvas.height = img.naturalHeight || svgEl.getBoundingClientRect().height;
-    var ctx = canvas.getContext('2d');
-    if (!transparent) { ctx.fillStyle = '#0d1117'; ctx.fillRect(0, 0, canvas.width, canvas.height); }
-    ctx.drawImage(img, 0, 0);
-    URL.revokeObjectURL(url);
-    canvas.toBlob(function(pngBlob) {
-      var pngUrl = URL.createObjectURL(pngBlob);
-      var a = document.createElement('a');
-      a.href = pngUrl; a.download = 'diagram.png'; a.click();
-      URL.revokeObjectURL(pngUrl);
-    }, 'image/png');
-  };
-  img.src = url;
-}
 
 // ── Boot ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', init);
