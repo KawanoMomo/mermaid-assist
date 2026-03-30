@@ -855,7 +855,12 @@ function selectItem(type, id, multi) {
       sel.push({ type: type, id: id });
     }
   } else {
-    sel = [{ type: type, id: id }];
+    // Toggle: if already the only selection, deselect
+    if (sel.length === 1 && sel[0].id === id) {
+      sel = [];
+    } else {
+      sel = [{ type: type, id: id }];
+    }
   }
   renderProps();
   rebuildOverlay();
@@ -935,7 +940,7 @@ var future = [];
 var MAX_HISTORY = 80;
 var suppressSync = false;
 var debounceTimer = null;
-var DRAG_RENDER_INTERVAL = 200; // ms between mermaid re-renders during drag
+var DRAG_RENDER_INTERVAL = 100; // ms between mermaid re-renders during drag
 var dragRenderTimer = null;
 var renderCounter = 0;
 var clipboard = null;
