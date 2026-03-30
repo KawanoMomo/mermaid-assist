@@ -1,3 +1,5 @@
 node_modules/
 .superpowers/
 *.log
+test-results/
+playwright-report/
