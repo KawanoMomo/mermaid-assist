@@ -792,75 +792,93 @@ function calibrateScale(svgEl, parsedData) {
   calibration = { pxPerDay: 0, originX: 0, baseDate: '', barRects: [] };
   if (!svgEl || !parsedData || !parsedData.tasks || parsedData.tasks.length === 0) return;
 
-  // Collect task bar rects from SVG
-  var rects = [];
-  var selectors = ['rect.task', 'rect.task0', 'rect.task1', 'rect.task2', 'rect.task3'];
-  for (var si = 0; si < selectors.length; si++) {
-    var found = svgEl.querySelectorAll(selectors[si]);
-    for (var fi = 0; fi < found.length; fi++) {
-      rects.push(found[fi]);
-    }
-  }
-
-  // Fallback: section groups
-  if (rects.length === 0) {
-    var sectionSelectors = ['.section0', '.section1', '.section2', '.section3'];
-    for (var ssi = 0; ssi < sectionSelectors.length; ssi++) {
-      var groups = svgEl.querySelectorAll(sectionSelectors[ssi]);
-      for (var gi = 0; gi < groups.length; gi++) {
-        var groupRects = groups[gi].querySelectorAll('rect');
-        for (var gri = 0; gri < groupRects.length; gri++) {
-          rects.push(groupRects[gri]);
-        }
-      }
-    }
-  }
-
-  // Last fallback: all rects with height 10-50px and width >10px
-  if (rects.length === 0) {
-    var allRects = svgEl.querySelectorAll('rect');
-    for (var ari = 0; ari < allRects.length; ari++) {
-      var bbox;
-      try { bbox = allRects[ari].getBBox(); } catch (e) { continue; }
-      if (bbox.height >= 10 && bbox.height <= 50 && bbox.width > 10) {
-        rects.push(allRects[ari]);
-      }
-    }
-  }
-
-  // Store barRects with bounding boxes
-  var barRects = [];
-  for (var bri = 0; bri < rects.length; bri++) {
+  // ── Match tasks to SVG rects via text label y-position proximity ──
+  // Step 1: Collect all text elements and their y-centers
+  var textEls = svgEl.querySelectorAll('text');
+  var labelInfos = []; // {text, yCenter}
+  for (var ti2 = 0; ti2 < textEls.length; ti2++) {
     try {
-      var bb = rects[bri].getBBox();
-      barRects.push({ el: rects[bri], x: bb.x, y: bb.y, width: bb.width, height: bb.height });
+      var tbb = textEls[ti2].getBBox();
+      labelInfos.push({ text: textEls[ti2].textContent.trim(), yCenter: tbb.y + tbb.height / 2 });
     } catch (e) { /* skip */ }
+  }
+
+  // Step 2: Collect candidate bar rects (reasonable size, not full-width backgrounds)
+  var vb = svgEl.viewBox.baseVal;
+  var chartWidth = vb ? vb.width : 2000;
+  var allRects = svgEl.querySelectorAll('rect');
+  var candidateRects = []; // {x, y, width, height, yCenter}
+  for (var cri = 0; cri < allRects.length; cri++) {
+    try {
+      var rbb = allRects[cri].getBBox();
+      // Task bars: reasonable height (8-40px), not too wide (< 95% of chart), minimum width
+      if (rbb.height >= 8 && rbb.height <= 40 && rbb.width >= 3 && rbb.width < chartWidth * 0.95) {
+        candidateRects.push({ x: rbb.x, y: rbb.y, width: rbb.width, height: rbb.height, yCenter: rbb.y + rbb.height / 2, used: false });
+      }
+    } catch (e) { /* skip */ }
+  }
+
+  // Step 3: For each task, find its text label, then find the closest candidate rect
+  var barRects = []; // one per task (or null)
+  for (var ti = 0; ti < parsedData.tasks.length; ti++) {
+    var task = parsedData.tasks[ti];
+    var taskLabel = task.label.trim();
+
+    // Find matching text label
+    var labelY = null;
+    for (var li = 0; li < labelInfos.length; li++) {
+      if (labelInfos[li].text === taskLabel) {
+        labelY = labelInfos[li].yCenter;
+        labelInfos.splice(li, 1); // consume it so duplicate labels map to different rects
+        break;
+      }
+    }
+
+    if (labelY === null) {
+      barRects.push(null);
+      continue;
+    }
+
+    // Find closest unused candidate rect by y-center
+    var closest = null;
+    var closestDist = Infinity;
+    for (var ri = 0; ri < candidateRects.length; ri++) {
+      if (candidateRects[ri].used) continue;
+      var dist = Math.abs(candidateRects[ri].yCenter - labelY);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closest = ri;
+      }
+    }
+
+    if (closest !== null && closestDist < 30) {
+      candidateRects[closest].used = true;
+      var cr = candidateRects[closest];
+      barRects.push({ x: cr.x, y: cr.y, width: cr.width, height: cr.height });
+    } else {
+      barRects.push(null);
+    }
   }
   calibration.barRects = barRects;
 
-  // Need tasks with known dates for calibration
+  // ── Calibrate pxPerDay from tasks with known dates ──
+  var calibrated = false;
   var tasksWithDates = [];
-  for (var ti = 0; ti < parsedData.tasks.length; ti++) {
-    var task = parsedData.tasks[ti];
-    if (task.startDate && DATE_RE.test(task.startDate)) {
-      tasksWithDates.push({ task: task, index: ti });
+  for (var di = 0; di < parsedData.tasks.length; di++) {
+    if (parsedData.tasks[di].startDate && DATE_RE.test(parsedData.tasks[di].startDate) && barRects[di]) {
+      tasksWithDates.push({ task: parsedData.tasks[di], rect: barRects[di] });
     }
   }
 
-  if (tasksWithDates.length === 0 || barRects.length === 0) return;
-
-  // Find two tasks with different startDates and corresponding rects
-  var calibrated = false;
+  // Two-task calibration
   for (var ci = 0; ci < tasksWithDates.length && !calibrated; ci++) {
     for (var cj = ci + 1; cj < tasksWithDates.length && !calibrated; cj++) {
       var t1 = tasksWithDates[ci], t2 = tasksWithDates[cj];
       if (t1.task.startDate === t2.task.startDate) continue;
-      if (t1.index >= barRects.length || t2.index >= barRects.length) continue;
-      var r1 = barRects[t1.index], r2 = barRects[t2.index];
       var dDays = daysBetween(t1.task.startDate, t2.task.startDate);
       if (dDays === 0) continue;
-      calibration.pxPerDay = (r2.x - r1.x) / dDays;
-      calibration.originX = r1.x;
+      calibration.pxPerDay = (t2.rect.x - t1.rect.x) / dDays;
+      calibration.originX = t1.rect.x;
       calibration.baseDate = t1.task.startDate;
       calibrated = true;
     }
@@ -869,11 +887,11 @@ function calibrateScale(svgEl, parsedData) {
   // Single-task fallback
   if (!calibrated && tasksWithDates.length >= 1) {
     var st = tasksWithDates[0];
-    if (st.index < barRects.length && st.task.endDate && DATE_RE.test(st.task.endDate)) {
+    if (st.task.endDate && DATE_RE.test(st.task.endDate)) {
       var dur = daysBetween(st.task.startDate, st.task.endDate);
       if (dur > 0) {
-        calibration.pxPerDay = barRects[st.index].width / dur;
-        calibration.originX = barRects[st.index].x;
+        calibration.pxPerDay = st.rect.width / dur;
+        calibration.originX = st.rect.x;
         calibration.baseDate = st.task.startDate;
       }
     }
@@ -1035,11 +1053,10 @@ modules.gantt = {
     var NS = 'http://www.w3.org/2000/svg';
     var barRects = calibration.barRects;
 
-    // For each task (up to barRects.length)
-    var taskCount = Math.min(parsedData.tasks.length, barRects.length);
-    for (var i = 0; i < taskCount; i++) {
+    for (var i = 0; i < parsedData.tasks.length; i++) {
       var task = parsedData.tasks[i];
-      var br = barRects[i];
+      var br = i < barRects.length ? barRects[i] : null;
+      if (!br) continue; // skip tasks we couldn't match to SVG rects
       var selected = isSelected(task.id);
 
       // If selected: add green dashed highlight rect
@@ -1635,8 +1652,8 @@ async function refresh(skipRender) {
     }
     if (zoomDisplayEl) zoomDisplayEl.textContent = Math.round(zoom * 100) + '%';
 
-    // Build overlay
-    if (currentModule && svgEl) {
+    // Build overlay (skip during drag to prevent jitter)
+    if (currentModule && svgEl && !dragState) {
       currentModule.buildOverlay(svgEl, parsed);
     }
 
@@ -1940,14 +1957,13 @@ function init() {
         }
       }
       if (task && task.startDate && DATE_RE.test(task.startDate)) {
-        // Create SVG point from mouse coordinates
-        var svgEl = previewSvgEl.querySelector('svg');
-        if (svgEl && svgEl.createSVGPoint) {
-          var pt = svgEl.createSVGPoint();
+        // Use overlay SVG for coordinate conversion (same viewBox as mermaid SVG)
+        if (overlayEl && overlayEl.createSVGPoint) {
+          var pt = overlayEl.createSVGPoint();
           pt.x = e.clientX;
           pt.y = e.clientY;
           try {
-            var ctm = svgEl.getScreenCTM();
+            var ctm = overlayEl.getScreenCTM();
             if (ctm) {
               var svgPt = pt.matrixTransform(ctm.inverse());
               var br = calibration.barRects[indexInt];
@@ -1983,15 +1999,14 @@ function init() {
   document.addEventListener('mousemove', function(e) {
     if (!dragState) return;
 
-    var svgEl = previewSvgEl.querySelector('svg');
-    if (!svgEl || !svgEl.createSVGPoint) return;
+    if (!overlayEl || !overlayEl.createSVGPoint) return;
 
-    var pt = svgEl.createSVGPoint();
+    var pt = overlayEl.createSVGPoint();
     pt.x = e.clientX;
     pt.y = e.clientY;
 
     try {
-      var ctm = svgEl.getScreenCTM();
+      var ctm = overlayEl.getScreenCTM();
       if (!ctm) return;
       var svgPt = pt.matrixTransform(ctm.inverse());
       var dx = svgPt.x - dragState.startX;
