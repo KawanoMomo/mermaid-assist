@@ -935,7 +935,8 @@ var future = [];
 var MAX_HISTORY = 80;
 var suppressSync = false;
 var debounceTimer = null;
-var DEBOUNCE_MS = 150;
+var DEBOUNCE_MS = 50;
+var isDragging = false;
 var renderCounter = 0;
 var clipboard = null;
 var addCounter = 0;
@@ -1439,7 +1440,7 @@ function scheduleRefresh() {
   debounceTimer = setTimeout(refresh, DEBOUNCE_MS);
 }
 
-async function refresh() {
+async function refresh(skipRender) {
   if (!previewSvgEl) return;
 
   var thisRender = ++renderCounter;
@@ -1447,13 +1448,21 @@ async function refresh() {
   // Detect diagram module
   currentModule = detectModule(mmdText);
 
-  // Parse
+  // Parse (always — it's fast)
   if (currentModule) {
     try {
       parsed = currentModule.parse(mmdText);
     } catch (e) {
       parsed = { title: '', dateFormat: 'YYYY-MM-DD', axisFormat: '', sections: [], tasks: [] };
     }
+  }
+
+  // During drag: update parse/status/props only, skip expensive mermaid render
+  if (skipRender) {
+    renderProps();
+    renderStatus();
+    syncLineNumbers();
+    return;
   }
 
   // Render via mermaid.js
@@ -1888,17 +1897,43 @@ function init() {
         }
       }
 
+      // Update text + editor immediately (no mermaid re-render)
       suppressSync = true;
       editorEl.value = mmdText;
       suppressSync = false;
-      syncLineNumbers();
-      scheduleRefresh();
+
+      // Visually move the overlay bar instead of full re-render
+      var barEl = overlayEl.querySelector('.overlay-bar[data-task-id="' + dragState.taskId + '"]');
+      if (barEl) {
+        var pxDelta = daysDelta * calibration.pxPerDay;
+        var origX = parseFloat(barEl.getAttribute('data-orig-x') || barEl.getAttribute('x'));
+        var origW = parseFloat(barEl.getAttribute('data-orig-w') || barEl.getAttribute('width'));
+        if (!barEl.getAttribute('data-orig-x')) {
+          barEl.setAttribute('data-orig-x', barEl.getAttribute('x'));
+          barEl.setAttribute('data-orig-w', barEl.getAttribute('width'));
+        }
+        if (dragState.handle === null) {
+          barEl.setAttribute('x', origX + pxDelta);
+        } else if (dragState.handle === 'left') {
+          barEl.setAttribute('x', origX + pxDelta);
+          barEl.setAttribute('width', Math.max(5, origW - pxDelta));
+        } else if (dragState.handle === 'right') {
+          barEl.setAttribute('width', Math.max(5, origW + pxDelta));
+        }
+      }
+
+      // Lightweight refresh: parse + status only, no mermaid render
+      refresh(true);
     } catch (ex) { /* ignore CTM errors */ }
   });
 
   // ── Document mouseup (end drag) ─────────────────────────────────────────
   document.addEventListener('mouseup', function() {
-    dragState = null;
+    if (dragState) {
+      dragState = null;
+      // Now do the full mermaid re-render
+      scheduleRefresh();
+    }
   });
 
   // ── Keyboard shortcuts ───────────────────────────────────────────────────
