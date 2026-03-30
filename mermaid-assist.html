@@ -267,22 +267,23 @@ html, body {
   padding: 16px;
 }
 
-/* SVG wrapper + overlay share the same transform origin */
+/* SVG wrapper: inline-block so it sizes to the SVG's natural dimensions */
 #preview-svg {
   display: inline-block;
-  transform-origin: top left;
+  transform-origin: 0 0;
   position: relative;
 }
 #preview-svg svg {
   display: block;
 }
 
+/* Overlay: positioned exactly on top of #preview-svg */
 #overlay-layer {
   position: absolute;
   top: 16px; /* matches container padding */
   left: 16px;
   pointer-events: none;
-  transform-origin: top left;
+  transform-origin: 0 0;
 }
 #overlay-layer > * {
   pointer-events: auto;
@@ -363,6 +364,7 @@ html, body {
     <button class="tb-btn" id="btn-zoom-out" title="縮小">－</button>
     <span id="zoom-display">100%</span>
     <button class="tb-btn" id="btn-zoom-in"  title="拡大">＋</button>
+    <button class="tb-btn" id="btn-zoom-fit" title="幅に合わせる">Fit</button>
 
     <div class="tb-sep"></div>
 
@@ -1463,43 +1465,47 @@ async function refresh() {
 
     previewSvgEl.innerHTML = renderResult.svg;
 
-    // Force SVG to fill the preview container width
     var svgEl = previewSvgEl.querySelector('svg');
     if (svgEl) {
-      var previewContainer = document.getElementById('preview-container');
-      var targetWidth = previewContainer.clientWidth - 32;
-      if (targetWidth < 300) targetWidth = 300;
+      // ── Fix mermaid.js SVG sizing ──
+      // mermaid.js outputs width="100%" + max-width inline style.
+      // This causes the SVG to collapse inside an inline-block parent.
+      // Fix: set explicit pixel dimensions from the viewBox.
+      var vb = svgEl.viewBox.baseVal;
+      var naturalW = vb.width || 800;
+      var naturalH = vb.height || 400;
 
-      // Read original dimensions from the SVG
-      var origW = parseFloat(svgEl.getAttribute('width')) || svgEl.getBBox().width || 800;
-      var origH = parseFloat(svgEl.getAttribute('height')) || svgEl.getBBox().height || 400;
+      // Remove all mermaid inline styles (max-width, width:100%, etc.)
+      svgEl.removeAttribute('style');
+      // Set to natural pixel dimensions from viewBox
+      svgEl.setAttribute('width', naturalW);
+      svgEl.setAttribute('height', naturalH);
 
-      // Preserve viewBox if it exists; otherwise create one from original dims
-      if (!svgEl.getAttribute('viewBox')) {
-        svgEl.setAttribute('viewBox', '0 0 ' + origW + ' ' + origH);
+      // Sync overlay to same natural dimensions and viewBox
+      if (overlayEl) {
+        overlayEl.setAttribute('width', naturalW);
+        overlayEl.setAttribute('height', naturalH);
+        overlayEl.setAttribute('viewBox', svgEl.getAttribute('viewBox'));
       }
 
-      // Scale SVG to container width while preserving aspect ratio
-      var scale = targetWidth / origW;
-      var newH = origH * scale;
-      svgEl.setAttribute('width', targetWidth);
-      svgEl.setAttribute('height', newH);
-
-      // Sync overlay
-      if (overlayEl) {
-        overlayEl.setAttribute('width', targetWidth);
-        overlayEl.setAttribute('height', newH);
-        overlayEl.setAttribute('viewBox', svgEl.getAttribute('viewBox'));
+      // Auto-fit zoom on first render: fit chart width to container
+      if (thisRender === 1) {
+        var previewContainer = document.getElementById('preview-container');
+        var containerW = previewContainer.clientWidth - 32;
+        var fitZoom = containerW / naturalW;
+        fitZoom = Math.max(0.25, Math.min(3.0, fitZoom));
+        zoom = Math.round(fitZoom * 100) / 100;
       }
     }
 
-    // Apply zoom transform
+    // Apply zoom via CSS transform on wrapper (both SVG and overlay)
     previewSvgEl.style.transform = 'scale(' + zoom + ')';
     previewSvgEl.style.transformOrigin = 'top left';
     if (overlayEl) {
       overlayEl.style.transform = 'scale(' + zoom + ')';
       overlayEl.style.transformOrigin = 'top left';
     }
+    if (zoomDisplayEl) zoomDisplayEl.textContent = Math.round(zoom * 100) + '%';
 
     // Build overlay
     if (currentModule && svgEl) {
@@ -1546,17 +1552,27 @@ function renderProps() {
 
 // ── Zoom ───────────────────────────────────────────────────────────────────
 function setZoom(z) {
-  zoom = Math.max(0.25, Math.min(3.0, z));
+  zoom = Math.max(0.1, Math.min(5.0, z));
   if (zoomDisplayEl) zoomDisplayEl.textContent = Math.round(zoom * 100) + '%';
 
   if (previewSvgEl) {
     previewSvgEl.style.transform = 'scale(' + zoom + ')';
-    previewSvgEl.style.transformOrigin = 'top left';
+    previewSvgEl.style.transformOrigin = '0 0';
   }
   if (overlayEl) {
     overlayEl.style.transform = 'scale(' + zoom + ')';
-    overlayEl.style.transformOrigin = 'top left';
+    overlayEl.style.transformOrigin = '0 0';
   }
+}
+
+function zoomToFit() {
+  var svgEl = previewSvgEl ? previewSvgEl.querySelector('svg') : null;
+  var previewContainer = document.getElementById('preview-container');
+  if (!svgEl || !previewContainer) return;
+  var naturalW = parseFloat(svgEl.getAttribute('width')) || 800;
+  var containerW = previewContainer.clientWidth - 32;
+  var fitZoom = containerW / naturalW;
+  setZoom(Math.round(fitZoom * 100) / 100);
 }
 
 // ── File Open / Save ───────────────────────────────────────────────────────
@@ -1690,6 +1706,9 @@ function init() {
   });
   document.getElementById('btn-zoom-out').addEventListener('click', function() {
     setZoom(zoom - 0.1);
+  });
+  document.getElementById('btn-zoom-fit').addEventListener('click', function() {
+    zoomToFit();
   });
 
   // ── File input handler ───────────────────────────────────────────────────
