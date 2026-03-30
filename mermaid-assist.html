@@ -433,7 +433,7 @@ html, body {
 'use strict';
 
 // ── Constants ──────────────────────────────────────────────────────────────
-var STATUS_KEYWORDS = ['done', 'active', 'crit'];
+var STATUS_KEYWORDS = ['done', 'active', 'crit', 'milestone'];
 var DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 var DURATION_RE = /^\d+[dwmyhMs]$/;
 
@@ -715,6 +715,61 @@ function deleteTask(text, lineNum) {
   var idx = lineNum - 1;
   if (idx < 0 || idx >= lines.length) return text;
   lines.splice(idx, 1);
+  return lines.join('\n');
+}
+
+// ── Section management ────────────────────────────────────────────────────
+function addSection(text, name) {
+  var lines = text.split('\n');
+  // Append at end (before trailing empty lines)
+  var insertIdx = lines.length;
+  while (insertIdx > 0 && lines[insertIdx - 1].trim() === '') insertIdx--;
+  lines.splice(insertIdx, 0, '', '    section ' + name);
+  return lines.join('\n');
+}
+
+function deleteSection(text, sectionLine) {
+  var lines = text.split('\n');
+  var p = parseGantt(text);
+  var secIdx = -1;
+  for (var i = 0; i < p.sections.length; i++) {
+    if (p.sections[i].line === sectionLine) { secIdx = i; break; }
+  }
+  if (secIdx === -1) return text;
+  // Find range: from section line to next section (or end)
+  var startIdx = sectionLine - 1;
+  var endIdx;
+  if (secIdx + 1 < p.sections.length) {
+    endIdx = p.sections[secIdx + 1].line - 1;
+  } else {
+    endIdx = lines.length;
+  }
+  // Remove blank line before section if present
+  if (startIdx > 0 && lines[startIdx - 1].trim() === '') startIdx--;
+  lines.splice(startIdx, endIdx - startIdx);
+  return lines.join('\n');
+}
+
+// ── Global settings update ────────────────────────────────────────────────
+function updateGlobalSetting(text, key, value) {
+  var lines = text.split('\n');
+  var found = false;
+  for (var i = 0; i < lines.length; i++) {
+    if (lines[i].trim().indexOf(key + ' ') === 0) {
+      lines[i] = '    ' + key + ' ' + value;
+      found = true;
+      break;
+    }
+  }
+  if (!found) {
+    // Insert after 'gantt' line
+    for (var j = 0; j < lines.length; j++) {
+      if (lines[j].trim() === 'gantt') {
+        lines.splice(j + 1, 0, '    ' + key + ' ' + value);
+        break;
+      }
+    }
+  }
   return lines.join('\n');
 }
 
@@ -1088,17 +1143,24 @@ modules.gantt = {
           '<select id="prop-add-section" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + sectionOptions + '</select>' +
         '</div>' +
         '<button id="prop-add-btn" style="width:100%;background:var(--accent);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-bottom:12px;">+ タスク追加</button>' +
-        '<div style="font-size:10px;color:var(--text-secondary);line-height:1.8;">' +
-          '<div><b>Shortcuts:</b></div>' +
-          '<div>Ctrl+Z: Undo</div>' +
-          '<div>Ctrl+Y: Redo</div>' +
-          '<div>Click: Select</div>' +
-          '<div>Shift+Click: Multi-select</div>' +
-          '<div>Drag: Move task</div>' +
-          '<div>Drag handle: Resize</div>' +
+        '<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px;margin-bottom:12px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション追加</label>' +
+          '<div style="display:flex;gap:4px;">' +
+            '<input id="prop-add-sec-name" type="text" placeholder="セクション名" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '<button id="prop-add-sec-btn" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:12px;">+</button>' +
+          '</div>' +
+        '</div>' +
+        '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:6px;font-weight:bold;">グローバル設定</label>' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">title</label>' +
+          '<input id="prop-global-title" type="text" value="' + escHtml(parsedData.title || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:6px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">dateFormat</label>' +
+          '<input id="prop-global-dateformat" type="text" value="' + escHtml(parsedData.dateFormat || 'YYYY-MM-DD') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:6px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">axisFormat</label>' +
+          '<input id="prop-global-axisformat" type="text" value="' + escHtml(parsedData.axisFormat || '') + '" placeholder="%m/%d" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
         '</div>';
 
-      // Bind add button
+      // Bind add task button
       var addBtn = document.getElementById('prop-add-btn');
       if (addBtn) {
         addBtn.addEventListener('click', function() {
@@ -1117,6 +1179,41 @@ modules.gantt = {
           scheduleRefresh();
         });
       }
+
+      // Bind add section button
+      var addSecBtn = document.getElementById('prop-add-sec-btn');
+      if (addSecBtn) {
+        addSecBtn.addEventListener('click', function() {
+          var name = document.getElementById('prop-add-sec-name').value.trim();
+          if (!name) return;
+          pushHistory();
+          mmdText = addSection(mmdText, name);
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+
+      // Bind global settings
+      function bindGlobal(elId, key) {
+        var el = document.getElementById(elId);
+        if (el) {
+          el.addEventListener('change', function() {
+            pushHistory();
+            mmdText = updateGlobalSetting(mmdText, key, el.value);
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            syncLineNumbers();
+            scheduleRefresh();
+          });
+        }
+      }
+      bindGlobal('prop-global-title', 'title');
+      bindGlobal('prop-global-dateformat', 'dateFormat');
+      bindGlobal('prop-global-axisformat', 'axisFormat');
       return;
     }
 
@@ -1134,7 +1231,7 @@ modules.gantt = {
         return;
       }
 
-      var statusBtns = ['none', 'done', 'active', 'crit'].map(function(s) {
+      var statusBtns = ['none', 'done', 'active', 'crit', 'milestone'].map(function(s) {
         var isActive = (s === 'none' && !task.status) || (task.status === s);
         var bg = isActive ? 'var(--accent)' : 'var(--bg-tertiary)';
         var val = s === 'none' ? '' : s;
@@ -1341,9 +1438,10 @@ modules.gantt = {
           '<input id="prop-sec-name" type="text" value="' + escHtml(section.name) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
         '</div>' +
         '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:4px;">タスク一覧</label>' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:4px;">タスク一覧 (' + secTasks.length + '件)</label>' +
           taskList +
-        '</div>';
+        '</div>' +
+        '<button id="prop-sec-delete-btn" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">セクション削除 (タスクごと)</button>';
 
       // Bind section name change
       var secNameEl = document.getElementById('prop-sec-name');
@@ -1359,9 +1457,25 @@ modules.gantt = {
             suppressSync = true;
             editorEl.value = mmdText;
             suppressSync = false;
+            sel = [{ type: 'section', id: secNameEl.value }];
             syncLineNumbers();
             scheduleRefresh();
           }
+        });
+      }
+
+      // Bind section delete
+      var secDelBtn = document.getElementById('prop-sec-delete-btn');
+      if (secDelBtn) {
+        secDelBtn.addEventListener('click', function() {
+          pushHistory();
+          mmdText = deleteSection(mmdText, section.line);
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          sel = [];
+          syncLineNumbers();
+          scheduleRefresh();
         });
       }
       return;
