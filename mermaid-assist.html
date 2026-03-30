@@ -2015,18 +2015,26 @@ function init() {
       if (daysDelta === 0) return;
 
       if (dragState.handle === null) {
-        // Move: shift both dates
+        // Move: shift both dates equally
         var newStart = addDays(dragState.origStartDate, daysDelta);
         var newEnd = dragState.origEndDate && DATE_RE.test(dragState.origEndDate) ? addDays(dragState.origEndDate, daysDelta) : null;
         mmdText = updateTaskDates(mmdText, dragState.lineNum, newStart, newEnd);
       } else if (dragState.handle === 'left') {
-        // Resize left: shift start date only
+        // Resize left: shift start date, but don't go past end date
         var newStart2 = addDays(dragState.origStartDate, daysDelta);
+        if (dragState.origEndDate && DATE_RE.test(dragState.origEndDate)) {
+          if (daysBetween(newStart2, dragState.origEndDate) < 1) {
+            newStart2 = addDays(dragState.origEndDate, -1); // minimum 1 day
+          }
+        }
         mmdText = updateTaskDates(mmdText, dragState.lineNum, newStart2, null);
       } else if (dragState.handle === 'right') {
-        // Resize right: shift end date only
+        // Resize right: shift end date, but don't go before start date
         if (dragState.origEndDate && DATE_RE.test(dragState.origEndDate)) {
           var newEnd2 = addDays(dragState.origEndDate, daysDelta);
+          if (daysBetween(dragState.origStartDate, newEnd2) < 1) {
+            newEnd2 = addDays(dragState.origStartDate, 1); // minimum 1 day
+          }
           mmdText = updateTaskDates(mmdText, dragState.lineNum, null, newEnd2);
         }
       }
