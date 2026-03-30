@@ -1454,20 +1454,6 @@ async function refresh() {
     }
   }
 
-  // Update mermaid gantt width to match preview container
-  var previewContainer = document.getElementById('preview-container');
-  if (previewContainer) {
-    var containerWidth = previewContainer.clientWidth - 32;
-    if (containerWidth > 200) {
-      mermaid.initialize({
-        startOnLoad: false,
-        theme: 'dark',
-        gantt: { useWidth: containerWidth },
-        securityLevel: 'loose',
-      });
-    }
-  }
-
   // Render via mermaid.js
   var svgId = 'mermaid-svg-' + thisRender;
   try {
@@ -1477,23 +1463,46 @@ async function refresh() {
 
     previewSvgEl.innerHTML = renderResult.svg;
 
-    // Apply zoom transform to SVG wrapper
+    // Force SVG to fill the preview container width
+    var svgEl = previewSvgEl.querySelector('svg');
+    if (svgEl) {
+      var previewContainer = document.getElementById('preview-container');
+      var targetWidth = previewContainer.clientWidth - 32;
+      if (targetWidth < 300) targetWidth = 300;
+
+      // Read original dimensions from the SVG
+      var origW = parseFloat(svgEl.getAttribute('width')) || svgEl.getBBox().width || 800;
+      var origH = parseFloat(svgEl.getAttribute('height')) || svgEl.getBBox().height || 400;
+
+      // Preserve viewBox if it exists; otherwise create one from original dims
+      if (!svgEl.getAttribute('viewBox')) {
+        svgEl.setAttribute('viewBox', '0 0 ' + origW + ' ' + origH);
+      }
+
+      // Scale SVG to container width while preserving aspect ratio
+      var scale = targetWidth / origW;
+      var newH = origH * scale;
+      svgEl.setAttribute('width', targetWidth);
+      svgEl.setAttribute('height', newH);
+
+      // Sync overlay
+      if (overlayEl) {
+        overlayEl.setAttribute('width', targetWidth);
+        overlayEl.setAttribute('height', newH);
+        overlayEl.setAttribute('viewBox', svgEl.getAttribute('viewBox'));
+      }
+    }
+
+    // Apply zoom transform
     previewSvgEl.style.transform = 'scale(' + zoom + ')';
     previewSvgEl.style.transformOrigin = 'top left';
-
-    // Sync overlay dimensions to the SVG
-    var svgEl = previewSvgEl.querySelector('svg');
-    if (svgEl && overlayEl) {
-      var w = svgEl.getAttribute('width')  || svgEl.getBoundingClientRect().width;
-      var h = svgEl.getAttribute('height') || svgEl.getBoundingClientRect().height;
-      overlayEl.setAttribute('width',  w);
-      overlayEl.setAttribute('height', h);
+    if (overlayEl) {
       overlayEl.style.transform = 'scale(' + zoom + ')';
       overlayEl.style.transformOrigin = 'top left';
     }
 
-    // Build overlay (stub for Task 7)
-    if (currentModule) {
+    // Build overlay
+    if (currentModule && svgEl) {
       currentModule.buildOverlay(svgEl, parsed);
     }
 
@@ -1630,12 +1639,10 @@ function init() {
   statusInfoEl  = document.getElementById('status-info');
   zoomDisplayEl = document.getElementById('zoom-display');
 
-  // Init mermaid.js — useWidth will be updated dynamically in refresh()
-  var previewContainer = document.getElementById('preview-container');
+  // Init mermaid.js
   mermaid.initialize({
     startOnLoad: false,
     theme: 'dark',
-    gantt: { useWidth: previewContainer.clientWidth - 32 },
     securityLevel: 'loose',
   });
 
