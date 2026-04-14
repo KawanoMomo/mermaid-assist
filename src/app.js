@@ -85,7 +85,7 @@ function parseGantt(text) {
     if (!p) continue;
 
     // Auto-generate id if not set
-    var taskId = p.id !== null ? p.id : '__auto_' + (autoIdCounter++);
+    var taskId = p.id !== null ? p.id : window.MA.parserUtils.generateAutoId('auto', autoIdCounter++);
 
     result.tasks.push({
       id: taskId,
@@ -114,7 +114,7 @@ function isAfter(s) { return typeof s === 'string' && s.indexOf('after ') === 0;
 function rebuildTaskMeta(status, id, startDate, endDate, after) {
   var parts = [];
   if (status) parts.push(status);
-  if (id && id.indexOf('__auto_') !== 0) parts.push(id);
+  if (id && !window.MA.parserUtils.isAutoId(id)) parts.push(id);
   if (after && !startDate) {
     parts.push('after ' + after);
   } else if (startDate) {
@@ -1053,7 +1053,7 @@ modules.gantt = {
         '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ID</label>' +
-          '<input id="prop-id" type="text" value="' + window.MA.htmlUtils.escHtml(task.id.indexOf('__auto_') === 0 ? '' : task.id) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+          '<input id="prop-id" type="text" value="' + window.MA.htmlUtils.escHtml(window.MA.parserUtils.isAutoId(task.id) ? '' : task.id) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
         '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +

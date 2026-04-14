@@ -8,6 +8,7 @@ const sourceFiles = [
   'src/core/date-utils.js',
   'src/core/html-utils.js',
   'src/core/text-updater.js',
+  'src/core/parser-utils.js',
   'src/app.js',
 ];
 
