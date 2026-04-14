@@ -773,6 +773,54 @@ function moveTaskWithinSection(text, lineNum, direction) {
   return lines.join('\n');
 }
 
+// moveTaskToSection — moves the task at 1-based lineNum to the end of the
+// section identified by targetSectionIndex (0-based). No-op if already there
+// or if targetSectionIndex is invalid.
+function moveTaskToSection(text, lineNum, targetSectionIndex) {
+  var p = parseGantt(text);
+  var task = null;
+  for (var i = 0; i < p.tasks.length; i++) {
+    if (p.tasks[i].line === lineNum) { task = p.tasks[i]; break; }
+  }
+  if (!task) return text;
+  if (task.sectionIndex === targetSectionIndex) return text; // already there
+  if (targetSectionIndex < -1 || targetSectionIndex >= p.sections.length) return text;
+
+  // Capture the original task line content
+  var lines = text.split('\n');
+  var taskLineContent = lines[lineNum - 1];
+
+  // Delete the original line first
+  var afterDelete = deleteTask(text, lineNum);
+
+  // Re-parse the post-delete state and find the insertion point at the target section
+  var p2 = parseGantt(afterDelete);
+  var lines2 = afterDelete.split('\n');
+  var insertAt;
+
+  if (targetSectionIndex === -1 || p2.sections.length === 0) {
+    // Append at end (trim trailing empty lines)
+    insertAt = lines2.length;
+    while (insertAt > 0 && lines2[insertAt - 1].trim() === '') insertAt--;
+  } else {
+    var sectionLine = p2.sections[targetSectionIndex].line; // 1-based
+    var nextSectionLine = (targetSectionIndex + 1 < p2.sections.length)
+      ? p2.sections[targetSectionIndex + 1].line
+      : lines2.length + 1;
+    var lastLineInSection = sectionLine;
+    for (var ti = 0; ti < p2.tasks.length; ti++) {
+      if (p2.tasks[ti].sectionIndex === targetSectionIndex && p2.tasks[ti].line > lastLineInSection) {
+        lastLineInSection = p2.tasks[ti].line;
+      }
+    }
+    if (lastLineInSection >= nextSectionLine) lastLineInSection = nextSectionLine - 1;
+    insertAt = lastLineInSection; // 0-based: insert at this index = after lastLineInSection (1-based)
+  }
+
+  lines2.splice(insertAt, 0, taskLineContent);
+  return lines2.join('\n');
+}
+
 // ── After-dependency date sanitization ────────────────────────────────────
 // When a task's dates are changed, dependent tasks (after <id>) may end up
 // with their end date before the referenced task's end date, causing
@@ -1355,6 +1403,17 @@ modules.gantt = {
         return '<button class="prop-status-btn" data-status="' + val + '" style="flex:1;background:' + bg + ';color:var(--text-primary);border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">' + s + '</button>';
       }).join('');
 
+      var moveSecOpts = '';
+      if (parsedData && parsedData.sections) {
+        for (var msi = 0; msi < parsedData.sections.length; msi++) {
+          var selAttr = (msi === task.sectionIndex) ? ' selected' : '';
+          moveSecOpts += '<option value="' + msi + '"' + selAttr + '>' + escHtml(parsedData.sections[msi].name) + '</option>';
+        }
+      }
+      if (!moveSecOpts) {
+        moveSecOpts = '<option value="-1">（セクションなし）</option>';
+      }
+
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;">' +
           '<div style="flex:1;font-weight:bold;color:var(--text-primary);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(task.label) + '</div>' +
@@ -1385,6 +1444,10 @@ modules.gantt = {
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">after依存</label>' +
           '<input id="prop-after" type="text" value="' + escHtml(task.after || '') + '" placeholder="タスクID (例: a1)" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
         '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション移動</label>' +
+          '<select id="prop-move-section" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + moveSecOpts + '</select>' +
+        '</div>' +
         '<button id="prop-delete-btn" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">タスク削除</button>';
 
       // Bind handlers
@@ -1413,6 +1476,23 @@ modules.gantt = {
         moveDownBtn.addEventListener('click', function() {
           var newText = moveTaskWithinSection(mmdText, task.line, 1);
           if (newText === mmdText) return;
+          pushHistory();
+          mmdText = newText;
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+
+      var moveSectionEl = document.getElementById('prop-move-section');
+      if (moveSectionEl) {
+        moveSectionEl.addEventListener('change', function() {
+          var targetIdx = parseInt(moveSectionEl.value, 10);
+          if (isNaN(targetIdx)) return;
+          var newText = moveTaskToSection(mmdText, task.line, targetIdx);
+          if (newText === mmdText) return; // no-op
           pushHistory();
           mmdText = newText;
           suppressSync = true;
