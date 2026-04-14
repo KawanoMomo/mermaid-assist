@@ -13,6 +13,7 @@ const sourceFiles = [
   'src/core/selection.js',
   'src/core/connection-mode.js',
   'src/ui/properties.js',
+  'src/modules/gantt.js',
   'src/app.js',
 ];
 
