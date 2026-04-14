@@ -1754,6 +1754,8 @@ function renderStatus() {
     if (allDates.length >= 2) {
       info += ' | 期間: ' + allDates[0] + ' ~ ' + allDates[allDates.length - 1];
     }
+  } else {
+    info = 'タスク: 0 | プロパティパネルからタスクを追加してください';
   }
   statusInfoEl.textContent = info;
 }
