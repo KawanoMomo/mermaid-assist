@@ -12,6 +12,7 @@ const sourceFiles = [
   'src/core/history.js',
   'src/core/selection.js',
   'src/core/connection-mode.js',
+  'src/ui/properties.js',
   'src/app.js',
 ];
 

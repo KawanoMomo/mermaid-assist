@@ -595,46 +595,7 @@ function rebuildOverlay() {
 }
 
 // ── Property Panel Helpers ────────────────────────────────────────────────
-function bindPropInput(elId, lineNum, field) {
-  var el = document.getElementById(elId);
-  if (!el) return;
-  el.addEventListener('change', function() {
-    window.MA.history.pushHistory();
-    mmdText = updateTaskField(mmdText, lineNum, field, el.value);
-    suppressSync = true;
-    editorEl.value = mmdText;
-    suppressSync = false;
-    syncLineNumbers();
-    scheduleRefresh();
-  });
-}
-
-function bindPropDate(startId, endId, lineNum) {
-  var startEl = document.getElementById(startId);
-  var endEl = document.getElementById(endId);
-  if (startEl) {
-    startEl.addEventListener('change', function() {
-      window.MA.history.pushHistory();
-      mmdText = updateTaskDates(mmdText, lineNum, startEl.value, null);
-      suppressSync = true;
-      editorEl.value = mmdText;
-      suppressSync = false;
-      syncLineNumbers();
-      scheduleRefresh();
-    });
-  }
-  if (endEl) {
-    endEl.addEventListener('change', function() {
-      window.MA.history.pushHistory();
-      mmdText = updateTaskDates(mmdText, lineNum, null, endEl.value);
-      suppressSync = true;
-      editorEl.value = mmdText;
-      suppressSync = false;
-      syncLineNumbers();
-      scheduleRefresh();
-    });
-  }
-}
+// (moved to src/ui/properties.js — bindTextField / bindDateField)
 
 // ── Drag State ────────────────────────────────────────────────────────────
 var dragState = null;
@@ -1039,10 +1000,10 @@ modules.gantt = {
         '<button id="prop-delete-btn" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">タスク削除</button>';
 
       // Bind handlers
-      bindPropInput('prop-label', task.line, 'label');
-      bindPropInput('prop-id', task.line, 'id');
-      bindPropInput('prop-after', task.line, 'after');
-      bindPropDate('prop-start', 'prop-end', task.line);
+      window.MA.properties.bindTextField('prop-label', task.line, 'label');
+      window.MA.properties.bindTextField('prop-id', task.line, 'id');
+      window.MA.properties.bindTextField('prop-after', task.line, 'after');
+      window.MA.properties.bindDateField('prop-start', 'prop-end', task.line, updateTaskDates);
 
       // Move up/down handlers
       var moveUpBtn = document.getElementById('prop-move-up');
@@ -1611,6 +1572,22 @@ function init() {
       if (btnUndo) btnUndo.disabled = !window.MA.history.canUndo();
       if (btnRedo) btnRedo.disabled = !window.MA.history.canRedo();
     }
+  });
+
+  // Properties initialization
+  window.MA.properties.init({
+    getMmdText: function() { return mmdText; },
+    setMmdText: function(t) {
+      mmdText = t;
+      suppressSync = true;
+      editorEl.value = mmdText;
+      suppressSync = false;
+      syncLineNumbers();
+    },
+    onUpdate: function() { scheduleRefresh(); },
+    moduleUpdater: function(text, lineNum, field, value) {
+      return updateTaskField(text, lineNum, field, value);
+    },
   });
 
   // Selection initialization
