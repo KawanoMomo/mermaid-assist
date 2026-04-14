@@ -1,0 +1,1490 @@
+'use strict';
+
+// ── Gantt module aliases (Phase 0 transition: keeps existing code working) ──
+var STATUS_KEYWORDS = window.MA.modules.gantt.STATUS_KEYWORDS;
+var DATE_RE = window.MA.modules.gantt.DATE_RE;
+var DURATION_RE = window.MA.modules.gantt.DURATION_RE;
+var parseGantt = window.MA.modules.gantt.parseGantt;
+var parseTaskLine = window.MA.modules.gantt.parseTaskLine;
+var rebuildTaskMeta = window.MA.modules.gantt.rebuildTaskMeta;
+var updateTaskDates = window.MA.modules.gantt.updateTaskDates;
+var updateTaskField = window.MA.modules.gantt.updateTaskField;
+var addTask = window.MA.modules.gantt.addTask;
+var deleteTask = window.MA.modules.gantt.deleteTask;
+var sanitizeAfterDependencies = window.MA.modules.gantt.sanitizeAfterDependencies;
+var addSection = window.MA.modules.gantt.addSection;
+var deleteSection = window.MA.modules.gantt.deleteSection;
+var updateGlobalSetting = window.MA.modules.gantt.updateGlobalSetting;
+var moveTaskWithinSection = window.MA.modules.gantt.moveTaskWithinSection;
+var moveTaskToSection = window.MA.modules.gantt.moveTaskToSection;
+var calibrateScale = window.MA.modules.gantt.calibrateScale;
+var pxToDate = window.MA.modules.gantt.pxToDate;
+var dateToPx = window.MA.modules.gantt.dateToPx;
+function isDate(s) { return DATE_RE.test(s); }
+function isDuration(s) { return DURATION_RE.test(s); }
+function isAfter(s) { return typeof s === 'string' && s.indexOf('after ') === 0; }
+
+// ── PLACEHOLDER (do not remove — keeps grep/diff readable) ────────────────
+// The following pure functions have been moved to src/modules/gantt.js:
+// parseGantt, parseTaskLine, rebuildTaskMeta, updateTaskDates, updateTaskField,
+// addTask, deleteTask, sanitizeAfterDependencies, addSection, deleteSection,
+// updateGlobalSetting, moveTaskWithinSection, moveTaskToSection,
+// calibrateScale, pxToDate, dateToPx
+// The calibration var is now owned by the gantt module (getCalibration()).
+
+function rebuildOverlay() {
+  if (!currentModule || !overlayEl) return;
+  var svgEl = previewSvgEl ? previewSvgEl.querySelector('svg') : null;
+  if (svgEl) {
+    currentModule.buildOverlay(svgEl, parsed);
+  }
+}
+
+// ── Property Panel Helpers ────────────────────────────────────────────────
+// (moved to src/ui/properties.js — bindTextField / bindDateField)
+
+// ── Drag State ────────────────────────────────────────────────────────────
+var dragState = null;
+
+// ── Application State ──────────────────────────────────────────────────────
+var mmdText = '';
+var parsed = { title: '', dateFormat: 'YYYY-MM-DD', axisFormat: '', sections: [], tasks: [] };
+var sel = [];
+var zoom = 1.0;
+var suppressSync = false;
+var debounceTimer = null;
+var DRAG_RENDER_INTERVAL = 100; // ms between mermaid re-renders during drag
+var dragRenderTimer = null;
+var renderCounter = 0;
+var clipboard = null;
+var addCounter = 0;
+var modules = {};
+var currentModule = null;
+
+// ── DOM References ─────────────────────────────────────────────────────────
+var editorEl, lineNumEl, previewSvgEl, overlayEl, propsEl;
+var statusParseEl, statusInfoEl, zoomDisplayEl;
+
+// ── DiagramModule: Gantt ───────────────────────────────────────────────────
+modules.gantt = {
+  type: 'gantt',
+  detect: function(text) { return text.trim().startsWith('gantt'); },
+  parse: parseGantt,
+  buildOverlay: function(svgEl, parsedData) {
+    if (!overlayEl) return;
+    // Clear previous overlay content
+    while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
+
+    if (!svgEl || !parsedData || !parsedData.tasks || parsedData.tasks.length === 0) return;
+
+    // Calibrate scale
+    calibrateScale(svgEl, parsedData);
+
+    // Match overlay SVG dimensions/viewBox to the mermaid SVG
+    var viewBox = svgEl.getAttribute('viewBox');
+    if (viewBox) {
+      overlayEl.setAttribute('viewBox', viewBox);
+    }
+    var svgW = svgEl.getAttribute('width');
+    var svgH = svgEl.getAttribute('height');
+    if (svgW) overlayEl.setAttribute('width', svgW);
+    if (svgH) overlayEl.setAttribute('height', svgH);
+
+    var NS = 'http://www.w3.org/2000/svg';
+    var barRects = window.MA.modules.gantt.getCalibration().barRects;
+
+    for (var i = 0; i < parsedData.tasks.length; i++) {
+      var task = parsedData.tasks[i];
+      var br = i < barRects.length ? barRects[i] : null;
+      if (!br) continue; // skip tasks we couldn't match to SVG rects
+      var selected = window.MA.selection.isSelected(task.id);
+
+      // If selected: add green dashed highlight rect
+      if (selected) {
+        var hlRect = document.createElementNS(NS, 'rect');
+        hlRect.setAttribute('x', br.x - 2);
+        hlRect.setAttribute('y', br.y - 2);
+        hlRect.setAttribute('width', br.width + 4);
+        hlRect.setAttribute('height', br.height + 4);
+        hlRect.setAttribute('fill', 'none');
+        hlRect.setAttribute('stroke', '#7ee787');
+        hlRect.setAttribute('stroke-width', '2');
+        hlRect.setAttribute('stroke-dasharray', '4');
+        hlRect.setAttribute('rx', '3');
+        overlayEl.appendChild(hlRect);
+      }
+
+      // Transparent overlay bar rect
+      var overlayRect = document.createElementNS(NS, 'rect');
+      overlayRect.setAttribute('x', br.x);
+      overlayRect.setAttribute('y', br.y);
+      overlayRect.setAttribute('width', br.width);
+      overlayRect.setAttribute('height', br.height);
+      overlayRect.setAttribute('fill', 'transparent');
+      overlayRect.setAttribute('cursor', 'move');
+      overlayRect.setAttribute('class', 'overlay-bar');
+      overlayRect.setAttribute('data-task-id', task.id);
+      overlayRect.setAttribute('data-type', 'task');
+      overlayRect.setAttribute('data-line', task.line);
+      overlayRect.setAttribute('data-index', i);
+      overlayEl.appendChild(overlayRect);
+
+      // Left resize handle
+      var leftHandle = document.createElementNS(NS, 'rect');
+      leftHandle.setAttribute('x', br.x);
+      leftHandle.setAttribute('y', br.y);
+      leftHandle.setAttribute('width', '6');
+      leftHandle.setAttribute('height', br.height);
+      leftHandle.setAttribute('fill', selected ? '#7ee787' : 'transparent');
+      leftHandle.setAttribute('opacity', selected ? '0.7' : '0');
+      leftHandle.setAttribute('cursor', 'w-resize');
+      leftHandle.setAttribute('class', 'resize-handle');
+      leftHandle.setAttribute('data-task-id', task.id);
+      leftHandle.setAttribute('data-handle', 'left');
+      leftHandle.setAttribute('data-line', task.line);
+      leftHandle.setAttribute('data-index', i);
+      overlayEl.appendChild(leftHandle);
+
+      // Right resize handle
+      var rightHandle = document.createElementNS(NS, 'rect');
+      rightHandle.setAttribute('x', br.x + br.width - 6);
+      rightHandle.setAttribute('y', br.y);
+      rightHandle.setAttribute('width', '6');
+      rightHandle.setAttribute('height', br.height);
+      rightHandle.setAttribute('fill', selected ? '#7ee787' : 'transparent');
+      rightHandle.setAttribute('opacity', selected ? '0.7' : '0');
+      rightHandle.setAttribute('cursor', 'e-resize');
+      rightHandle.setAttribute('class', 'resize-handle');
+      rightHandle.setAttribute('data-task-id', task.id);
+      rightHandle.setAttribute('data-handle', 'right');
+      rightHandle.setAttribute('data-line', task.line);
+      rightHandle.setAttribute('data-index', i);
+      overlayEl.appendChild(rightHandle);
+    }
+  },
+  renderProps: function(selData, parsedData) {
+    if (!propsEl) return;
+
+    // No selection
+    if (!selData || selData.length === 0) {
+      var sectionOptions = '';
+      if (parsedData && parsedData.sections) {
+        for (var si = 0; si < parsedData.sections.length; si++) {
+          sectionOptions += '<option value="' + si + '">' + window.MA.htmlUtils.escHtml(parsedData.sections[si].name) + '</option>';
+        }
+      }
+      if (!sectionOptions) {
+        sectionOptions = '<option value="-1">（セクションなし）</option>';
+      }
+
+      var sectionListHtml = '';
+      if (parsedData && parsedData.sections && parsedData.sections.length > 0) {
+        sectionListHtml += '<div id="prop-section-list" style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:12px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">セクション一覧</label>';
+        for (var sli = 0; sli < parsedData.sections.length; sli++) {
+          var sec = parsedData.sections[sli];
+          var taskCount = 0;
+          for (var sti = 0; sti < parsedData.tasks.length; sti++) {
+            if (parsedData.tasks[sti].sectionIndex === sli) taskCount++;
+          }
+          sectionListHtml +=
+            '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;">' +
+              '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + window.MA.htmlUtils.escHtml(sec.name) + '">' + window.MA.htmlUtils.escHtml(sec.name) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + taskCount + ')</span></div>' +
+              '<button class="prop-section-delete" data-section-name="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-line="' + sec.line + '" title="セクションごと削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
+            '</div>';
+        }
+        sectionListHtml += '</div>';
+      } else {
+        sectionListHtml = '<div id="prop-section-list" style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:12px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:4px;">セクション一覧</label>' +
+          '<div style="font-size:11px;color:var(--text-secondary);">（セクションなし）</div>' +
+        '</div>';
+      }
+
+      propsEl.innerHTML =
+        '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">タスクを選択するか、新規追加</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label>' +
+          '<input id="prop-add-label" type="text" value="新規タスク" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ID</label>' +
+          '<input id="prop-add-id" type="text" placeholder="t' + (addCounter + 1) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
+          '<input id="prop-add-start" type="date" value="2026-04-01" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
+          '<input id="prop-add-end" type="date" value="2026-04-15" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション</label>' +
+          '<select id="prop-add-section" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + sectionOptions + '</select>' +
+        '</div>' +
+        '<button id="prop-add-btn" style="width:100%;background:var(--accent);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-bottom:12px;">+ タスク追加</button>' +
+        '<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px;margin-bottom:12px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション追加</label>' +
+          '<div style="display:flex;gap:4px;">' +
+            '<input id="prop-add-sec-name" type="text" placeholder="セクション名" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '<button id="prop-add-sec-btn" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:12px;">+</button>' +
+          '</div>' +
+        '</div>' +
+        sectionListHtml +
+        '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:6px;font-weight:bold;">グローバル設定</label>' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">title</label>' +
+          '<input id="prop-global-title" type="text" value="' + window.MA.htmlUtils.escHtml(parsedData.title || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:6px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">dateFormat</label>' +
+          '<input id="prop-global-dateformat" type="text" value="' + window.MA.htmlUtils.escHtml(parsedData.dateFormat || 'YYYY-MM-DD') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:6px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">axisFormat</label>' +
+          (function() {
+            var presets = [
+              { v: '%Y-%m-%d', label: '2026-04-14' },
+              { v: '%Y/%m/%d', label: '2026/04/14' },
+              { v: '%m/%d',    label: '04/14' },
+              { v: '%m月%d日', label: '04月14日' },
+              { v: '%b %d',    label: 'Apr 14' },
+              { v: '%d %b',    label: '14 Apr' },
+              { v: '%a',       label: 'Tue (曜日)' }
+            ];
+            var current = parsedData.axisFormat || '';
+            var matched = false;
+            var opts = '';
+            for (var pi = 0; pi < presets.length; pi++) {
+              var sel = (presets[pi].v === current) ? ' selected' : '';
+              if (sel) matched = true;
+              opts += '<option value="' + window.MA.htmlUtils.escHtml(presets[pi].v) + '"' + sel + '>' + window.MA.htmlUtils.escHtml(presets[pi].label + '  (' + presets[pi].v + ')') + '</option>';
+            }
+            var customSel = matched ? '' : ' selected';
+            opts += '<option value="__custom__"' + customSel + '>カスタム…</option>';
+            var customDisplay = matched ? 'none' : 'block';
+            return '<select id="prop-axisformat-preset" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:4px;">' + opts + '</select>' +
+              '<input id="prop-axisformat-custom" type="text" value="' + window.MA.htmlUtils.escHtml(current) + '" placeholder="%m/%d" style="display:' + customDisplay + ';width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">';
+          })() +
+        '</div>';
+
+      // Bind add task button
+      var addBtn = document.getElementById('prop-add-btn');
+      if (addBtn) {
+        addBtn.addEventListener('click', function() {
+          var label = document.getElementById('prop-add-label').value || '新規タスク';
+          var idEl = document.getElementById('prop-add-id');
+          var id = (idEl && idEl.value) ? idEl.value : ('t' + (++addCounter));
+          var start = document.getElementById('prop-add-start').value || '2026-04-01';
+          var end = document.getElementById('prop-add-end').value || '2026-04-15';
+          var secIdx = parseInt(document.getElementById('prop-add-section').value, 10);
+          window.MA.history.pushHistory();
+          mmdText = addTask(mmdText, secIdx, label, id, start, end);
+          window.MA.selection.setSelected([{ type: 'task', id: id }]); // 追加したタスクを自動選択
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+          // renderPropsは scheduleRefresh → refresh → renderProps で自動的に呼ばれるので、追加呼び出しは不要
+        });
+      }
+
+      // Bind add section button
+      var addSecBtn = document.getElementById('prop-add-sec-btn');
+      if (addSecBtn) {
+        addSecBtn.addEventListener('click', function() {
+          var name = document.getElementById('prop-add-sec-name').value.trim();
+          if (!name) return;
+          window.MA.history.pushHistory();
+          mmdText = addSection(mmdText, name);
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+
+      // Bind section delete buttons
+      var sectionDeleteBtns = propsEl.querySelectorAll('.prop-section-delete');
+      for (var sdbi = 0; sdbi < sectionDeleteBtns.length; sdbi++) {
+        (function(btn) {
+          btn.addEventListener('click', function() {
+            var secName = btn.getAttribute('data-section-name');
+            var secLine = parseInt(btn.getAttribute('data-section-line'), 10);
+            if (!confirm('セクション「' + secName + '」と含まれるタスクを削除しますか？')) return;
+            window.MA.history.pushHistory();
+            mmdText = deleteSection(mmdText, secLine);
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            window.MA.selection.setSelected([]);
+            syncLineNumbers();
+            scheduleRefresh();
+          });
+        })(sectionDeleteBtns[sdbi]);
+      }
+
+      // Bind global settings
+      function bindGlobal(elId, key) {
+        var el = document.getElementById(elId);
+        if (el) {
+          el.addEventListener('change', function() {
+            window.MA.history.pushHistory();
+            mmdText = updateGlobalSetting(mmdText, key, el.value);
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            syncLineNumbers();
+            scheduleRefresh();
+          });
+        }
+      }
+      bindGlobal('prop-global-title', 'title');
+      bindGlobal('prop-global-dateformat', 'dateFormat');
+      // axisFormat: preset dropdown + custom input
+      var afPreset = document.getElementById('prop-axisformat-preset');
+      var afCustom = document.getElementById('prop-axisformat-custom');
+      if (afPreset) {
+        afPreset.addEventListener('change', function() {
+          var v = afPreset.value;
+          if (v === '__custom__') {
+            if (afCustom) {
+              afCustom.style.display = 'block';
+              afCustom.focus();
+            }
+            return; // don't update text yet — wait for custom input change
+          }
+          if (afCustom) afCustom.style.display = 'none';
+          window.MA.history.pushHistory();
+          mmdText = updateGlobalSetting(mmdText, 'axisFormat', v);
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+      if (afCustom) {
+        afCustom.addEventListener('change', function() {
+          window.MA.history.pushHistory();
+          mmdText = updateGlobalSetting(mmdText, 'axisFormat', afCustom.value);
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+      return;
+    }
+
+    // Single task selected
+    if (selData.length === 1 && selData[0].type === 'task') {
+      var taskId = selData[0].id;
+      var task = null;
+      if (parsedData && parsedData.tasks) {
+        for (var ti = 0; ti < parsedData.tasks.length; ti++) {
+          if (parsedData.tasks[ti].id === taskId) { task = parsedData.tasks[ti]; break; }
+        }
+      }
+      if (!task) {
+        propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">タスクが見つかりません</p>';
+        return;
+      }
+
+      var statusBtns = ['none', 'done', 'active', 'crit', 'milestone'].map(function(s) {
+        var isActive = (s === 'none' && !task.status) || (task.status === s);
+        var bg = isActive ? 'var(--accent)' : 'var(--bg-tertiary)';
+        var val = s === 'none' ? '' : s;
+        return '<button class="prop-status-btn" data-status="' + val + '" style="flex:1;background:' + bg + ';color:var(--text-primary);border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">' + s + '</button>';
+      }).join('');
+
+      var moveSecOpts = '';
+      if (parsedData && parsedData.sections) {
+        for (var msi = 0; msi < parsedData.sections.length; msi++) {
+          var selAttr = (msi === task.sectionIndex) ? ' selected' : '';
+          moveSecOpts += '<option value="' + msi + '"' + selAttr + '>' + window.MA.htmlUtils.escHtml(parsedData.sections[msi].name) + '</option>';
+        }
+      }
+      if (!moveSecOpts) {
+        moveSecOpts = '<option value="-1">（セクションなし）</option>';
+      }
+
+      propsEl.innerHTML =
+        '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;">' +
+          '<div style="flex:1;font-weight:bold;color:var(--text-primary);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + window.MA.htmlUtils.escHtml(task.label) + '</div>' +
+          '<button id="prop-move-up" title="同一セクション内で上に移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↑</button>' +
+          '<button id="prop-move-down" title="同一セクション内で下に移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↓</button>' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label>' +
+          '<input id="prop-label" type="text" value="' + window.MA.htmlUtils.escHtml(task.label) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ID</label>' +
+          '<input id="prop-id" type="text" value="' + window.MA.htmlUtils.escHtml(window.MA.parserUtils.isAutoId(task.id) ? '' : task.id) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
+          '<input id="prop-start" type="date" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
+          '<input id="prop-end" type="date" value="' + window.MA.htmlUtils.escHtml(task.endDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ステータス</label>' +
+          '<div style="display:flex;gap:2px;">' + statusBtns + '</div>' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">after依存</label>' +
+          '<input id="prop-after" type="text" value="' + window.MA.htmlUtils.escHtml(task.after || '') + '" placeholder="タスクID (例: a1)" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション移動</label>' +
+          '<select id="prop-move-section" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + moveSecOpts + '</select>' +
+        '</div>' +
+        '<button id="prop-delete-btn" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">タスク削除</button>';
+
+      // Bind handlers
+      window.MA.properties.bindTextField('prop-label', task.line, 'label');
+      window.MA.properties.bindTextField('prop-id', task.line, 'id');
+      window.MA.properties.bindTextField('prop-after', task.line, 'after');
+      window.MA.properties.bindDateField('prop-start', 'prop-end', task.line, updateTaskDates);
+
+      // Move up/down handlers
+      var moveUpBtn = document.getElementById('prop-move-up');
+      if (moveUpBtn) {
+        moveUpBtn.addEventListener('click', function() {
+          var newText = moveTaskWithinSection(mmdText, task.line, -1);
+          if (newText === mmdText) return; // no-op (boundary)
+          window.MA.history.pushHistory();
+          mmdText = newText;
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+      var moveDownBtn = document.getElementById('prop-move-down');
+      if (moveDownBtn) {
+        moveDownBtn.addEventListener('click', function() {
+          var newText = moveTaskWithinSection(mmdText, task.line, 1);
+          if (newText === mmdText) return;
+          window.MA.history.pushHistory();
+          mmdText = newText;
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+
+      var moveSectionEl = document.getElementById('prop-move-section');
+      if (moveSectionEl) {
+        moveSectionEl.addEventListener('change', function() {
+          var targetIdx = parseInt(moveSectionEl.value, 10);
+          if (isNaN(targetIdx)) return;
+          var newText = moveTaskToSection(mmdText, task.line, targetIdx);
+          if (newText === mmdText) return; // no-op
+          window.MA.history.pushHistory();
+          mmdText = newText;
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+
+      // Status buttons
+      var statusBtnEls = propsEl.querySelectorAll('.prop-status-btn');
+      for (var sbi = 0; sbi < statusBtnEls.length; sbi++) {
+        (function(btn) {
+          btn.addEventListener('click', function() {
+            window.MA.history.pushHistory();
+            mmdText = updateTaskField(mmdText, task.line, 'status', btn.getAttribute('data-status'));
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            syncLineNumbers();
+            scheduleRefresh();
+          });
+        })(statusBtnEls[sbi]);
+      }
+
+      // Delete button
+      var delBtn = document.getElementById('prop-delete-btn');
+      if (delBtn) {
+        delBtn.addEventListener('click', function() {
+          window.MA.history.pushHistory();
+          mmdText = deleteTask(mmdText, task.line);
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          window.MA.selection.setSelected([]);
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+      return;
+    }
+
+    // Multiple tasks selected
+    if (selData.length > 1) {
+      var selectedTasks = [];
+      if (parsedData && parsedData.tasks) {
+        for (var mi = 0; mi < selData.length; mi++) {
+          for (var mj = 0; mj < parsedData.tasks.length; mj++) {
+            if (parsedData.tasks[mj].id === selData[mi].id) {
+              selectedTasks.push(parsedData.tasks[mj]);
+              break;
+            }
+          }
+        }
+      }
+
+      var batchStatusBtns = ['done', 'active', 'crit', 'none'].map(function(s) {
+        var val = s === 'none' ? '' : s;
+        return '<button class="batch-status-btn" data-status="' + val + '" style="flex:1;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">' + s + '</button>';
+      }).join('');
+
+      propsEl.innerHTML =
+        '<div style="margin-bottom:8px;font-size:11px;color:var(--text-secondary);">' + selData.length + ' タスク選択中</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">一括ステータス変更</label>' +
+          '<div style="display:flex;gap:2px;">' + batchStatusBtns + '</div>' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">一括日付シフト（日数）</label>' +
+          '<div style="display:flex;gap:4px;">' +
+            '<input id="batch-shift-days" type="number" value="0" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '<button id="batch-shift-btn" style="background:var(--accent);color:#fff;border:none;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:11px;">適用</button>' +
+          '</div>' +
+        '</div>' +
+        '<button id="batch-delete-btn" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">一括削除</button>';
+
+      // Batch status change
+      var batchBtnEls = propsEl.querySelectorAll('.batch-status-btn');
+      for (var bbi = 0; bbi < batchBtnEls.length; bbi++) {
+        (function(btn) {
+          btn.addEventListener('click', function() {
+            window.MA.history.pushHistory();
+            var statusVal = btn.getAttribute('data-status');
+            for (var bti = 0; bti < selectedTasks.length; bti++) {
+              mmdText = updateTaskField(mmdText, selectedTasks[bti].line, 'status', statusVal);
+            }
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            syncLineNumbers();
+            scheduleRefresh();
+          });
+        })(batchBtnEls[bbi]);
+      }
+
+      // Batch date shift
+      var shiftBtn = document.getElementById('batch-shift-btn');
+      if (shiftBtn) {
+        shiftBtn.addEventListener('click', function() {
+          var daysVal = parseInt(document.getElementById('batch-shift-days').value, 10);
+          if (isNaN(daysVal) || daysVal === 0) return;
+          window.MA.history.pushHistory();
+          for (var sti = 0; sti < selectedTasks.length; sti++) {
+            var st = selectedTasks[sti];
+            var newStart = st.startDate && DATE_RE.test(st.startDate) ? window.MA.dateUtils.addDays(st.startDate, daysVal) : null;
+            var newEnd = st.endDate && DATE_RE.test(st.endDate) ? window.MA.dateUtils.addDays(st.endDate, daysVal) : null;
+            if (newStart || newEnd) {
+              mmdText = updateTaskDates(mmdText, st.line, newStart, newEnd);
+            }
+          }
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+
+      // Batch delete (reverse line order to preserve line numbers)
+      var batchDelBtn = document.getElementById('batch-delete-btn');
+      if (batchDelBtn) {
+        batchDelBtn.addEventListener('click', function() {
+          window.MA.history.pushHistory();
+          // Sort by line number descending so deletion doesn't shift lines
+          var sorted = selectedTasks.slice().sort(function(a, b) { return b.line - a.line; });
+          for (var di = 0; di < sorted.length; di++) {
+            mmdText = deleteTask(mmdText, sorted[di].line);
+          }
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          window.MA.selection.setSelected([]);
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+      return;
+    }
+
+    // Section selected
+    if (selData.length === 1 && selData[0].type === 'section') {
+      var secId = selData[0].id;
+      var section = null;
+      if (parsedData && parsedData.sections) {
+        for (var sci = 0; sci < parsedData.sections.length; sci++) {
+          if (parsedData.sections[sci].name === secId) {
+            section = parsedData.sections[sci];
+            break;
+          }
+        }
+      }
+      if (!section) {
+        propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">セクションが見つかりません</p>';
+        return;
+      }
+
+      // Tasks in this section
+      var secTasks = [];
+      if (parsedData && parsedData.tasks) {
+        var secIndex = parsedData.sections.indexOf(section);
+        for (var sti2 = 0; sti2 < parsedData.tasks.length; sti2++) {
+          if (parsedData.tasks[sti2].sectionIndex === secIndex) {
+            secTasks.push(parsedData.tasks[sti2]);
+          }
+        }
+      }
+
+      var taskList = secTasks.map(function(t) {
+        return '<div style="padding:2px 4px;font-size:11px;color:var(--text-primary);">' + window.MA.htmlUtils.escHtml(t.label) + '</div>';
+      }).join('');
+
+      propsEl.innerHTML =
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション名</label>' +
+          '<input id="prop-sec-name" type="text" value="' + window.MA.htmlUtils.escHtml(section.name) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:4px;">タスク一覧 (' + secTasks.length + '件)</label>' +
+          taskList +
+        '</div>' +
+        '<button id="prop-sec-delete-btn" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">セクション削除 (タスクごと)</button>';
+
+      // Bind section name change
+      var secNameEl = document.getElementById('prop-sec-name');
+      if (secNameEl) {
+        secNameEl.addEventListener('change', function() {
+          window.MA.history.pushHistory();
+          var lines = mmdText.split('\n');
+          var idx = section.line - 1;
+          if (idx >= 0 && idx < lines.length) {
+            var indent = lines[idx].match(/^(\s*)/)[1];
+            lines[idx] = indent + 'section ' + secNameEl.value;
+            mmdText = lines.join('\n');
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            window.MA.selection.setSelected([{ type: 'section', id: secNameEl.value }]);
+            syncLineNumbers();
+            scheduleRefresh();
+          }
+        });
+      }
+
+      // Bind section delete
+      var secDelBtn = document.getElementById('prop-sec-delete-btn');
+      if (secDelBtn) {
+        secDelBtn.addEventListener('click', function() {
+          window.MA.history.pushHistory();
+          mmdText = deleteSection(mmdText, section.line);
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          window.MA.selection.setSelected([]);
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+      return;
+    }
+
+    // Default fallback
+    propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">タスクを選択してください</p>';
+  },
+  updateText: function(text, change) {
+    if (change.type === 'dates')  return updateTaskDates(text, change.line, change.startDate, change.endDate);
+    if (change.type === 'field')  return updateTaskField(text, change.line, change.field, change.value);
+    if (change.type === 'add')    return addTask(text, change.sectionIndex, change.label, change.id, change.startDate, change.endDate);
+    if (change.type === 'delete') return deleteTask(text, change.line);
+    return text;
+  },
+  exportMmd: function(parsedData) { return mmdText; },
+};
+
+// ── Line Numbers ───────────────────────────────────────────────────────────
+function syncLineNumbers() {
+  if (!editorEl || !lineNumEl) return;
+  var lineCount = editorEl.value.split('\n').length;
+  var nums = [];
+  for (var i = 1; i <= lineCount; i++) nums.push(i);
+  lineNumEl.textContent = nums.join('\n');
+  // Sync scroll position
+  lineNumEl.scrollTop = editorEl.scrollTop;
+}
+
+// ── Module Detection ───────────────────────────────────────────────────────
+function detectModule(text) {
+  var keys = Object.keys(modules);
+  for (var i = 0; i < keys.length; i++) {
+    if (modules[keys[i]].detect(text)) return modules[keys[i]];
+  }
+  return null;
+}
+
+// ── Refresh Pipeline ───────────────────────────────────────────────────────
+function scheduleRefresh() {
+  cancelAnimationFrame(debounceTimer);
+  debounceTimer = requestAnimationFrame(function() { refresh(); });
+}
+
+async function refresh(skipRender) {
+  if (!previewSvgEl) return;
+
+  var thisRender = ++renderCounter;
+
+  // Detect diagram module
+  currentModule = detectModule(mmdText);
+
+  // Parse (always — it's fast)
+  if (currentModule) {
+    try {
+      parsed = currentModule.parse(mmdText);
+    } catch (e) {
+      parsed = { title: '', dateFormat: 'YYYY-MM-DD', axisFormat: '', sections: [], tasks: [] };
+    }
+  }
+
+  // During drag: update parse/status/props only, skip expensive mermaid render
+  if (skipRender) {
+    renderProps();
+    renderStatus();
+    syncLineNumbers();
+    return;
+  }
+
+  // Render via mermaid.js
+  var svgId = 'mermaid-svg-' + thisRender;
+  try {
+    var renderResult = await mermaid.render(svgId, mmdText);
+    // Guard: if a newer render was started, discard this result
+    if (thisRender !== renderCounter) return;
+
+    previewSvgEl.innerHTML = renderResult.svg;
+
+    var svgEl = previewSvgEl.querySelector('svg');
+    if (svgEl) {
+      // ── Fix mermaid.js SVG sizing ──
+      // mermaid.js outputs width="100%" + max-width inline style.
+      // This causes the SVG to collapse inside an inline-block parent.
+      // Fix: set explicit pixel dimensions from the viewBox.
+      var vb = svgEl.viewBox.baseVal;
+      var naturalW = vb.width || 800;
+      var naturalH = vb.height || 400;
+
+      // Remove all mermaid inline styles (max-width, width:100%, etc.)
+      svgEl.removeAttribute('style');
+      // Set to natural pixel dimensions from viewBox
+      svgEl.setAttribute('width', naturalW);
+      svgEl.setAttribute('height', naturalH);
+
+      // Sync overlay to same natural dimensions and viewBox
+      if (overlayEl) {
+        overlayEl.setAttribute('width', naturalW);
+        overlayEl.setAttribute('height', naturalH);
+        overlayEl.setAttribute('viewBox', svgEl.getAttribute('viewBox'));
+      }
+
+      // Auto-fit zoom on first render: fit chart width to container
+      if (thisRender === 1) {
+        var previewContainer = document.getElementById('preview-container');
+        var containerW = previewContainer.clientWidth - 32;
+        var fitZoom = containerW / naturalW;
+        fitZoom = Math.max(0.25, Math.min(3.0, fitZoom));
+        zoom = Math.round(fitZoom * 100) / 100;
+      }
+    }
+
+    // Apply zoom via CSS transform on wrapper (both SVG and overlay)
+    previewSvgEl.style.transform = 'scale(' + zoom + ')';
+    previewSvgEl.style.transformOrigin = 'top left';
+    if (overlayEl) {
+      overlayEl.style.transform = 'scale(' + zoom + ')';
+      overlayEl.style.transformOrigin = 'top left';
+    }
+    if (zoomDisplayEl) zoomDisplayEl.textContent = Math.round(zoom * 100) + '%';
+
+    // Build overlay (skip during drag to prevent jitter)
+    if (currentModule && svgEl && !dragState) {
+      currentModule.buildOverlay(svgEl, parsed);
+    }
+
+    statusParseEl.textContent = 'OK';
+    statusParseEl.classList.remove('error');
+  } catch (e) {
+    if (thisRender !== renderCounter) return;
+    previewSvgEl.innerHTML = '<p style="color:var(--accent-red);padding:16px;font-family:var(--font-mono);font-size:12px;">Render error:<br>' + String(e).replace(/</g, '&lt;') + '</p>';
+    statusParseEl.textContent = 'Error';
+    statusParseEl.classList.add('error');
+  }
+
+  renderProps();
+  renderStatus();
+  syncLineNumbers();
+}
+
+// ── Status Bar ─────────────────────────────────────────────────────────────
+function renderStatus() {
+  if (!statusInfoEl) return;
+  var info = '';
+  if (parsed && parsed.tasks && parsed.tasks.length > 0) {
+    info = 'タスク: ' + parsed.tasks.length;
+    if (parsed.sections && parsed.sections.length > 0) info += ' | セクション: ' + parsed.sections.length;
+    // Calculate date range
+    var dates = parsed.tasks.filter(function(t) { return t.startDate; }).map(function(t) { return t.startDate; });
+    var endDates = parsed.tasks.filter(function(t) { return t.endDate && DATE_RE.test(t.endDate); }).map(function(t) { return t.endDate; });
+    var allDates = dates.concat(endDates).sort();
+    if (allDates.length >= 2) {
+      info += ' | 期間: ' + allDates[0] + ' ~ ' + allDates[allDates.length - 1];
+    }
+  } else {
+    info = 'タスク: 0 | プロパティパネルからタスクを追加してください';
+  }
+  statusInfoEl.textContent = info;
+}
+
+// ── Properties Panel ───────────────────────────────────────────────────────
+function renderProps() {
+  if (!propsEl || !currentModule) return;
+  currentModule.renderProps(sel, parsed);
+}
+
+// ── Zoom ───────────────────────────────────────────────────────────────────
+function setZoom(z) {
+  zoom = Math.max(0.25, Math.min(3.0, z));
+  if (zoomDisplayEl) zoomDisplayEl.textContent = Math.round(zoom * 100) + '%';
+
+  if (previewSvgEl) {
+    previewSvgEl.style.transform = 'scale(' + zoom + ')';
+    previewSvgEl.style.transformOrigin = '0 0';
+  }
+  if (overlayEl) {
+    overlayEl.style.transform = 'scale(' + zoom + ')';
+    overlayEl.style.transformOrigin = '0 0';
+  }
+}
+
+function zoomToFit() {
+  var svgEl = previewSvgEl ? previewSvgEl.querySelector('svg') : null;
+  var previewContainer = document.getElementById('preview-container');
+  if (!svgEl || !previewContainer) return;
+  var naturalW = parseFloat(svgEl.getAttribute('width')) || 800;
+  var containerW = previewContainer.clientWidth - 32;
+  var fitZoom = containerW / naturalW;
+  setZoom(Math.round(fitZoom * 100) / 100);
+}
+
+// ── File Open / Save ───────────────────────────────────────────────────────
+function openFile() {
+  document.getElementById('file-input').click();
+}
+
+function saveFile() {
+  var blob = new Blob([mmdText], { type: 'text/plain' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (parsed.title || 'untitled') + '.mmd';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ── Export Functions ───────────────────────────────────────────────────────
+function exportSVG() {
+  var svgEl = previewSvgEl.querySelector('svg');
+  if (!svgEl) return;
+  var clone = svgEl.cloneNode(true);
+  var blob = new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (parsed.title || 'untitled') + '.svg';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function svgToCanvas(transparent, callback) {
+  var svgEl = previewSvgEl.querySelector('svg');
+  if (!svgEl) return;
+  var clone = svgEl.cloneNode(true);
+  var svgData = new XMLSerializer().serializeToString(clone);
+  var img = new Image();
+  img.onload = function() {
+    var canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    var ctx = canvas.getContext('2d');
+    if (!transparent) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    ctx.drawImage(img, 0, 0);
+    callback(canvas);
+  };
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData);
+}
+
+function exportPNG(transparent) {
+  svgToCanvas(transparent, function(canvas) {
+    canvas.toBlob(function(blob) {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = (parsed.title || 'untitled') + '.png';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+  });
+}
+
+function exportClipboard() {
+  svgToCanvas(false, function(canvas) {
+    canvas.toBlob(function(blob) {
+      navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    });
+  });
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+function init() {
+  // DOM references
+  editorEl      = document.getElementById('editor');
+  lineNumEl     = document.getElementById('line-numbers');
+  previewSvgEl  = document.getElementById('preview-svg');
+  overlayEl     = document.getElementById('overlay-layer');
+  propsEl       = document.getElementById('props-content');
+  statusParseEl = document.getElementById('status-parse');
+  statusInfoEl  = document.getElementById('status-info');
+  zoomDisplayEl = document.getElementById('zoom-display');
+
+  // Init mermaid.js
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'dark',
+    securityLevel: 'loose',
+  });
+
+  // Default content
+  mmdText = [
+    'gantt',
+    '    title プロジェクト計画',
+    '    dateFormat YYYY-MM-DD',
+    '    axisFormat %m/%d',
+    '',
+    '    section 要件定義',
+    '    要件分析           :a1, 2026-04-01, 2026-04-15',
+    '    仕様書作成         :a2, after a1, 2026-04-25',
+    '',
+    '    section 設計',
+    '    基本設計           :b1, 2026-04-20, 2026-05-05',
+    '    詳細設計           :b2, after b1, 2026-05-15',
+  ].join('\n');
+
+  editorEl.value = mmdText;
+  syncLineNumbers();
+  setZoom(1.0);
+
+  // History initialization
+  window.MA.history.init({
+    getMmdText: function() { return mmdText; },
+    setMmdText: function(t) {
+      mmdText = t;
+      suppressSync = true;
+      editorEl.value = mmdText;
+      suppressSync = false;
+      syncLineNumbers();
+      scheduleRefresh();
+    },
+    onUpdate: function() {
+      var btnUndo = document.getElementById('btn-undo');
+      var btnRedo = document.getElementById('btn-redo');
+      if (btnUndo) btnUndo.disabled = !window.MA.history.canUndo();
+      if (btnRedo) btnRedo.disabled = !window.MA.history.canRedo();
+    }
+  });
+
+  // Properties initialization
+  window.MA.properties.init({
+    getMmdText: function() { return mmdText; },
+    setMmdText: function(t) {
+      mmdText = t;
+      suppressSync = true;
+      editorEl.value = mmdText;
+      suppressSync = false;
+      syncLineNumbers();
+    },
+    onUpdate: function() { scheduleRefresh(); },
+    moduleUpdater: function(text, lineNum, field, value) {
+      return updateTaskField(text, lineNum, field, value);
+    },
+  });
+
+  // Selection initialization
+  window.MA.selection.init(function() {
+    sel = window.MA.selection.getSelected();
+    renderProps();
+    rebuildOverlay();
+  });
+
+  // Initialize history button states
+  (function() {
+    var btnUndo = document.getElementById('btn-undo');
+    var btnRedo = document.getElementById('btn-redo');
+    if (btnUndo) btnUndo.disabled = !window.MA.history.canUndo();
+    if (btnRedo) btnRedo.disabled = !window.MA.history.canRedo();
+  })();
+
+  // ── Editor events ────────────────────────────────────────────────────────
+  editorEl.addEventListener('input', function() {
+    if (suppressSync) return;
+    window.MA.history.pushHistory();
+    mmdText = editorEl.value;
+    scheduleRefresh();
+  });
+
+  editorEl.addEventListener('scroll', function() {
+    syncLineNumbers();
+  });
+
+  // ── Toolbar buttons ──────────────────────────────────────────────────────
+  document.getElementById('btn-open').addEventListener('click', openFile);
+  document.getElementById('btn-save').addEventListener('click', saveFile);
+  document.getElementById('btn-undo').addEventListener('click', function() { window.MA.history.undo(); });
+  document.getElementById('btn-redo').addEventListener('click', function() { window.MA.history.redo(); });
+
+  document.getElementById('btn-zoom-in').addEventListener('click', function() {
+    setZoom(zoom + 0.1);
+  });
+  document.getElementById('btn-zoom-out').addEventListener('click', function() {
+    setZoom(zoom - 0.1);
+  });
+  document.getElementById('btn-zoom-fit').addEventListener('click', function() {
+    zoomToFit();
+  });
+
+  // ── File input handler ───────────────────────────────────────────────────
+  document.getElementById('file-input').addEventListener('change', function(e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(ev) {
+      window.MA.history.pushHistory();
+      mmdText = ev.target.result;
+      suppressSync = true;
+      editorEl.value = mmdText;
+      suppressSync = false;
+      syncLineNumbers();
+      scheduleRefresh();
+    };
+    reader.readAsText(file);
+    // Reset so same file can be reopened
+    e.target.value = '';
+  });
+
+  // ── Export menu toggle ───────────────────────────────────────────────────
+  var btnExport  = document.getElementById('btn-export');
+  var exportMenu = document.getElementById('export-menu');
+
+  btnExport.addEventListener('click', function(e) {
+    e.stopPropagation();
+    exportMenu.classList.toggle('open');
+  });
+
+  document.addEventListener('click', function() {
+    exportMenu.classList.remove('open');
+  });
+
+  // Export actions
+  document.getElementById('exp-svg').addEventListener('click', function() {
+    exportMenu.classList.remove('open');
+    exportSVG();
+  });
+
+  document.getElementById('exp-png').addEventListener('click', function() {
+    exportMenu.classList.remove('open');
+    exportPNG(false);
+  });
+
+  document.getElementById('exp-png-transparent').addEventListener('click', function() {
+    exportMenu.classList.remove('open');
+    exportPNG(true);
+  });
+
+  document.getElementById('exp-clipboard').addEventListener('click', function() {
+    exportMenu.classList.remove('open');
+    exportClipboard();
+  });
+
+  // ── Ctrl+wheel zoom / Shift+wheel horizontal scroll on preview ───────────
+  var previewContainer = document.getElementById('preview-container');
+  previewContainer.addEventListener('wheel', function(e) {
+    if (e.ctrlKey) {
+      e.preventDefault();
+      var delta = e.deltaY < 0 ? 0.1 : -0.1;
+      setZoom(zoom + delta);
+    } else if (e.shiftKey && !e.ctrlKey) {
+      // Shift+Wheel → horizontal scroll
+      previewContainer.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  // ── Overlay click + drag handling ─────────────────────────────────────────
+  overlayEl.addEventListener('mousedown', function(e) {
+    var target = e.target;
+    var taskId = target.getAttribute('data-task-id');
+    var handle = target.getAttribute('data-handle');
+    var lineNum = target.getAttribute('data-line');
+    var index = target.getAttribute('data-index');
+
+    // Click on empty overlay area (no task): clear selection
+    if (!taskId && !e.shiftKey) {
+      window.MA.selection.clearSelection();
+      return;
+    }
+
+    if (!taskId) return;
+
+    // Select the task
+    if (!handle) {
+      window.MA.selection.selectItem('task', taskId, e.shiftKey);
+    }
+
+    // Initiate drag if calibration is available
+    if (window.MA.modules.gantt.getCalibration().pxPerDay !== 0 && lineNum) {
+      var lineNumInt = parseInt(lineNum, 10);
+      var indexInt = parseInt(index, 10);
+
+      // Find the task data to get original dates
+      var task = null;
+      if (parsed && parsed.tasks) {
+        for (var dti = 0; dti < parsed.tasks.length; dti++) {
+          if (parsed.tasks[dti].id === taskId) { task = parsed.tasks[dti]; break; }
+        }
+      }
+      if (task && task.startDate && DATE_RE.test(task.startDate)) {
+        // Use overlay SVG for coordinate conversion (same viewBox as mermaid SVG)
+        if (overlayEl && overlayEl.createSVGPoint) {
+          var pt = overlayEl.createSVGPoint();
+          pt.x = e.clientX;
+          pt.y = e.clientY;
+          try {
+            var ctm = overlayEl.getScreenCTM();
+            if (ctm) {
+              var svgPt = pt.matrixTransform(ctm.inverse());
+              var br = window.MA.modules.gantt.getCalibration().barRects[indexInt];
+              dragState = {
+                taskId: taskId,
+                lineNum: lineNumInt,
+                handle: handle || null,
+                startX: svgPt.x,
+                historyPushed: false,
+                origStartDate: task.startDate,
+                origEndDate: task.endDate || '',
+                origBarX: br ? br.x : 0,
+                origBarW: br ? br.width : 0,
+              };
+              // Visual feedback: highlight dragged bar
+              var dragBarEl = overlayEl.querySelector('.overlay-bar[data-task-id="' + taskId + '"]');
+              if (dragBarEl) {
+                dragBarEl.setAttribute('fill', 'rgba(124, 140, 248, 0.3)');
+                dragBarEl.setAttribute('data-dragging', 'true');
+              }
+            }
+          } catch (ex) { /* can't get CTM */ }
+        }
+      }
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  // Click on preview-container background: clear selection
+  document.getElementById('preview-container').addEventListener('mousedown', function(e) {
+    if (e.target === this || e.target === previewSvgEl) {
+      window.MA.selection.clearSelection();
+    }
+  });
+
+  // ── Document mousemove (drag) ───────────────────────────────────────────
+  document.addEventListener('mousemove', function(e) {
+    if (!dragState) return;
+
+    if (!overlayEl || !overlayEl.createSVGPoint) return;
+
+    var pt = overlayEl.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+
+    try {
+      var ctm = overlayEl.getScreenCTM();
+      if (!ctm) return;
+      var svgPt = pt.matrixTransform(ctm.inverse());
+      var dx = svgPt.x - dragState.startX;
+      var daysDelta = Math.round(dx / window.MA.modules.gantt.getCalibration().pxPerDay);
+
+      if (daysDelta === 0) return;
+
+      // Push history only on first actual move
+      if (!dragState.historyPushed) {
+        window.MA.history.pushHistory();
+        dragState.historyPushed = true;
+      }
+
+      if (dragState.handle === null) {
+        // Move: shift both dates equally
+        var newStart = window.MA.dateUtils.addDays(dragState.origStartDate, daysDelta);
+        var newEnd = dragState.origEndDate && DATE_RE.test(dragState.origEndDate) ? window.MA.dateUtils.addDays(dragState.origEndDate, daysDelta) : null;
+        mmdText = updateTaskDates(mmdText, dragState.lineNum, newStart, newEnd);
+      } else if (dragState.handle === 'left') {
+        // Resize left: shift start date, but don't go past end date
+        var newStart2 = window.MA.dateUtils.addDays(dragState.origStartDate, daysDelta);
+        if (dragState.origEndDate && DATE_RE.test(dragState.origEndDate)) {
+          if (window.MA.dateUtils.daysBetween(newStart2, dragState.origEndDate) < 1) {
+            newStart2 = window.MA.dateUtils.addDays(dragState.origEndDate, -1); // minimum 1 day
+          }
+        }
+        mmdText = updateTaskDates(mmdText, dragState.lineNum, newStart2, null);
+      } else if (dragState.handle === 'right') {
+        // Resize right: shift end date, but don't go before start date
+        if (dragState.origEndDate && DATE_RE.test(dragState.origEndDate)) {
+          var newEnd2 = window.MA.dateUtils.addDays(dragState.origEndDate, daysDelta);
+          if (window.MA.dateUtils.daysBetween(dragState.origStartDate, newEnd2) < 1) {
+            newEnd2 = window.MA.dateUtils.addDays(dragState.origStartDate, 1); // minimum 1 day
+          }
+          mmdText = updateTaskDates(mmdText, dragState.lineNum, null, newEnd2);
+        }
+      }
+
+      // Fix after-dependent task dates to prevent negative widths in mermaid
+      mmdText = sanitizeAfterDependencies(mmdText);
+
+      // Update text + editor immediately (no mermaid re-render)
+      suppressSync = true;
+      editorEl.value = mmdText;
+      suppressSync = false;
+
+      // Visually move the overlay bar instead of full re-render
+      var barEl = overlayEl.querySelector('.overlay-bar[data-task-id="' + dragState.taskId + '"]');
+      if (barEl) {
+        var pxDelta = daysDelta * window.MA.modules.gantt.getCalibration().pxPerDay;
+        var origX = parseFloat(barEl.getAttribute('data-orig-x') || barEl.getAttribute('x'));
+        var origW = parseFloat(barEl.getAttribute('data-orig-w') || barEl.getAttribute('width'));
+        if (!barEl.getAttribute('data-orig-x')) {
+          barEl.setAttribute('data-orig-x', barEl.getAttribute('x'));
+          barEl.setAttribute('data-orig-w', barEl.getAttribute('width'));
+        }
+        if (dragState.handle === null) {
+          barEl.setAttribute('x', origX + pxDelta);
+        } else if (dragState.handle === 'left') {
+          barEl.setAttribute('x', origX + pxDelta);
+          barEl.setAttribute('width', Math.max(5, origW - pxDelta));
+        } else if (dragState.handle === 'right') {
+          barEl.setAttribute('width', Math.max(5, origW + pxDelta));
+        }
+      }
+
+      // Show drag tooltip near cursor
+      var tooltipEl = document.getElementById('drag-tooltip');
+      if (tooltipEl) {
+        var currentParsed = parseGantt(mmdText);
+        var dragTask = null;
+        for (var dpi = 0; dpi < currentParsed.tasks.length; dpi++) {
+          if (currentParsed.tasks[dpi].id === dragState.taskId) { dragTask = currentParsed.tasks[dpi]; break; }
+        }
+        if (dragTask) {
+          var tipText = dragTask.startDate || '';
+          if (dragTask.endDate && DATE_RE.test(dragTask.endDate)) {
+            tipText += ' → ' + dragTask.endDate;
+            if (dragTask.startDate && DATE_RE.test(dragTask.startDate)) {
+              var dur = window.MA.dateUtils.daysBetween(dragTask.startDate, dragTask.endDate);
+              tipText += ' (' + dur + '日)';
+            }
+          }
+          tooltipEl.textContent = tipText;
+          tooltipEl.style.display = 'block';
+          tooltipEl.style.left = (e.clientX + 16) + 'px';
+          tooltipEl.style.top = (e.clientY - 30) + 'px';
+        }
+      }
+
+      // Lightweight refresh: parse + status only (instant)
+      refresh(true);
+
+      // Throttled mermaid re-render: chart updates progressively during drag
+      if (!dragRenderTimer) {
+        dragRenderTimer = setTimeout(function() {
+          dragRenderTimer = null;
+          refresh();  // full mermaid re-render
+        }, DRAG_RENDER_INTERVAL);
+      }
+    } catch (ex) { /* ignore CTM errors */ }
+  });
+
+  // ── Document mouseup (end drag) ─────────────────────────────────────────
+  document.addEventListener('mouseup', function() {
+    if (dragState) {
+      dragState = null;
+      clearTimeout(dragRenderTimer);
+      dragRenderTimer = null;
+      var tooltipEl = document.getElementById('drag-tooltip');
+      if (tooltipEl) tooltipEl.style.display = 'none';
+      // Clear drag visual feedback on any dragging bars
+      if (overlayEl) {
+        var draggingBars = overlayEl.querySelectorAll('[data-dragging="true"]');
+        for (var dbi = 0; dbi < draggingBars.length; dbi++) {
+          draggingBars[dbi].setAttribute('fill', 'transparent');
+          draggingBars[dbi].removeAttribute('data-dragging');
+        }
+      }
+      // Final full re-render
+      refresh();
+    }
+  });
+
+  // ── Keyboard shortcuts ───────────────────────────────────────────────────
+  document.addEventListener('keydown', function(e) {
+    var tag = e.target.tagName;
+    var inInput = (tag === 'INPUT' || tag === 'SELECT');
+    var inEditor = (e.target === editorEl);
+
+    if (e.ctrlKey && e.key === 'z') {
+      if (inEditor) return;
+      e.preventDefault(); window.MA.history.undo();
+    } else if (e.ctrlKey && e.key === 'y') {
+      if (inEditor) return;
+      e.preventDefault(); window.MA.history.redo();
+    } else if (e.ctrlKey && e.key === 's') {
+      e.preventDefault(); saveFile();
+    } else if (e.ctrlKey && e.key === 'o') {
+      e.preventDefault(); openFile();
+    } else if (e.key === 'Delete' && !inInput && !inEditor) {
+      if (sel.length === 0) return;
+      window.MA.history.pushHistory();
+      var lines = sel.map(function(s) {
+        var t = parsed.tasks.find(function(tk) { return tk.id === s.id; });
+        return t ? t.line : -1;
+      }).filter(function(l) { return l > 0; }).sort(function(a, b) { return b - a; });
+      lines.forEach(function(l) { mmdText = deleteTask(mmdText, l); });
+      suppressSync = true;
+      editorEl.value = mmdText;
+      suppressSync = false;
+      window.MA.selection.setSelected([]);
+      syncLineNumbers();
+      scheduleRefresh();
+    } else if (e.key === 'Escape') {
+      window.MA.selection.clearSelection();
+    } else if (e.ctrlKey && e.key === 'a' && !inEditor && !inInput) {
+      e.preventDefault();
+      window.MA.selection.setSelected(parsed.tasks.map(function(t) { return { type: 'task', id: t.id }; }));
+    } else if (e.ctrlKey && e.shiftKey && e.key === 'C') {
+      e.preventDefault(); exportClipboard();
+    } else if (e.ctrlKey && e.key === 'c' && !inEditor && !inInput && sel.length > 0) {
+      e.preventDefault();
+      clipboard = sel.map(function(s) {
+        return parsed.tasks.find(function(t) { return t.id === s.id; });
+      }).filter(Boolean);
+    } else if (e.ctrlKey && e.key === 'v' && !inEditor && !inInput && clipboard && clipboard.length > 0) {
+      e.preventDefault();
+      window.MA.history.pushHistory();
+      clipboard.forEach(function(t) {
+        var newId = 't' + (++addCounter);
+        var newStart = t.startDate ? window.MA.dateUtils.addDays(t.startDate, 7) : null;
+        var newEnd = t.endDate && !isDuration(t.endDate) ? window.MA.dateUtils.addDays(t.endDate, 7) : t.endDate;
+        mmdText = addTask(mmdText, t.sectionIndex, t.label, newId, newStart, newEnd);
+      });
+      suppressSync = true;
+      editorEl.value = mmdText;
+      suppressSync = false;
+      syncLineNumbers();
+      scheduleRefresh();
+    }
+  });
+
+  // ── Pane Resizers ─────────────────────────────────────────────────────────
+  function setupResizer(resizerId, leftPaneId, rightPaneId, direction) {
+    var resizer = document.getElementById(resizerId);
+    var leftPane = document.getElementById(leftPaneId);
+    var rightPane = document.getElementById(rightPaneId);
+    if (!resizer) return;
+    if (direction === 'left' && !leftPane) return;
+    if (direction === 'right' && !rightPane) return;
+
+    var startX, startLeftW, startRightW;
+
+    resizer.addEventListener('mousedown', function(e) {
+      e.preventDefault();
+      startX = e.clientX;
+      if (leftPane) startLeftW = leftPane.getBoundingClientRect().width;
+      if (rightPane) startRightW = rightPane.getBoundingClientRect().width;
+      resizer.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+
+      function onMouseMove(e2) {
+        var dx = e2.clientX - startX;
+        if (direction === 'left') {
+          var newW = Math.max(150, startLeftW + dx);
+          leftPane.style.width = newW + 'px';
+        } else if (direction === 'right') {
+          var newW2 = Math.max(150, startRightW - dx);
+          rightPane.style.width = newW2 + 'px';
+        }
+      }
+
+      function onMouseUp() {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        resizer.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        // Re-render with new container width
+        scheduleRefresh();
+      }
+
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    });
+  }
+
+  setupResizer('resizer-left', 'editor-pane', null, 'left');
+  setupResizer('resizer-right', null, 'props-pane', 'right');
+
+  // ── Initial render ───────────────────────────────────────────────────────
+  scheduleRefresh();
+}
+
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', init);
+
+// ── Export hook for tests ──────────────────────────────────────────────────
+if (typeof __exportForTest === 'function') {
+  __exportForTest({
+    parseGantt: parseGantt,
+    updateTaskDates: updateTaskDates,
+    updateTaskField: updateTaskField,
+    addTask: addTask,
+    deleteTask: deleteTask,
+    daysBetween: window.MA.dateUtils.daysBetween,
+    addDays: window.MA.dateUtils.addDays,
+  });
+}
