@@ -586,42 +586,6 @@ function dateToPx(dateStr) {
   return calibration.originX + window.MA.dateUtils.daysBetween(calibration.baseDate, dateStr) * calibration.pxPerDay;
 }
 
-// ── Selection Functions ───────────────────────────────────────────────────
-function isSelected(id) {
-  return sel.some(function(s) { return s.id === id; });
-}
-
-function selectItem(type, id, multi) {
-  if (multi) {
-    var found = false;
-    for (var i = 0; i < sel.length; i++) {
-      if (sel[i].id === id) {
-        sel.splice(i, 1);
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      sel.push({ type: type, id: id });
-    }
-  } else {
-    // Toggle: if already the only selection, deselect
-    if (sel.length === 1 && sel[0].id === id) {
-      sel = [];
-    } else {
-      sel = [{ type: type, id: id }];
-    }
-  }
-  renderProps();
-  rebuildOverlay();
-}
-
-function clearSelection() {
-  sel = [];
-  renderProps();
-  rebuildOverlay();
-}
-
 function rebuildOverlay() {
   if (!currentModule || !overlayEl) return;
   var svgEl = previewSvgEl ? previewSvgEl.querySelector('svg') : null;
@@ -635,7 +599,7 @@ function bindPropInput(elId, lineNum, field) {
   var el = document.getElementById(elId);
   if (!el) return;
   el.addEventListener('change', function() {
-    pushHistory();
+    window.MA.history.pushHistory();
     mmdText = updateTaskField(mmdText, lineNum, field, el.value);
     suppressSync = true;
     editorEl.value = mmdText;
@@ -650,7 +614,7 @@ function bindPropDate(startId, endId, lineNum) {
   var endEl = document.getElementById(endId);
   if (startEl) {
     startEl.addEventListener('change', function() {
-      pushHistory();
+      window.MA.history.pushHistory();
       mmdText = updateTaskDates(mmdText, lineNum, startEl.value, null);
       suppressSync = true;
       editorEl.value = mmdText;
@@ -661,7 +625,7 @@ function bindPropDate(startId, endId, lineNum) {
   }
   if (endEl) {
     endEl.addEventListener('change', function() {
-      pushHistory();
+      window.MA.history.pushHistory();
       mmdText = updateTaskDates(mmdText, lineNum, null, endEl.value);
       suppressSync = true;
       editorEl.value = mmdText;
@@ -680,9 +644,6 @@ var mmdText = '';
 var parsed = { title: '', dateFormat: 'YYYY-MM-DD', axisFormat: '', sections: [], tasks: [] };
 var sel = [];
 var zoom = 1.0;
-var undoStack = [];
-var future = [];
-var MAX_HISTORY = 80;
 var suppressSync = false;
 var debounceTimer = null;
 var DRAG_RENDER_INTERVAL = 100; // ms between mermaid re-renders during drag
@@ -729,7 +690,7 @@ modules.gantt = {
       var task = parsedData.tasks[i];
       var br = i < barRects.length ? barRects[i] : null;
       if (!br) continue; // skip tasks we couldn't match to SVG rects
-      var selected = isSelected(task.id);
+      var selected = window.MA.selection.isSelected(task.id);
 
       // If selected: add green dashed highlight rect
       if (selected) {
@@ -907,9 +868,9 @@ modules.gantt = {
           var start = document.getElementById('prop-add-start').value || '2026-04-01';
           var end = document.getElementById('prop-add-end').value || '2026-04-15';
           var secIdx = parseInt(document.getElementById('prop-add-section').value, 10);
-          pushHistory();
+          window.MA.history.pushHistory();
           mmdText = addTask(mmdText, secIdx, label, id, start, end);
-          sel = [{ type: 'task', id: id }]; // 追加したタスクを自動選択
+          window.MA.selection.setSelected([{ type: 'task', id: id }]); // 追加したタスクを自動選択
           suppressSync = true;
           editorEl.value = mmdText;
           suppressSync = false;
@@ -925,7 +886,7 @@ modules.gantt = {
         addSecBtn.addEventListener('click', function() {
           var name = document.getElementById('prop-add-sec-name').value.trim();
           if (!name) return;
-          pushHistory();
+          window.MA.history.pushHistory();
           mmdText = addSection(mmdText, name);
           suppressSync = true;
           editorEl.value = mmdText;
@@ -943,12 +904,12 @@ modules.gantt = {
             var secName = btn.getAttribute('data-section-name');
             var secLine = parseInt(btn.getAttribute('data-section-line'), 10);
             if (!confirm('セクション「' + secName + '」と含まれるタスクを削除しますか？')) return;
-            pushHistory();
+            window.MA.history.pushHistory();
             mmdText = deleteSection(mmdText, secLine);
             suppressSync = true;
             editorEl.value = mmdText;
             suppressSync = false;
-            sel = [];
+            window.MA.selection.setSelected([]);
             syncLineNumbers();
             scheduleRefresh();
           });
@@ -960,7 +921,7 @@ modules.gantt = {
         var el = document.getElementById(elId);
         if (el) {
           el.addEventListener('change', function() {
-            pushHistory();
+            window.MA.history.pushHistory();
             mmdText = updateGlobalSetting(mmdText, key, el.value);
             suppressSync = true;
             editorEl.value = mmdText;
@@ -986,7 +947,7 @@ modules.gantt = {
             return; // don't update text yet — wait for custom input change
           }
           if (afCustom) afCustom.style.display = 'none';
-          pushHistory();
+          window.MA.history.pushHistory();
           mmdText = updateGlobalSetting(mmdText, 'axisFormat', v);
           suppressSync = true;
           editorEl.value = mmdText;
@@ -997,7 +958,7 @@ modules.gantt = {
       }
       if (afCustom) {
         afCustom.addEventListener('change', function() {
-          pushHistory();
+          window.MA.history.pushHistory();
           mmdText = updateGlobalSetting(mmdText, 'axisFormat', afCustom.value);
           suppressSync = true;
           editorEl.value = mmdText;
@@ -1089,7 +1050,7 @@ modules.gantt = {
         moveUpBtn.addEventListener('click', function() {
           var newText = moveTaskWithinSection(mmdText, task.line, -1);
           if (newText === mmdText) return; // no-op (boundary)
-          pushHistory();
+          window.MA.history.pushHistory();
           mmdText = newText;
           suppressSync = true;
           editorEl.value = mmdText;
@@ -1103,7 +1064,7 @@ modules.gantt = {
         moveDownBtn.addEventListener('click', function() {
           var newText = moveTaskWithinSection(mmdText, task.line, 1);
           if (newText === mmdText) return;
-          pushHistory();
+          window.MA.history.pushHistory();
           mmdText = newText;
           suppressSync = true;
           editorEl.value = mmdText;
@@ -1120,7 +1081,7 @@ modules.gantt = {
           if (isNaN(targetIdx)) return;
           var newText = moveTaskToSection(mmdText, task.line, targetIdx);
           if (newText === mmdText) return; // no-op
-          pushHistory();
+          window.MA.history.pushHistory();
           mmdText = newText;
           suppressSync = true;
           editorEl.value = mmdText;
@@ -1135,7 +1096,7 @@ modules.gantt = {
       for (var sbi = 0; sbi < statusBtnEls.length; sbi++) {
         (function(btn) {
           btn.addEventListener('click', function() {
-            pushHistory();
+            window.MA.history.pushHistory();
             mmdText = updateTaskField(mmdText, task.line, 'status', btn.getAttribute('data-status'));
             suppressSync = true;
             editorEl.value = mmdText;
@@ -1150,12 +1111,12 @@ modules.gantt = {
       var delBtn = document.getElementById('prop-delete-btn');
       if (delBtn) {
         delBtn.addEventListener('click', function() {
-          pushHistory();
+          window.MA.history.pushHistory();
           mmdText = deleteTask(mmdText, task.line);
           suppressSync = true;
           editorEl.value = mmdText;
           suppressSync = false;
-          sel = [];
+          window.MA.selection.setSelected([]);
           syncLineNumbers();
           scheduleRefresh();
         });
@@ -1202,7 +1163,7 @@ modules.gantt = {
       for (var bbi = 0; bbi < batchBtnEls.length; bbi++) {
         (function(btn) {
           btn.addEventListener('click', function() {
-            pushHistory();
+            window.MA.history.pushHistory();
             var statusVal = btn.getAttribute('data-status');
             for (var bti = 0; bti < selectedTasks.length; bti++) {
               mmdText = updateTaskField(mmdText, selectedTasks[bti].line, 'status', statusVal);
@@ -1222,7 +1183,7 @@ modules.gantt = {
         shiftBtn.addEventListener('click', function() {
           var daysVal = parseInt(document.getElementById('batch-shift-days').value, 10);
           if (isNaN(daysVal) || daysVal === 0) return;
-          pushHistory();
+          window.MA.history.pushHistory();
           for (var sti = 0; sti < selectedTasks.length; sti++) {
             var st = selectedTasks[sti];
             var newStart = st.startDate && DATE_RE.test(st.startDate) ? window.MA.dateUtils.addDays(st.startDate, daysVal) : null;
@@ -1243,7 +1204,7 @@ modules.gantt = {
       var batchDelBtn = document.getElementById('batch-delete-btn');
       if (batchDelBtn) {
         batchDelBtn.addEventListener('click', function() {
-          pushHistory();
+          window.MA.history.pushHistory();
           // Sort by line number descending so deletion doesn't shift lines
           var sorted = selectedTasks.slice().sort(function(a, b) { return b.line - a.line; });
           for (var di = 0; di < sorted.length; di++) {
@@ -1252,7 +1213,7 @@ modules.gantt = {
           suppressSync = true;
           editorEl.value = mmdText;
           suppressSync = false;
-          sel = [];
+          window.MA.selection.setSelected([]);
           syncLineNumbers();
           scheduleRefresh();
         });
@@ -1307,7 +1268,7 @@ modules.gantt = {
       var secNameEl = document.getElementById('prop-sec-name');
       if (secNameEl) {
         secNameEl.addEventListener('change', function() {
-          pushHistory();
+          window.MA.history.pushHistory();
           var lines = mmdText.split('\n');
           var idx = section.line - 1;
           if (idx >= 0 && idx < lines.length) {
@@ -1317,7 +1278,7 @@ modules.gantt = {
             suppressSync = true;
             editorEl.value = mmdText;
             suppressSync = false;
-            sel = [{ type: 'section', id: secNameEl.value }];
+            window.MA.selection.setSelected([{ type: 'section', id: secNameEl.value }]);
             syncLineNumbers();
             scheduleRefresh();
           }
@@ -1328,12 +1289,12 @@ modules.gantt = {
       var secDelBtn = document.getElementById('prop-sec-delete-btn');
       if (secDelBtn) {
         secDelBtn.addEventListener('click', function() {
-          pushHistory();
+          window.MA.history.pushHistory();
           mmdText = deleteSection(mmdText, section.line);
           suppressSync = true;
           editorEl.value = mmdText;
           suppressSync = false;
-          sel = [];
+          window.MA.selection.setSelected([]);
           syncLineNumbers();
           scheduleRefresh();
         });
@@ -1363,45 +1324,6 @@ function syncLineNumbers() {
   lineNumEl.textContent = nums.join('\n');
   // Sync scroll position
   lineNumEl.scrollTop = editorEl.scrollTop;
-}
-
-// ── History (Undo / Redo) ──────────────────────────────────────────────────
-function pushHistory() {
-  undoStack.push(mmdText);
-  if (undoStack.length > MAX_HISTORY) undoStack.shift();
-  future = [];
-  updateHistoryButtons();
-}
-
-function undo() {
-  if (undoStack.length === 0) return;
-  future.push(mmdText);
-  mmdText = undoStack.pop();
-  suppressSync = true;
-  editorEl.value = mmdText;
-  suppressSync = false;
-  syncLineNumbers();
-  scheduleRefresh();
-  updateHistoryButtons();
-}
-
-function redo() {
-  if (future.length === 0) return;
-  undoStack.push(mmdText);
-  mmdText = future.pop();
-  suppressSync = true;
-  editorEl.value = mmdText;
-  suppressSync = false;
-  syncLineNumbers();
-  scheduleRefresh();
-  updateHistoryButtons();
-}
-
-function updateHistoryButtons() {
-  var btnUndo = document.getElementById('btn-undo');
-  var btnRedo = document.getElementById('btn-redo');
-  if (btnUndo) btnUndo.disabled = undoStack.length === 0;
-  if (btnRedo) btnRedo.disabled = future.length === 0;
 }
 
 // ── Module Detection ───────────────────────────────────────────────────────
@@ -1670,13 +1592,46 @@ function init() {
 
   editorEl.value = mmdText;
   syncLineNumbers();
-  updateHistoryButtons();
   setZoom(1.0);
+
+  // History initialization
+  window.MA.history.init({
+    getMmdText: function() { return mmdText; },
+    setMmdText: function(t) {
+      mmdText = t;
+      suppressSync = true;
+      editorEl.value = mmdText;
+      suppressSync = false;
+      syncLineNumbers();
+      scheduleRefresh();
+    },
+    onUpdate: function() {
+      var btnUndo = document.getElementById('btn-undo');
+      var btnRedo = document.getElementById('btn-redo');
+      if (btnUndo) btnUndo.disabled = !window.MA.history.canUndo();
+      if (btnRedo) btnRedo.disabled = !window.MA.history.canRedo();
+    }
+  });
+
+  // Selection initialization
+  window.MA.selection.init(function() {
+    sel = window.MA.selection.getSelected();
+    renderProps();
+    rebuildOverlay();
+  });
+
+  // Initialize history button states
+  (function() {
+    var btnUndo = document.getElementById('btn-undo');
+    var btnRedo = document.getElementById('btn-redo');
+    if (btnUndo) btnUndo.disabled = !window.MA.history.canUndo();
+    if (btnRedo) btnRedo.disabled = !window.MA.history.canRedo();
+  })();
 
   // ── Editor events ────────────────────────────────────────────────────────
   editorEl.addEventListener('input', function() {
     if (suppressSync) return;
-    pushHistory();
+    window.MA.history.pushHistory();
     mmdText = editorEl.value;
     scheduleRefresh();
   });
@@ -1688,8 +1643,8 @@ function init() {
   // ── Toolbar buttons ──────────────────────────────────────────────────────
   document.getElementById('btn-open').addEventListener('click', openFile);
   document.getElementById('btn-save').addEventListener('click', saveFile);
-  document.getElementById('btn-undo').addEventListener('click', undo);
-  document.getElementById('btn-redo').addEventListener('click', redo);
+  document.getElementById('btn-undo').addEventListener('click', function() { window.MA.history.undo(); });
+  document.getElementById('btn-redo').addEventListener('click', function() { window.MA.history.redo(); });
 
   document.getElementById('btn-zoom-in').addEventListener('click', function() {
     setZoom(zoom + 0.1);
@@ -1707,7 +1662,7 @@ function init() {
     if (!file) return;
     var reader = new FileReader();
     reader.onload = function(ev) {
-      pushHistory();
+      window.MA.history.pushHistory();
       mmdText = ev.target.result;
       suppressSync = true;
       editorEl.value = mmdText;
@@ -1778,7 +1733,7 @@ function init() {
 
     // Click on empty overlay area (no task): clear selection
     if (!taskId && !e.shiftKey) {
-      clearSelection();
+      window.MA.selection.clearSelection();
       return;
     }
 
@@ -1786,7 +1741,7 @@ function init() {
 
     // Select the task
     if (!handle) {
-      selectItem('task', taskId, e.shiftKey);
+      window.MA.selection.selectItem('task', taskId, e.shiftKey);
     }
 
     // Initiate drag if calibration is available
@@ -1842,7 +1797,7 @@ function init() {
   // Click on preview-container background: clear selection
   document.getElementById('preview-container').addEventListener('mousedown', function(e) {
     if (e.target === this || e.target === previewSvgEl) {
-      clearSelection();
+      window.MA.selection.clearSelection();
     }
   });
 
@@ -1867,7 +1822,7 @@ function init() {
 
       // Push history only on first actual move
       if (!dragState.historyPushed) {
-        pushHistory();
+        window.MA.history.pushHistory();
         dragState.historyPushed = true;
       }
 
@@ -1990,17 +1945,17 @@ function init() {
 
     if (e.ctrlKey && e.key === 'z') {
       if (inEditor) return;
-      e.preventDefault(); undo();
+      e.preventDefault(); window.MA.history.undo();
     } else if (e.ctrlKey && e.key === 'y') {
       if (inEditor) return;
-      e.preventDefault(); redo();
+      e.preventDefault(); window.MA.history.redo();
     } else if (e.ctrlKey && e.key === 's') {
       e.preventDefault(); saveFile();
     } else if (e.ctrlKey && e.key === 'o') {
       e.preventDefault(); openFile();
     } else if (e.key === 'Delete' && !inInput && !inEditor) {
       if (sel.length === 0) return;
-      pushHistory();
+      window.MA.history.pushHistory();
       var lines = sel.map(function(s) {
         var t = parsed.tasks.find(function(tk) { return tk.id === s.id; });
         return t ? t.line : -1;
@@ -2009,19 +1964,14 @@ function init() {
       suppressSync = true;
       editorEl.value = mmdText;
       suppressSync = false;
-      sel = [];
+      window.MA.selection.setSelected([]);
       syncLineNumbers();
       scheduleRefresh();
     } else if (e.key === 'Escape') {
-      clearSelection();
+      window.MA.selection.clearSelection();
     } else if (e.ctrlKey && e.key === 'a' && !inEditor && !inInput) {
       e.preventDefault();
-      sel = parsed.tasks.map(function(t) { return { type: 'task', id: t.id }; });
-      renderProps();
-      if (currentModule) {
-        var svgEl = previewSvgEl.querySelector('svg');
-        if (svgEl) currentModule.buildOverlay(svgEl, parsed);
-      }
+      window.MA.selection.setSelected(parsed.tasks.map(function(t) { return { type: 'task', id: t.id }; }));
     } else if (e.ctrlKey && e.shiftKey && e.key === 'C') {
       e.preventDefault(); exportClipboard();
     } else if (e.ctrlKey && e.key === 'c' && !inEditor && !inInput && sel.length > 0) {
@@ -2031,7 +1981,7 @@ function init() {
       }).filter(Boolean);
     } else if (e.ctrlKey && e.key === 'v' && !inEditor && !inInput && clipboard && clipboard.length > 0) {
       e.preventDefault();
-      pushHistory();
+      window.MA.history.pushHistory();
       clipboard.forEach(function(t) {
         var newId = 't' + (++addCounter);
         var newStart = t.startDate ? window.MA.dateUtils.addDays(t.startDate, 7) : null;
