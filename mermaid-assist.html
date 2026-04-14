@@ -2191,7 +2191,7 @@ function init() {
       e.preventDefault();
       pushHistory();
       clipboard.forEach(function(t) {
-        var newId = '__new_' + (++addCounter);
+        var newId = 't' + (++addCounter);
         var newStart = t.startDate ? addDays(t.startDate, 7) : null;
         var newEnd = t.endDate && !isDuration(t.endDate) ? addDays(t.endDate, 7) : t.endDate;
         mmdText = addTask(mmdText, t.sectionIndex, t.label, newId, newStart, newEnd);

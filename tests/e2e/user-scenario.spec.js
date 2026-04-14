@@ -372,7 +372,7 @@ test.describe('シナリオ6: スケジュール再編成', () => {
     const after = await editorText(page);
     // 元のa1がある
     expect(after).toContain(':a1,');
-    // コピーされた新タスク（__new_ prefix）がある
+    // コピーされた新タスク（t prefix）がある
     expect(after).toContain('要件分析');
     // テキスト行数が増えている
     expect(after.split('\n').length).toBeGreaterThan(before.split('\n').length);
