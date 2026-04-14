@@ -1254,11 +1254,13 @@ modules.gantt = {
           var secIdx = parseInt(document.getElementById('prop-add-section').value, 10);
           pushHistory();
           mmdText = addTask(mmdText, secIdx, label, id, start, end);
+          sel = [{ type: 'task', id: id }]; // 追加したタスクを自動選択
           suppressSync = true;
           editorEl.value = mmdText;
           suppressSync = false;
           syncLineNumbers();
           scheduleRefresh();
+          // renderPropsは scheduleRefresh → refresh → renderProps で自動的に呼ばれるので、追加呼び出しは不要
         });
       }
 
@@ -1321,6 +1323,7 @@ modules.gantt = {
       }).join('');
 
       propsEl.innerHTML =
+        '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);font-weight:bold;color:var(--text-primary);font-size:13px;">' + escHtml(task.label) + '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label>' +
           '<input id="prop-label" type="text" value="' + escHtml(task.label) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
