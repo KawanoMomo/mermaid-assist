@@ -2036,6 +2036,12 @@ function init() {
                 origBarX: br ? br.x : 0,
                 origBarW: br ? br.width : 0,
               };
+              // Visual feedback: highlight dragged bar
+              var dragBarEl = overlayEl.querySelector('.overlay-bar[data-task-id="' + taskId + '"]');
+              if (dragBarEl) {
+                dragBarEl.setAttribute('fill', 'rgba(124, 140, 248, 0.3)');
+                dragBarEl.setAttribute('data-dragging', 'true');
+              }
             }
           } catch (ex) { /* can't get CTM */ }
         }
@@ -2176,6 +2182,14 @@ function init() {
       dragRenderTimer = null;
       var tooltipEl = document.getElementById('drag-tooltip');
       if (tooltipEl) tooltipEl.style.display = 'none';
+      // Clear drag visual feedback on any dragging bars
+      if (overlayEl) {
+        var draggingBars = overlayEl.querySelectorAll('[data-dragging="true"]');
+        for (var dbi = 0; dbi < draggingBars.length; dbi++) {
+          draggingBars[dbi].setAttribute('fill', 'transparent');
+          draggingBars[dbi].removeAttribute('data-dragging');
+        }
+      }
       // Final full re-render
       refresh();
     }
