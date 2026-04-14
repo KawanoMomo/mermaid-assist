@@ -435,6 +435,12 @@ html, body {
 
 </div><!-- /#app -->
 
+  <!-- Drag tooltip -->
+  <div id="drag-tooltip" style="display:none; position:fixed; pointer-events:none; z-index:1000;
+    background:var(--bg-secondary); border:1px solid var(--accent); color:var(--text-primary);
+    font-family:var(--font-mono); font-size:11px; padding:4px 8px; border-radius:4px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.4); white-space:nowrap;"></div>
+
 <!-- Hidden file input -->
 <input type="file" id="file-input" accept=".mmd,.mermaid,.txt" style="display:none">
 
@@ -2125,6 +2131,30 @@ function init() {
         }
       }
 
+      // Show drag tooltip near cursor
+      var tooltipEl = document.getElementById('drag-tooltip');
+      if (tooltipEl) {
+        var currentParsed = parseGantt(mmdText);
+        var dragTask = null;
+        for (var dpi = 0; dpi < currentParsed.tasks.length; dpi++) {
+          if (currentParsed.tasks[dpi].id === dragState.taskId) { dragTask = currentParsed.tasks[dpi]; break; }
+        }
+        if (dragTask) {
+          var tipText = dragTask.startDate || '';
+          if (dragTask.endDate && DATE_RE.test(dragTask.endDate)) {
+            tipText += ' → ' + dragTask.endDate;
+            if (dragTask.startDate && DATE_RE.test(dragTask.startDate)) {
+              var dur = daysBetween(dragTask.startDate, dragTask.endDate);
+              tipText += ' (' + dur + '日)';
+            }
+          }
+          tooltipEl.textContent = tipText;
+          tooltipEl.style.display = 'block';
+          tooltipEl.style.left = (e.clientX + 16) + 'px';
+          tooltipEl.style.top = (e.clientY - 30) + 'px';
+        }
+      }
+
       // Lightweight refresh: parse + status only (instant)
       refresh(true);
 
@@ -2144,6 +2174,8 @@ function init() {
       dragState = null;
       clearTimeout(dragRenderTimer);
       dragRenderTimer = null;
+      var tooltipEl = document.getElementById('drag-tooltip');
+      if (tooltipEl) tooltipEl.style.display = 'none';
       // Final full re-render
       refresh();
     }
