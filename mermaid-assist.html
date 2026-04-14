@@ -669,6 +669,13 @@ function updateTaskField(text, lineNum, field, value) {
     parsed.status = value || null;
   } else if (field === 'id') {
     parsed.id = value;
+  } else if (field === 'after') {
+    if (value && value.trim()) {
+      parsed.after = value.trim();
+      parsed.startDate = null; // after指定時はstartDateをクリア
+    } else {
+      parsed.after = null;
+    }
   }
 
   var meta = rebuildTaskMeta(parsed.status, parsed.id, parsed.startDate, parsed.endDate, parsed.after);
@@ -1334,15 +1341,16 @@ modules.gantt = {
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ステータス</label>' +
           '<div style="display:flex;gap:2px;">' + statusBtns + '</div>' +
         '</div>' +
-        (task.after ? '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">after依存 (読み取り専用)</label>' +
-          '<input type="text" value="' + escHtml(task.after) + '" readonly style="width:100%;background:var(--bg-primary);border:1px solid var(--border);color:var(--text-secondary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' : '') +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">after依存</label>' +
+          '<input id="prop-after" type="text" value="' + escHtml(task.after || '') + '" placeholder="タスクID (例: a1)" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
         '<button id="prop-delete-btn" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">タスク削除</button>';
 
       // Bind handlers
       bindPropInput('prop-label', task.line, 'label');
       bindPropInput('prop-id', task.line, 'id');
+      bindPropInput('prop-after', task.line, 'after');
       bindPropDate('prop-start', 'prop-end', task.line);
 
       // Status buttons
