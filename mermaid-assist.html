@@ -1283,6 +1283,30 @@ modules.gantt = {
         sectionOptions = '<option value="-1">（セクションなし）</option>';
       }
 
+      var sectionListHtml = '';
+      if (parsedData && parsedData.sections && parsedData.sections.length > 0) {
+        sectionListHtml += '<div id="prop-section-list" style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:12px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">セクション一覧</label>';
+        for (var sli = 0; sli < parsedData.sections.length; sli++) {
+          var sec = parsedData.sections[sli];
+          var taskCount = 0;
+          for (var sti = 0; sti < parsedData.tasks.length; sti++) {
+            if (parsedData.tasks[sti].sectionIndex === sli) taskCount++;
+          }
+          sectionListHtml +=
+            '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;">' +
+              '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escHtml(sec.name) + '">' + escHtml(sec.name) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + taskCount + ')</span></div>' +
+              '<button class="prop-section-delete" data-section-name="' + escHtml(sec.name) + '" data-section-line="' + sec.line + '" title="セクションごと削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
+            '</div>';
+        }
+        sectionListHtml += '</div>';
+      } else {
+        sectionListHtml = '<div id="prop-section-list" style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:12px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:4px;">セクション一覧</label>' +
+          '<div style="font-size:11px;color:var(--text-secondary);">（セクションなし）</div>' +
+        '</div>';
+      }
+
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">タスクを選択するか、新規追加</div>' +
         '<div style="margin-bottom:8px;">' +
@@ -1313,6 +1337,7 @@ modules.gantt = {
             '<button id="prop-add-sec-btn" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:12px;">+</button>' +
           '</div>' +
         '</div>' +
+        sectionListHtml +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:6px;font-weight:bold;">グローバル設定</label>' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">title</label>' +
@@ -1359,6 +1384,26 @@ modules.gantt = {
           syncLineNumbers();
           scheduleRefresh();
         });
+      }
+
+      // Bind section delete buttons
+      var sectionDeleteBtns = propsEl.querySelectorAll('.prop-section-delete');
+      for (var sdbi = 0; sdbi < sectionDeleteBtns.length; sdbi++) {
+        (function(btn) {
+          btn.addEventListener('click', function() {
+            var secName = btn.getAttribute('data-section-name');
+            var secLine = parseInt(btn.getAttribute('data-section-line'), 10);
+            if (!confirm('セクション「' + secName + '」と含まれるタスクを削除しますか？')) return;
+            pushHistory();
+            mmdText = deleteSection(mmdText, secLine);
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            sel = [];
+            syncLineNumbers();
+            scheduleRefresh();
+          });
+        })(sectionDeleteBtns[sdbi]);
       }
 
       // Bind global settings
