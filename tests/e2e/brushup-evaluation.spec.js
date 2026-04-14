@@ -235,3 +235,160 @@ test.describe('E10: 空ガントのガイド', () => {
     expect(hasGuide).toBe(true);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+//  E11: タスク上下移動（同一セクション内）
+// ─────────────────────────────────────────────────────────────────────────
+test.describe('E11: タスク上下移動', () => {
+  test('↑ボタンで同一セクション内の前のタスクと順序が入れ替わる', async ({ page }) => {
+    await page.goto(HTML_URL);
+    await waitForRender(page);
+
+    // a2 (要件定義セクション内、a1の下) を選択
+    await clickBar(page, 'a2');
+    await page.waitForTimeout(200);
+
+    // ↑ボタンをクリック
+    const upBtn = page.locator('#prop-move-up');
+    await expect(upBtn).toBeVisible();
+    await upBtn.click();
+    await page.waitForTimeout(500);
+
+    // テキスト内で a2 の行が a1 より前にある
+    const text = await editorText(page);
+    const lines = text.split('\n');
+    let a1Line = -1, a2Line = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (a1Line === -1 && /:a1,/.test(lines[i])) a1Line = i;
+      if (a2Line === -1 && /:a2,/.test(lines[i])) a2Line = i;
+    }
+    expect(a2Line).toBeGreaterThan(-1);
+    expect(a1Line).toBeGreaterThan(-1);
+    expect(a2Line).toBeLessThan(a1Line);
+  });
+
+  test('↓ボタンで同一セクション内の次のタスクと順序が入れ替わる', async ({ page }) => {
+    await page.goto(HTML_URL);
+    await waitForRender(page);
+
+    // a1 (要件定義セクション内、最初) を選択
+    await clickBar(page, 'a1');
+    await page.waitForTimeout(200);
+
+    // ↓ボタン
+    const downBtn = page.locator('#prop-move-down');
+    await expect(downBtn).toBeVisible();
+    await downBtn.click();
+    await page.waitForTimeout(500);
+
+    // テキスト内で a1 の行が a2 より後ろにある
+    const text = await editorText(page);
+    const lines = text.split('\n');
+    let a1Line = -1, a2Line = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (a1Line === -1 && /:a1,/.test(lines[i])) a1Line = i;
+      if (a2Line === -1 && /:a2,/.test(lines[i])) a2Line = i;
+    }
+    expect(a1Line).toBeGreaterThan(a2Line);
+  });
+
+  test('セクション境界を越えない（最後のタスクの↓は無効）', async ({ page }) => {
+    await page.goto(HTML_URL);
+    await waitForRender(page);
+
+    // a2 (要件定義セクションの最後のタスク) を選択
+    await clickBar(page, 'a2');
+    await page.waitForTimeout(200);
+
+    const before = await editorText(page);
+
+    // ↓を押す
+    await page.locator('#prop-move-down').click();
+    await page.waitForTimeout(500);
+
+    // テキストは変わらない（a2はセクション最後なので動かない）
+    const after = await editorText(page);
+    expect(after).toBe(before);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+//  E12: タスクのセクション移動
+// ─────────────────────────────────────────────────────────────────────────
+test.describe('E12: タスクのセクション移動', () => {
+  test('プロパティパネルのセクションドロップダウンで別セクションに移動できる', async ({ page }) => {
+    await page.goto(HTML_URL);
+    await waitForRender(page);
+
+    // a1 (要件定義) を選択
+    await clickBar(page, 'a1');
+    await page.waitForTimeout(200);
+
+    // セクション移動ドロップダウン
+    const sectionSelect = page.locator('#prop-move-section');
+    await expect(sectionSelect).toBeVisible();
+
+    // 「設計」セクションのインデックスを取得して選択
+    await sectionSelect.selectOption({ label: '設計' });
+    await page.waitForTimeout(500);
+
+    // a1 が「設計」セクションの中（b1, b2 周辺）に移動している
+    const text = await editorText(page);
+    const lines = text.split('\n');
+    let designLine = -1, reqLine = -1, a1Line = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (reqLine === -1 && /section\s+要件定義/.test(lines[i])) reqLine = i;
+      if (designLine === -1 && /section\s+設計/.test(lines[i])) designLine = i;
+      if (a1Line === -1 && /:a1,/.test(lines[i])) a1Line = i;
+    }
+    // a1 は設計セクション以降にある
+    expect(a1Line).toBeGreaterThan(designLine);
+    // a1 は要件定義セクションには無い（要件定義の範囲外）
+    expect(a1Line).toBeGreaterThan(designLine);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+//  E13: セクション一覧と削除UI
+// ─────────────────────────────────────────────────────────────────────────
+test.describe('E13: セクション一覧と削除UI', () => {
+  test('未選択パネルにセクション一覧が表示される', async ({ page }) => {
+    await page.goto(HTML_URL);
+    await waitForRender(page);
+    await escapeSelection(page);
+
+    // セクション一覧コンテナ
+    const sectionList = page.locator('#prop-section-list');
+    await expect(sectionList).toBeVisible();
+
+    // デフォルト2セクション (要件定義, 設計) が表示
+    const text = await sectionList.textContent();
+    expect(text).toContain('要件定義');
+    expect(text).toContain('設計');
+  });
+
+  test('セクション一覧の削除ボタンでセクションとそのタスクが削除される', async ({ page }) => {
+    await page.goto(HTML_URL);
+    await waitForRender(page);
+    await escapeSelection(page);
+
+    // 「設計」セクションの削除ボタンをクリック
+    // (data-section-line属性で識別する想定)
+    const deleteBtn = page.locator('.prop-section-delete[data-section-name="設計"]');
+    await expect(deleteBtn).toBeVisible();
+
+    // confirm dialog はacceptで通過
+    page.on('dialog', dialog => dialog.accept());
+    await deleteBtn.click();
+    await page.waitForTimeout(800);
+
+    const text = await editorText(page);
+    expect(text).not.toContain('section 設計');
+    // 設計セクションのタスク (b1, b2) も削除されている
+    expect(text).not.toContain(':b1,');
+    expect(text).not.toContain(':b2,');
+    // 要件定義は残っている
+    expect(text).toContain('section 要件定義');
+    expect(text).toContain(':a1,');
+  });
+});
