@@ -7,6 +7,7 @@ const projectRoot = path.resolve(__dirname, '..');
 const sourceFiles = [
   'src/core/date-utils.js',
   'src/core/html-utils.js',
+  'src/core/text-updater.js',
   'src/app.js',
 ];
 

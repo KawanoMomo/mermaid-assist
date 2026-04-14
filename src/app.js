@@ -286,11 +286,7 @@ function addTask(text, sectionIndex, label, id, startDate, endDate) {
 
 // deleteTask — removes the line at 1-based lineNum.
 function deleteTask(text, lineNum) {
-  var lines = text.split('\n');
-  var idx = lineNum - 1;
-  if (idx < 0 || idx >= lines.length) return text;
-  lines.splice(idx, 1);
-  return lines.join('\n');
+  return window.MA.textUpdater.deleteLine(text, lineNum);
 }
 
 // moveTaskWithinSection — moves the task at 1-based lineNum up (-1) or down (+1)
@@ -317,13 +313,7 @@ function moveTaskWithinSection(text, lineNum, direction) {
   var swapIdx = idx + direction;
   if (swapIdx < 0 || swapIdx >= siblings.length) return text; // boundary
 
-  var lines = text.split('\n');
-  var aLine = lineNum - 1;            // 0-based
-  var bLine = siblings[swapIdx].line - 1;
-  var tmp = lines[aLine];
-  lines[aLine] = lines[bLine];
-  lines[bLine] = tmp;
-  return lines.join('\n');
+  return window.MA.textUpdater.swapLines(text, lineNum, siblings[swapIdx].line);
 }
 
 // moveTaskToSection — moves the task at 1-based lineNum to the end of the
