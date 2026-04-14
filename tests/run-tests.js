@@ -5,6 +5,8 @@ const path = require('path');
 // ── Load source files for unit tests ──
 const projectRoot = path.resolve(__dirname, '..');
 const sourceFiles = [
+  'src/core/date-utils.js',
+  'src/core/html-utils.js',
   'src/app.js',
 ];
 

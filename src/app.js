@@ -401,9 +401,9 @@ function sanitizeAfterDependencies(text) {
 
     // Check if this task's end date is before the ref's end date
     if (t.endDate && DATE_RE.test(t.endDate)) {
-      if (daysBetween(refEnd, t.endDate) < 1) {
+      if (window.MA.dateUtils.daysBetween(refEnd, t.endDate) < 1) {
         // Push end date to refEnd + 1 day
-        var newEnd = addDays(refEnd, 1);
+        var newEnd = window.MA.dateUtils.addDays(refEnd, 1);
         var parsed = parseTaskLine(lines[t.line - 1]);
         if (parsed) {
           var meta = rebuildTaskMeta(parsed.status, parsed.id, parsed.startDate, newEnd, parsed.after);
@@ -470,18 +470,6 @@ function updateGlobalSetting(text, key, value) {
     }
   }
   return lines.join('\n');
-}
-
-// ── Date Helpers ──────────────────────────────────────────────────────────
-function daysBetween(dateStr1, dateStr2) {
-  var d1 = new Date(dateStr1), d2 = new Date(dateStr2);
-  return Math.round((d2 - d1) / (1000 * 60 * 60 * 24));
-}
-
-function addDays(dateStr, days) {
-  var d = new Date(dateStr);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().substring(0, 10);
 }
 
 // ── Calibration (ADR-010) ─────────────────────────────────────────────────
@@ -574,7 +562,7 @@ function calibrateScale(svgEl, parsedData) {
     for (var cj = ci + 1; cj < tasksWithDates.length && !calibrated; cj++) {
       var t1 = tasksWithDates[ci], t2 = tasksWithDates[cj];
       if (t1.task.startDate === t2.task.startDate) continue;
-      var dDays = daysBetween(t1.task.startDate, t2.task.startDate);
+      var dDays = window.MA.dateUtils.daysBetween(t1.task.startDate, t2.task.startDate);
       if (dDays === 0) continue;
       calibration.pxPerDay = (t2.rect.x - t1.rect.x) / dDays;
       calibration.originX = t1.rect.x;
@@ -587,7 +575,7 @@ function calibrateScale(svgEl, parsedData) {
   if (!calibrated && tasksWithDates.length >= 1) {
     var st = tasksWithDates[0];
     if (st.task.endDate && DATE_RE.test(st.task.endDate)) {
-      var dur = daysBetween(st.task.startDate, st.task.endDate);
+      var dur = window.MA.dateUtils.daysBetween(st.task.startDate, st.task.endDate);
       if (dur > 0) {
         calibration.pxPerDay = st.rect.width / dur;
         calibration.originX = st.rect.x;
@@ -600,12 +588,12 @@ function calibrateScale(svgEl, parsedData) {
 function pxToDate(px) {
   if (calibration.pxPerDay === 0) return null;
   var daysDelta = Math.round((px - calibration.originX) / calibration.pxPerDay);
-  return addDays(calibration.baseDate, daysDelta);
+  return window.MA.dateUtils.addDays(calibration.baseDate, daysDelta);
 }
 
 function dateToPx(dateStr) {
   if (calibration.pxPerDay === 0) return 0;
-  return calibration.originX + daysBetween(calibration.baseDate, dateStr) * calibration.pxPerDay;
+  return calibration.originX + window.MA.dateUtils.daysBetween(calibration.baseDate, dateStr) * calibration.pxPerDay;
 }
 
 // ── Selection Functions ───────────────────────────────────────────────────
@@ -650,11 +638,6 @@ function rebuildOverlay() {
   if (svgEl) {
     currentModule.buildOverlay(svgEl, parsed);
   }
-}
-
-// ── HTML Escape Helper ────────────────────────────────────────────────────
-function escHtml(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ── Property Panel Helpers ────────────────────────────────────────────────
@@ -829,7 +812,7 @@ modules.gantt = {
       var sectionOptions = '';
       if (parsedData && parsedData.sections) {
         for (var si = 0; si < parsedData.sections.length; si++) {
-          sectionOptions += '<option value="' + si + '">' + escHtml(parsedData.sections[si].name) + '</option>';
+          sectionOptions += '<option value="' + si + '">' + window.MA.htmlUtils.escHtml(parsedData.sections[si].name) + '</option>';
         }
       }
       if (!sectionOptions) {
@@ -848,8 +831,8 @@ modules.gantt = {
           }
           sectionListHtml +=
             '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;">' +
-              '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escHtml(sec.name) + '">' + escHtml(sec.name) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + taskCount + ')</span></div>' +
-              '<button class="prop-section-delete" data-section-name="' + escHtml(sec.name) + '" data-section-line="' + sec.line + '" title="セクションごと削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
+              '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + window.MA.htmlUtils.escHtml(sec.name) + '">' + window.MA.htmlUtils.escHtml(sec.name) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + taskCount + ')</span></div>' +
+              '<button class="prop-section-delete" data-section-name="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-line="' + sec.line + '" title="セクションごと削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
             '</div>';
         }
         sectionListHtml += '</div>';
@@ -894,9 +877,9 @@ modules.gantt = {
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:6px;font-weight:bold;">グローバル設定</label>' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">title</label>' +
-          '<input id="prop-global-title" type="text" value="' + escHtml(parsedData.title || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:6px;">' +
+          '<input id="prop-global-title" type="text" value="' + window.MA.htmlUtils.escHtml(parsedData.title || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:6px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">dateFormat</label>' +
-          '<input id="prop-global-dateformat" type="text" value="' + escHtml(parsedData.dateFormat || 'YYYY-MM-DD') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:6px;">' +
+          '<input id="prop-global-dateformat" type="text" value="' + window.MA.htmlUtils.escHtml(parsedData.dateFormat || 'YYYY-MM-DD') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:6px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">axisFormat</label>' +
           (function() {
             var presets = [
@@ -914,13 +897,13 @@ modules.gantt = {
             for (var pi = 0; pi < presets.length; pi++) {
               var sel = (presets[pi].v === current) ? ' selected' : '';
               if (sel) matched = true;
-              opts += '<option value="' + escHtml(presets[pi].v) + '"' + sel + '>' + escHtml(presets[pi].label + '  (' + presets[pi].v + ')') + '</option>';
+              opts += '<option value="' + window.MA.htmlUtils.escHtml(presets[pi].v) + '"' + sel + '>' + window.MA.htmlUtils.escHtml(presets[pi].label + '  (' + presets[pi].v + ')') + '</option>';
             }
             var customSel = matched ? '' : ' selected';
             opts += '<option value="__custom__"' + customSel + '>カスタム…</option>';
             var customDisplay = matched ? 'none' : 'block';
             return '<select id="prop-axisformat-preset" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:4px;">' + opts + '</select>' +
-              '<input id="prop-axisformat-custom" type="text" value="' + escHtml(current) + '" placeholder="%m/%d" style="display:' + customDisplay + ';width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">';
+              '<input id="prop-axisformat-custom" type="text" value="' + window.MA.htmlUtils.escHtml(current) + '" placeholder="%m/%d" style="display:' + customDisplay + ';width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">';
           })() +
         '</div>';
 
@@ -1061,7 +1044,7 @@ modules.gantt = {
       if (parsedData && parsedData.sections) {
         for (var msi = 0; msi < parsedData.sections.length; msi++) {
           var selAttr = (msi === task.sectionIndex) ? ' selected' : '';
-          moveSecOpts += '<option value="' + msi + '"' + selAttr + '>' + escHtml(parsedData.sections[msi].name) + '</option>';
+          moveSecOpts += '<option value="' + msi + '"' + selAttr + '>' + window.MA.htmlUtils.escHtml(parsedData.sections[msi].name) + '</option>';
         }
       }
       if (!moveSecOpts) {
@@ -1070,25 +1053,25 @@ modules.gantt = {
 
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;">' +
-          '<div style="flex:1;font-weight:bold;color:var(--text-primary);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(task.label) + '</div>' +
+          '<div style="flex:1;font-weight:bold;color:var(--text-primary);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + window.MA.htmlUtils.escHtml(task.label) + '</div>' +
           '<button id="prop-move-up" title="同一セクション内で上に移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↑</button>' +
           '<button id="prop-move-down" title="同一セクション内で下に移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↓</button>' +
         '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label>' +
-          '<input id="prop-label" type="text" value="' + escHtml(task.label) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+          '<input id="prop-label" type="text" value="' + window.MA.htmlUtils.escHtml(task.label) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
         '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ID</label>' +
-          '<input id="prop-id" type="text" value="' + escHtml(task.id.indexOf('__auto_') === 0 ? '' : task.id) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+          '<input id="prop-id" type="text" value="' + window.MA.htmlUtils.escHtml(task.id.indexOf('__auto_') === 0 ? '' : task.id) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
         '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
-          '<input id="prop-start" type="date" value="' + escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+          '<input id="prop-start" type="date" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
         '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
-          '<input id="prop-end" type="date" value="' + escHtml(task.endDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+          '<input id="prop-end" type="date" value="' + window.MA.htmlUtils.escHtml(task.endDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
         '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ステータス</label>' +
@@ -1096,7 +1079,7 @@ modules.gantt = {
         '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">after依存</label>' +
-          '<input id="prop-after" type="text" value="' + escHtml(task.after || '') + '" placeholder="タスクID (例: a1)" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+          '<input id="prop-after" type="text" value="' + window.MA.htmlUtils.escHtml(task.after || '') + '" placeholder="タスクID (例: a1)" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
         '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション移動</label>' +
@@ -1252,8 +1235,8 @@ modules.gantt = {
           pushHistory();
           for (var sti = 0; sti < selectedTasks.length; sti++) {
             var st = selectedTasks[sti];
-            var newStart = st.startDate && DATE_RE.test(st.startDate) ? addDays(st.startDate, daysVal) : null;
-            var newEnd = st.endDate && DATE_RE.test(st.endDate) ? addDays(st.endDate, daysVal) : null;
+            var newStart = st.startDate && DATE_RE.test(st.startDate) ? window.MA.dateUtils.addDays(st.startDate, daysVal) : null;
+            var newEnd = st.endDate && DATE_RE.test(st.endDate) ? window.MA.dateUtils.addDays(st.endDate, daysVal) : null;
             if (newStart || newEnd) {
               mmdText = updateTaskDates(mmdText, st.line, newStart, newEnd);
             }
@@ -1316,13 +1299,13 @@ modules.gantt = {
       }
 
       var taskList = secTasks.map(function(t) {
-        return '<div style="padding:2px 4px;font-size:11px;color:var(--text-primary);">' + escHtml(t.label) + '</div>';
+        return '<div style="padding:2px 4px;font-size:11px;color:var(--text-primary);">' + window.MA.htmlUtils.escHtml(t.label) + '</div>';
       }).join('');
 
       propsEl.innerHTML =
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション名</label>' +
-          '<input id="prop-sec-name" type="text" value="' + escHtml(section.name) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+          '<input id="prop-sec-name" type="text" value="' + window.MA.htmlUtils.escHtml(section.name) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
         '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:4px;">タスク一覧 (' + secTasks.length + '件)</label>' +
@@ -1900,24 +1883,24 @@ function init() {
 
       if (dragState.handle === null) {
         // Move: shift both dates equally
-        var newStart = addDays(dragState.origStartDate, daysDelta);
-        var newEnd = dragState.origEndDate && DATE_RE.test(dragState.origEndDate) ? addDays(dragState.origEndDate, daysDelta) : null;
+        var newStart = window.MA.dateUtils.addDays(dragState.origStartDate, daysDelta);
+        var newEnd = dragState.origEndDate && DATE_RE.test(dragState.origEndDate) ? window.MA.dateUtils.addDays(dragState.origEndDate, daysDelta) : null;
         mmdText = updateTaskDates(mmdText, dragState.lineNum, newStart, newEnd);
       } else if (dragState.handle === 'left') {
         // Resize left: shift start date, but don't go past end date
-        var newStart2 = addDays(dragState.origStartDate, daysDelta);
+        var newStart2 = window.MA.dateUtils.addDays(dragState.origStartDate, daysDelta);
         if (dragState.origEndDate && DATE_RE.test(dragState.origEndDate)) {
-          if (daysBetween(newStart2, dragState.origEndDate) < 1) {
-            newStart2 = addDays(dragState.origEndDate, -1); // minimum 1 day
+          if (window.MA.dateUtils.daysBetween(newStart2, dragState.origEndDate) < 1) {
+            newStart2 = window.MA.dateUtils.addDays(dragState.origEndDate, -1); // minimum 1 day
           }
         }
         mmdText = updateTaskDates(mmdText, dragState.lineNum, newStart2, null);
       } else if (dragState.handle === 'right') {
         // Resize right: shift end date, but don't go before start date
         if (dragState.origEndDate && DATE_RE.test(dragState.origEndDate)) {
-          var newEnd2 = addDays(dragState.origEndDate, daysDelta);
-          if (daysBetween(dragState.origStartDate, newEnd2) < 1) {
-            newEnd2 = addDays(dragState.origStartDate, 1); // minimum 1 day
+          var newEnd2 = window.MA.dateUtils.addDays(dragState.origEndDate, daysDelta);
+          if (window.MA.dateUtils.daysBetween(dragState.origStartDate, newEnd2) < 1) {
+            newEnd2 = window.MA.dateUtils.addDays(dragState.origStartDate, 1); // minimum 1 day
           }
           mmdText = updateTaskDates(mmdText, dragState.lineNum, null, newEnd2);
         }
@@ -1964,7 +1947,7 @@ function init() {
           if (dragTask.endDate && DATE_RE.test(dragTask.endDate)) {
             tipText += ' → ' + dragTask.endDate;
             if (dragTask.startDate && DATE_RE.test(dragTask.startDate)) {
-              var dur = daysBetween(dragTask.startDate, dragTask.endDate);
+              var dur = window.MA.dateUtils.daysBetween(dragTask.startDate, dragTask.endDate);
               tipText += ' (' + dur + '日)';
             }
           }
@@ -2061,8 +2044,8 @@ function init() {
       pushHistory();
       clipboard.forEach(function(t) {
         var newId = 't' + (++addCounter);
-        var newStart = t.startDate ? addDays(t.startDate, 7) : null;
-        var newEnd = t.endDate && !isDuration(t.endDate) ? addDays(t.endDate, 7) : t.endDate;
+        var newStart = t.startDate ? window.MA.dateUtils.addDays(t.startDate, 7) : null;
+        var newEnd = t.endDate && !isDuration(t.endDate) ? window.MA.dateUtils.addDays(t.endDate, 7) : t.endDate;
         mmdText = addTask(mmdText, t.sectionIndex, t.label, newId, newStart, newEnd);
       });
       suppressSync = true;
@@ -2138,7 +2121,7 @@ if (typeof __exportForTest === 'function') {
     updateTaskField: updateTaskField,
     addTask: addTask,
     deleteTask: deleteTask,
-    daysBetween: daysBetween,
-    addDays: addDays,
+    daysBetween: window.MA.dateUtils.daysBetween,
+    addDays: window.MA.dateUtils.addDays,
   });
 }
