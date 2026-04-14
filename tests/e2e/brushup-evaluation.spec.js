@@ -392,3 +392,62 @@ test.describe('E13: セクション一覧と削除UI', () => {
     expect(text).toContain(':a1,');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+//  E14: axisFormatプリセットドロップダウン
+// ─────────────────────────────────────────────────────────────────────────
+test.describe('E14: axisFormatプリセット', () => {
+  test('プリセット選択でaxisFormatが更新される', async ({ page }) => {
+    await page.goto(HTML_URL);
+    await waitForRender(page);
+    await escapeSelection(page);
+
+    const presetEl = page.locator('#prop-axisformat-preset');
+    await expect(presetEl).toBeVisible();
+
+    // %Y/%m/%d プリセットを選択
+    await presetEl.selectOption('%Y/%m/%d');
+    await page.waitForTimeout(500);
+
+    expect(await editorText(page)).toContain('axisFormat %Y/%m/%d');
+  });
+
+  test('カスタム選択でテキスト入力欄が現れて編集できる', async ({ page }) => {
+    await page.goto(HTML_URL);
+    await waitForRender(page);
+    await escapeSelection(page);
+
+    await page.locator('#prop-axisformat-preset').selectOption('__custom__');
+    await page.waitForTimeout(200);
+
+    const customEl = page.locator('#prop-axisformat-custom');
+    await expect(customEl).toBeVisible();
+
+    await customEl.fill('%Y年%m月');
+    await customEl.dispatchEvent('change');
+    await page.waitForTimeout(500);
+
+    expect(await editorText(page)).toContain('axisFormat %Y年%m月');
+  });
+
+  test('現在値がプリセットにない場合は自動でカスタム表示', async ({ page }) => {
+    await page.goto(HTML_URL);
+    await waitForRender(page);
+
+    // エディタで非プリセット値に書き換え
+    const original = await editorText(page);
+    const modified = original.replace(/axisFormat\s+%m\/%d/, 'axisFormat %j');
+    await page.locator('#editor').fill(modified);
+    await page.locator('#editor').dispatchEvent('input');
+    await page.waitForTimeout(1500);
+    await escapeSelection(page);
+
+    // ドロップダウンが__custom__を指している
+    const presetVal = await page.locator('#prop-axisformat-preset').inputValue();
+    expect(presetVal).toBe('__custom__');
+
+    // カスタム入力欄の値が%j
+    const customVal = await page.locator('#prop-axisformat-custom').inputValue();
+    expect(customVal).toBe('%j');
+  });
+});

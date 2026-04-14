@@ -416,8 +416,7 @@ test.describe('シナリオ7: チャート設定の変更', () => {
     await waitForRender(page);
     await escapeSelection(page);
 
-    await page.locator('#prop-global-axisformat').fill('%Y/%m/%d');
-    await page.locator('#prop-global-axisformat').dispatchEvent('change');
+    await page.locator('#prop-axisformat-preset').selectOption('%Y/%m/%d');
     await page.waitForTimeout(500);
 
     expect(await editorText(page)).toContain('axisFormat %Y/%m/%d');

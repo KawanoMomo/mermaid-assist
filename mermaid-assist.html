@@ -1345,7 +1345,30 @@ modules.gantt = {
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">dateFormat</label>' +
           '<input id="prop-global-dateformat" type="text" value="' + escHtml(parsedData.dateFormat || 'YYYY-MM-DD') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:6px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">axisFormat</label>' +
-          '<input id="prop-global-axisformat" type="text" value="' + escHtml(parsedData.axisFormat || '') + '" placeholder="%m/%d" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+          (function() {
+            var presets = [
+              { v: '%Y-%m-%d', label: '2026-04-14' },
+              { v: '%Y/%m/%d', label: '2026/04/14' },
+              { v: '%m/%d',    label: '04/14' },
+              { v: '%m月%d日', label: '04月14日' },
+              { v: '%b %d',    label: 'Apr 14' },
+              { v: '%d %b',    label: '14 Apr' },
+              { v: '%a',       label: 'Tue (曜日)' }
+            ];
+            var current = parsedData.axisFormat || '';
+            var matched = false;
+            var opts = '';
+            for (var pi = 0; pi < presets.length; pi++) {
+              var sel = (presets[pi].v === current) ? ' selected' : '';
+              if (sel) matched = true;
+              opts += '<option value="' + escHtml(presets[pi].v) + '"' + sel + '>' + escHtml(presets[pi].label + '  (' + presets[pi].v + ')') + '</option>';
+            }
+            var customSel = matched ? '' : ' selected';
+            opts += '<option value="__custom__"' + customSel + '>カスタム…</option>';
+            var customDisplay = matched ? 'none' : 'block';
+            return '<select id="prop-axisformat-preset" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:4px;">' + opts + '</select>' +
+              '<input id="prop-axisformat-custom" type="text" value="' + escHtml(current) + '" placeholder="%m/%d" style="display:' + customDisplay + ';width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">';
+          })() +
         '</div>';
 
       // Bind add task button
@@ -1423,7 +1446,40 @@ modules.gantt = {
       }
       bindGlobal('prop-global-title', 'title');
       bindGlobal('prop-global-dateformat', 'dateFormat');
-      bindGlobal('prop-global-axisformat', 'axisFormat');
+      // axisFormat: preset dropdown + custom input
+      var afPreset = document.getElementById('prop-axisformat-preset');
+      var afCustom = document.getElementById('prop-axisformat-custom');
+      if (afPreset) {
+        afPreset.addEventListener('change', function() {
+          var v = afPreset.value;
+          if (v === '__custom__') {
+            if (afCustom) {
+              afCustom.style.display = 'block';
+              afCustom.focus();
+            }
+            return; // don't update text yet — wait for custom input change
+          }
+          if (afCustom) afCustom.style.display = 'none';
+          pushHistory();
+          mmdText = updateGlobalSetting(mmdText, 'axisFormat', v);
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+      if (afCustom) {
+        afCustom.addEventListener('change', function() {
+          pushHistory();
+          mmdText = updateGlobalSetting(mmdText, 'axisFormat', afCustom.value);
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
       return;
     }
 
