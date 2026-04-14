@@ -740,6 +740,39 @@ function deleteTask(text, lineNum) {
   return lines.join('\n');
 }
 
+// moveTaskWithinSection — moves the task at 1-based lineNum up (-1) or down (+1)
+// within its current section. Returns unchanged text if the move would cross a
+// section boundary (or hit the file edges).
+function moveTaskWithinSection(text, lineNum, direction) {
+  if (direction !== -1 && direction !== 1) return text;
+  var p = parseGantt(text);
+  var task = null;
+  for (var i = 0; i < p.tasks.length; i++) {
+    if (p.tasks[i].line === lineNum) { task = p.tasks[i]; break; }
+  }
+  if (!task) return text;
+
+  // Tasks in the same section, sorted by line
+  var siblings = p.tasks.filter(function(t) { return t.sectionIndex === task.sectionIndex; });
+  siblings.sort(function(a, b) { return a.line - b.line; });
+  var idx = -1;
+  for (var si = 0; si < siblings.length; si++) {
+    if (siblings[si].line === lineNum) { idx = si; break; }
+  }
+  if (idx === -1) return text;
+
+  var swapIdx = idx + direction;
+  if (swapIdx < 0 || swapIdx >= siblings.length) return text; // boundary
+
+  var lines = text.split('\n');
+  var aLine = lineNum - 1;            // 0-based
+  var bLine = siblings[swapIdx].line - 1;
+  var tmp = lines[aLine];
+  lines[aLine] = lines[bLine];
+  lines[bLine] = tmp;
+  return lines.join('\n');
+}
+
 // ── After-dependency date sanitization ────────────────────────────────────
 // When a task's dates are changed, dependent tasks (after <id>) may end up
 // with their end date before the referenced task's end date, causing
@@ -1323,7 +1356,11 @@ modules.gantt = {
       }).join('');
 
       propsEl.innerHTML =
-        '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);font-weight:bold;color:var(--text-primary);font-size:13px;">' + escHtml(task.label) + '</div>' +
+        '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;">' +
+          '<div style="flex:1;font-weight:bold;color:var(--text-primary);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(task.label) + '</div>' +
+          '<button id="prop-move-up" title="同一セクション内で上に移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↑</button>' +
+          '<button id="prop-move-down" title="同一セクション内で下に移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↓</button>' +
+        '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label>' +
           '<input id="prop-label" type="text" value="' + escHtml(task.label) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
@@ -1355,6 +1392,36 @@ modules.gantt = {
       bindPropInput('prop-id', task.line, 'id');
       bindPropInput('prop-after', task.line, 'after');
       bindPropDate('prop-start', 'prop-end', task.line);
+
+      // Move up/down handlers
+      var moveUpBtn = document.getElementById('prop-move-up');
+      if (moveUpBtn) {
+        moveUpBtn.addEventListener('click', function() {
+          var newText = moveTaskWithinSection(mmdText, task.line, -1);
+          if (newText === mmdText) return; // no-op (boundary)
+          pushHistory();
+          mmdText = newText;
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+      var moveDownBtn = document.getElementById('prop-move-down');
+      if (moveDownBtn) {
+        moveDownBtn.addEventListener('click', function() {
+          var newText = moveTaskWithinSection(mmdText, task.line, 1);
+          if (newText === mmdText) return;
+          pushHistory();
+          mmdText = newText;
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
 
       // Status buttons
       var statusBtnEls = propsEl.querySelectorAll('.prop-status-btn');
