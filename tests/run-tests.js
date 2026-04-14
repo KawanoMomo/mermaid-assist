@@ -2,48 +2,49 @@
 const fs = require('fs');
 const path = require('path');
 
-// ── Extract functions from HTML ──
-const htmlPath = path.resolve(__dirname, '..', 'mermaid-assist.html');
-let htmlSrc;
-try {
-  htmlSrc = fs.readFileSync(htmlPath, 'utf-8');
-} catch (e) {
-  console.log('mermaid-assist.html not found yet — skipping extraction');
-  htmlSrc = '';
-}
+// ── Load source files for unit tests ──
+const projectRoot = path.resolve(__dirname, '..');
+const sourceFiles = [
+  'src/app.js',
+];
 
 let fns = {};
-if (htmlSrc) {
-  const m = htmlSrc.match(/<script[^>]*>([\s\S]*?)<\/script>/);
-  if (m) {
-    const sandbox = {
-      document: { addEventListener: () => {}, getElementById: () => null, querySelector: () => null, createElement: () => ({ style: {}, addEventListener: () => {} }) },
-      window: { addEventListener: () => {} },
-      mermaid: { initialize: () => {}, render: async () => ({ svg: '' }) },
-      localStorage: { getItem: () => null, setItem: () => {} },
-      navigator: { clipboard: { write: async () => {} } },
-      requestAnimationFrame: (cb) => cb(),
-      setTimeout: (cb) => cb(),
-      clearTimeout: () => {},
-      alert: () => {},
-      confirm: () => true,
-      Blob: class { constructor() {} },
-      URL: { createObjectURL: () => '', revokeObjectURL: () => {} },
-      File: class { constructor() {} },
-      FileReader: class { readAsText() {} },
-      ClipboardItem: class { constructor() {} },
-      HTMLElement: class {},
-      Image: class { set onload(fn) { fn && fn(); } set src(v) {} get width() { return 100; } get height() { return 100; } },
-      __exportForTest: (obj) => { fns = obj; },
-    };
-    const keys = Object.keys(sandbox);
-    const vals = keys.map(k => sandbox[k]);
-    try {
-      const fn = new Function(...keys, m[1]);
-      fn(...vals);
-    } catch (e) {
-      console.error('Script eval error:', e.message);
-    }
+const sandbox = {
+  document: { addEventListener: () => {}, getElementById: () => null, querySelector: () => null, createElement: () => ({ style: {}, addEventListener: () => {} }) },
+  window: { addEventListener: () => {} },
+  mermaid: { initialize: () => {}, render: async () => ({ svg: '' }) },
+  localStorage: { getItem: () => null, setItem: () => {} },
+  navigator: { clipboard: { write: async () => {} } },
+  requestAnimationFrame: (cb) => cb(),
+  setTimeout: (cb) => cb(),
+  clearTimeout: () => {},
+  alert: () => {},
+  confirm: () => true,
+  Blob: class { constructor() {} },
+  URL: { createObjectURL: () => '', revokeObjectURL: () => {} },
+  File: class { constructor() {} },
+  FileReader: class { readAsText() {} },
+  ClipboardItem: class { constructor() {} },
+  HTMLElement: class {},
+  Image: class { set onload(fn) { fn && fn(); } set src(v) {} get width() { return 100; } get height() { return 100; } },
+  __exportForTest: (obj) => { fns = obj; },
+};
+
+const keys = Object.keys(sandbox);
+const vals = keys.map(k => sandbox[k]);
+
+for (const relPath of sourceFiles) {
+  const filePath = path.join(projectRoot, relPath);
+  if (!fs.existsSync(filePath)) {
+    console.log(`${relPath} not found yet — skipping`);
+    continue;
+  }
+  const code = fs.readFileSync(filePath, 'utf-8');
+  try {
+    const fn = new Function(...keys, code);
+    fn(...vals);
+  } catch (e) {
+    console.error(`Script eval error in ${relPath}:`, e.message);
   }
 }
 
