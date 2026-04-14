@@ -342,6 +342,15 @@ html, body {
 ::-webkit-scrollbar-track { background: var(--bg-primary); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+
+/* ── Overlay hover effects ──────────────────────────────────────────────────── */
+#overlay-layer .overlay-bar {
+  transition: fill 0.1s, opacity 0.1s;
+}
+#overlay-layer .overlay-bar:hover {
+  fill: rgba(124, 140, 248, 0.15) !important;
+  cursor: move;
+}
 </style>
 </head>
 <body>
