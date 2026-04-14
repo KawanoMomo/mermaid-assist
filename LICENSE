@@ -20,7 +20,12 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
----
+--------------------------------------------------------------------------------
 
-This software includes mermaid.js, Copyright (c) 2014-2022 Knut Sveidqvist,
-licensed under the MIT License. See https://github.com/mermaid-js/mermaid
+Third-party software included in this distribution:
+
+- mermaid.js v11.13.0 (lib/mermaid.min.js)
+  Copyright (c) 2014 - 2024 Knut Sveidqvist
+  Licensed under the MIT License.
+  Source: https://github.com/mermaid-js/mermaid
+  Full license text: lib/LICENSE.mermaid

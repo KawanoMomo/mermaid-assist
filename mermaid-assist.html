@@ -342,6 +342,15 @@ html, body {
 ::-webkit-scrollbar-track { background: var(--bg-primary); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+
+/* ── Overlay hover effects ──────────────────────────────────────────────────── */
+#overlay-layer .overlay-bar {
+  transition: fill 0.1s, opacity 0.1s;
+}
+#overlay-layer .overlay-bar:hover {
+  fill: rgba(124, 140, 248, 0.15) !important;
+  cursor: move;
+}
 </style>
 </head>
 <body>
@@ -425,6 +434,12 @@ html, body {
   </div>
 
 </div><!-- /#app -->
+
+  <!-- Drag tooltip -->
+  <div id="drag-tooltip" style="display:none; position:fixed; pointer-events:none; z-index:1000;
+    background:var(--bg-secondary); border:1px solid var(--accent); color:var(--text-primary);
+    font-family:var(--font-mono); font-size:11px; padding:4px 8px; border-radius:4px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.4); white-space:nowrap;"></div>
 
 <!-- Hidden file input -->
 <input type="file" id="file-input" accept=".mmd,.mermaid,.txt" style="display:none">
@@ -654,6 +669,13 @@ function updateTaskField(text, lineNum, field, value) {
     parsed.status = value || null;
   } else if (field === 'id') {
     parsed.id = value;
+  } else if (field === 'after') {
+    if (value && value.trim()) {
+      parsed.after = value.trim();
+      parsed.startDate = null; // after指定時はstartDateをクリア
+    } else {
+      parsed.after = null;
+    }
   }
 
   var meta = rebuildTaskMeta(parsed.status, parsed.id, parsed.startDate, parsed.endDate, parsed.after);
@@ -716,6 +738,87 @@ function deleteTask(text, lineNum) {
   if (idx < 0 || idx >= lines.length) return text;
   lines.splice(idx, 1);
   return lines.join('\n');
+}
+
+// moveTaskWithinSection — moves the task at 1-based lineNum up (-1) or down (+1)
+// within its current section. Returns unchanged text if the move would cross a
+// section boundary (or hit the file edges).
+function moveTaskWithinSection(text, lineNum, direction) {
+  if (direction !== -1 && direction !== 1) return text;
+  var p = parseGantt(text);
+  var task = null;
+  for (var i = 0; i < p.tasks.length; i++) {
+    if (p.tasks[i].line === lineNum) { task = p.tasks[i]; break; }
+  }
+  if (!task) return text;
+
+  // Tasks in the same section, sorted by line
+  var siblings = p.tasks.filter(function(t) { return t.sectionIndex === task.sectionIndex; });
+  siblings.sort(function(a, b) { return a.line - b.line; });
+  var idx = -1;
+  for (var si = 0; si < siblings.length; si++) {
+    if (siblings[si].line === lineNum) { idx = si; break; }
+  }
+  if (idx === -1) return text;
+
+  var swapIdx = idx + direction;
+  if (swapIdx < 0 || swapIdx >= siblings.length) return text; // boundary
+
+  var lines = text.split('\n');
+  var aLine = lineNum - 1;            // 0-based
+  var bLine = siblings[swapIdx].line - 1;
+  var tmp = lines[aLine];
+  lines[aLine] = lines[bLine];
+  lines[bLine] = tmp;
+  return lines.join('\n');
+}
+
+// moveTaskToSection — moves the task at 1-based lineNum to the end of the
+// section identified by targetSectionIndex (0-based). No-op if already there
+// or if targetSectionIndex is invalid.
+function moveTaskToSection(text, lineNum, targetSectionIndex) {
+  var p = parseGantt(text);
+  var task = null;
+  for (var i = 0; i < p.tasks.length; i++) {
+    if (p.tasks[i].line === lineNum) { task = p.tasks[i]; break; }
+  }
+  if (!task) return text;
+  if (task.sectionIndex === targetSectionIndex) return text; // already there
+  if (targetSectionIndex < -1 || targetSectionIndex >= p.sections.length) return text;
+
+  // Capture the original task line content
+  var lines = text.split('\n');
+  var taskLineContent = lines[lineNum - 1];
+
+  // Delete the original line first
+  var afterDelete = deleteTask(text, lineNum);
+
+  // Re-parse the post-delete state and find the insertion point at the target section
+  var p2 = parseGantt(afterDelete);
+  var lines2 = afterDelete.split('\n');
+  var insertAt;
+
+  if (targetSectionIndex === -1 || p2.sections.length === 0) {
+    // Append at end (trim trailing empty lines)
+    insertAt = lines2.length;
+    while (insertAt > 0 && lines2[insertAt - 1].trim() === '') insertAt--;
+  } else {
+    var sectionLine = p2.sections[targetSectionIndex].line; // 1-based
+    var nextSectionLine = (targetSectionIndex + 1 < p2.sections.length)
+      ? p2.sections[targetSectionIndex + 1].line
+      : lines2.length + 1;
+    var lastLineInSection = sectionLine;
+    for (var ti = 0; ti < p2.tasks.length; ti++) {
+      if (p2.tasks[ti].sectionIndex === targetSectionIndex && p2.tasks[ti].line > lastLineInSection) {
+        lastLineInSection = p2.tasks[ti].line;
+      }
+    }
+    if (lastLineInSection >= nextSectionLine) lastLineInSection = nextSectionLine - 1;
+    insertAt = lastLineInSection; // 0-based: insert at this index = after lastLineInSection (1-based)
+  }
+
+  lines2.splice(insertAt, 0, taskLineContent);
+  return lines2.join('\n');
 }
 
 // ── After-dependency date sanitization ────────────────────────────────────
@@ -1180,6 +1283,30 @@ modules.gantt = {
         sectionOptions = '<option value="-1">（セクションなし）</option>';
       }
 
+      var sectionListHtml = '';
+      if (parsedData && parsedData.sections && parsedData.sections.length > 0) {
+        sectionListHtml += '<div id="prop-section-list" style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:12px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">セクション一覧</label>';
+        for (var sli = 0; sli < parsedData.sections.length; sli++) {
+          var sec = parsedData.sections[sli];
+          var taskCount = 0;
+          for (var sti = 0; sti < parsedData.tasks.length; sti++) {
+            if (parsedData.tasks[sti].sectionIndex === sli) taskCount++;
+          }
+          sectionListHtml +=
+            '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;">' +
+              '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escHtml(sec.name) + '">' + escHtml(sec.name) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + taskCount + ')</span></div>' +
+              '<button class="prop-section-delete" data-section-name="' + escHtml(sec.name) + '" data-section-line="' + sec.line + '" title="セクションごと削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
+            '</div>';
+        }
+        sectionListHtml += '</div>';
+      } else {
+        sectionListHtml = '<div id="prop-section-list" style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:12px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:4px;">セクション一覧</label>' +
+          '<div style="font-size:11px;color:var(--text-secondary);">（セクションなし）</div>' +
+        '</div>';
+      }
+
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">タスクを選択するか、新規追加</div>' +
         '<div style="margin-bottom:8px;">' +
@@ -1210,6 +1337,7 @@ modules.gantt = {
             '<button id="prop-add-sec-btn" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:12px;">+</button>' +
           '</div>' +
         '</div>' +
+        sectionListHtml +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:6px;font-weight:bold;">グローバル設定</label>' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">title</label>' +
@@ -1217,7 +1345,30 @@ modules.gantt = {
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">dateFormat</label>' +
           '<input id="prop-global-dateformat" type="text" value="' + escHtml(parsedData.dateFormat || 'YYYY-MM-DD') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:6px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">axisFormat</label>' +
-          '<input id="prop-global-axisformat" type="text" value="' + escHtml(parsedData.axisFormat || '') + '" placeholder="%m/%d" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+          (function() {
+            var presets = [
+              { v: '%Y-%m-%d', label: '2026-04-14' },
+              { v: '%Y/%m/%d', label: '2026/04/14' },
+              { v: '%m/%d',    label: '04/14' },
+              { v: '%m月%d日', label: '04月14日' },
+              { v: '%b %d',    label: 'Apr 14' },
+              { v: '%d %b',    label: '14 Apr' },
+              { v: '%a',       label: 'Tue (曜日)' }
+            ];
+            var current = parsedData.axisFormat || '';
+            var matched = false;
+            var opts = '';
+            for (var pi = 0; pi < presets.length; pi++) {
+              var sel = (presets[pi].v === current) ? ' selected' : '';
+              if (sel) matched = true;
+              opts += '<option value="' + escHtml(presets[pi].v) + '"' + sel + '>' + escHtml(presets[pi].label + '  (' + presets[pi].v + ')') + '</option>';
+            }
+            var customSel = matched ? '' : ' selected';
+            opts += '<option value="__custom__"' + customSel + '>カスタム…</option>';
+            var customDisplay = matched ? 'none' : 'block';
+            return '<select id="prop-axisformat-preset" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:4px;">' + opts + '</select>' +
+              '<input id="prop-axisformat-custom" type="text" value="' + escHtml(current) + '" placeholder="%m/%d" style="display:' + customDisplay + ';width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">';
+          })() +
         '</div>';
 
       // Bind add task button
@@ -1232,11 +1383,13 @@ modules.gantt = {
           var secIdx = parseInt(document.getElementById('prop-add-section').value, 10);
           pushHistory();
           mmdText = addTask(mmdText, secIdx, label, id, start, end);
+          sel = [{ type: 'task', id: id }]; // 追加したタスクを自動選択
           suppressSync = true;
           editorEl.value = mmdText;
           suppressSync = false;
           syncLineNumbers();
           scheduleRefresh();
+          // renderPropsは scheduleRefresh → refresh → renderProps で自動的に呼ばれるので、追加呼び出しは不要
         });
       }
 
@@ -1256,6 +1409,26 @@ modules.gantt = {
         });
       }
 
+      // Bind section delete buttons
+      var sectionDeleteBtns = propsEl.querySelectorAll('.prop-section-delete');
+      for (var sdbi = 0; sdbi < sectionDeleteBtns.length; sdbi++) {
+        (function(btn) {
+          btn.addEventListener('click', function() {
+            var secName = btn.getAttribute('data-section-name');
+            var secLine = parseInt(btn.getAttribute('data-section-line'), 10);
+            if (!confirm('セクション「' + secName + '」と含まれるタスクを削除しますか？')) return;
+            pushHistory();
+            mmdText = deleteSection(mmdText, secLine);
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            sel = [];
+            syncLineNumbers();
+            scheduleRefresh();
+          });
+        })(sectionDeleteBtns[sdbi]);
+      }
+
       // Bind global settings
       function bindGlobal(elId, key) {
         var el = document.getElementById(elId);
@@ -1273,7 +1446,40 @@ modules.gantt = {
       }
       bindGlobal('prop-global-title', 'title');
       bindGlobal('prop-global-dateformat', 'dateFormat');
-      bindGlobal('prop-global-axisformat', 'axisFormat');
+      // axisFormat: preset dropdown + custom input
+      var afPreset = document.getElementById('prop-axisformat-preset');
+      var afCustom = document.getElementById('prop-axisformat-custom');
+      if (afPreset) {
+        afPreset.addEventListener('change', function() {
+          var v = afPreset.value;
+          if (v === '__custom__') {
+            if (afCustom) {
+              afCustom.style.display = 'block';
+              afCustom.focus();
+            }
+            return; // don't update text yet — wait for custom input change
+          }
+          if (afCustom) afCustom.style.display = 'none';
+          pushHistory();
+          mmdText = updateGlobalSetting(mmdText, 'axisFormat', v);
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+      if (afCustom) {
+        afCustom.addEventListener('change', function() {
+          pushHistory();
+          mmdText = updateGlobalSetting(mmdText, 'axisFormat', afCustom.value);
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
       return;
     }
 
@@ -1298,7 +1504,23 @@ modules.gantt = {
         return '<button class="prop-status-btn" data-status="' + val + '" style="flex:1;background:' + bg + ';color:var(--text-primary);border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">' + s + '</button>';
       }).join('');
 
+      var moveSecOpts = '';
+      if (parsedData && parsedData.sections) {
+        for (var msi = 0; msi < parsedData.sections.length; msi++) {
+          var selAttr = (msi === task.sectionIndex) ? ' selected' : '';
+          moveSecOpts += '<option value="' + msi + '"' + selAttr + '>' + escHtml(parsedData.sections[msi].name) + '</option>';
+        }
+      }
+      if (!moveSecOpts) {
+        moveSecOpts = '<option value="-1">（セクションなし）</option>';
+      }
+
       propsEl.innerHTML =
+        '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;">' +
+          '<div style="flex:1;font-weight:bold;color:var(--text-primary);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(task.label) + '</div>' +
+          '<button id="prop-move-up" title="同一セクション内で上に移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↑</button>' +
+          '<button id="prop-move-down" title="同一セクション内で下に移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↓</button>' +
+        '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label>' +
           '<input id="prop-label" type="text" value="' + escHtml(task.label) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
@@ -1319,16 +1541,68 @@ modules.gantt = {
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ステータス</label>' +
           '<div style="display:flex;gap:2px;">' + statusBtns + '</div>' +
         '</div>' +
-        (task.after ? '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">after依存 (読み取り専用)</label>' +
-          '<input type="text" value="' + escHtml(task.after) + '" readonly style="width:100%;background:var(--bg-primary);border:1px solid var(--border);color:var(--text-secondary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' : '') +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">after依存</label>' +
+          '<input id="prop-after" type="text" value="' + escHtml(task.after || '') + '" placeholder="タスクID (例: a1)" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション移動</label>' +
+          '<select id="prop-move-section" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + moveSecOpts + '</select>' +
+        '</div>' +
         '<button id="prop-delete-btn" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">タスク削除</button>';
 
       // Bind handlers
       bindPropInput('prop-label', task.line, 'label');
       bindPropInput('prop-id', task.line, 'id');
+      bindPropInput('prop-after', task.line, 'after');
       bindPropDate('prop-start', 'prop-end', task.line);
+
+      // Move up/down handlers
+      var moveUpBtn = document.getElementById('prop-move-up');
+      if (moveUpBtn) {
+        moveUpBtn.addEventListener('click', function() {
+          var newText = moveTaskWithinSection(mmdText, task.line, -1);
+          if (newText === mmdText) return; // no-op (boundary)
+          pushHistory();
+          mmdText = newText;
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+      var moveDownBtn = document.getElementById('prop-move-down');
+      if (moveDownBtn) {
+        moveDownBtn.addEventListener('click', function() {
+          var newText = moveTaskWithinSection(mmdText, task.line, 1);
+          if (newText === mmdText) return;
+          pushHistory();
+          mmdText = newText;
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
+
+      var moveSectionEl = document.getElementById('prop-move-section');
+      if (moveSectionEl) {
+        moveSectionEl.addEventListener('change', function() {
+          var targetIdx = parseInt(moveSectionEl.value, 10);
+          if (isNaN(targetIdx)) return;
+          var newText = moveTaskToSection(mmdText, task.line, targetIdx);
+          if (newText === mmdText) return; // no-op
+          pushHistory();
+          mmdText = newText;
+          suppressSync = true;
+          editorEl.value = mmdText;
+          suppressSync = false;
+          syncLineNumbers();
+          scheduleRefresh();
+        });
+      }
 
       // Status buttons
       var statusBtnEls = propsEl.querySelectorAll('.prop-status-btn');
@@ -1728,6 +2002,8 @@ function renderStatus() {
     if (allDates.length >= 2) {
       info += ' | 期間: ' + allDates[0] + ' ~ ' + allDates[allDates.length - 1];
     }
+  } else {
+    info = 'タスク: 0 | プロパティパネルからタスクを追加してください';
   }
   statusInfoEl.textContent = info;
 }
@@ -1740,7 +2016,7 @@ function renderProps() {
 
 // ── Zoom ───────────────────────────────────────────────────────────────────
 function setZoom(z) {
-  zoom = Math.max(0.1, Math.min(5.0, z));
+  zoom = Math.max(0.25, Math.min(3.0, z));
   if (zoomDisplayEl) zoomDisplayEl.textContent = Math.round(zoom * 100) + '%';
 
   if (previewSvgEl) {
@@ -2021,6 +2297,12 @@ function init() {
                 origBarX: br ? br.x : 0,
                 origBarW: br ? br.width : 0,
               };
+              // Visual feedback: highlight dragged bar
+              var dragBarEl = overlayEl.querySelector('.overlay-bar[data-task-id="' + taskId + '"]');
+              if (dragBarEl) {
+                dragBarEl.setAttribute('fill', 'rgba(124, 140, 248, 0.3)');
+                dragBarEl.setAttribute('data-dragging', 'true');
+              }
             }
           } catch (ex) { /* can't get CTM */ }
         }
@@ -2116,6 +2398,30 @@ function init() {
         }
       }
 
+      // Show drag tooltip near cursor
+      var tooltipEl = document.getElementById('drag-tooltip');
+      if (tooltipEl) {
+        var currentParsed = parseGantt(mmdText);
+        var dragTask = null;
+        for (var dpi = 0; dpi < currentParsed.tasks.length; dpi++) {
+          if (currentParsed.tasks[dpi].id === dragState.taskId) { dragTask = currentParsed.tasks[dpi]; break; }
+        }
+        if (dragTask) {
+          var tipText = dragTask.startDate || '';
+          if (dragTask.endDate && DATE_RE.test(dragTask.endDate)) {
+            tipText += ' → ' + dragTask.endDate;
+            if (dragTask.startDate && DATE_RE.test(dragTask.startDate)) {
+              var dur = daysBetween(dragTask.startDate, dragTask.endDate);
+              tipText += ' (' + dur + '日)';
+            }
+          }
+          tooltipEl.textContent = tipText;
+          tooltipEl.style.display = 'block';
+          tooltipEl.style.left = (e.clientX + 16) + 'px';
+          tooltipEl.style.top = (e.clientY - 30) + 'px';
+        }
+      }
+
       // Lightweight refresh: parse + status only (instant)
       refresh(true);
 
@@ -2135,6 +2441,16 @@ function init() {
       dragState = null;
       clearTimeout(dragRenderTimer);
       dragRenderTimer = null;
+      var tooltipEl = document.getElementById('drag-tooltip');
+      if (tooltipEl) tooltipEl.style.display = 'none';
+      // Clear drag visual feedback on any dragging bars
+      if (overlayEl) {
+        var draggingBars = overlayEl.querySelectorAll('[data-dragging="true"]');
+        for (var dbi = 0; dbi < draggingBars.length; dbi++) {
+          draggingBars[dbi].setAttribute('fill', 'transparent');
+          draggingBars[dbi].removeAttribute('data-dragging');
+        }
+      }
       // Final full re-render
       refresh();
     }
@@ -2191,7 +2507,7 @@ function init() {
       e.preventDefault();
       pushHistory();
       clipboard.forEach(function(t) {
-        var newId = '__new_' + (++addCounter);
+        var newId = 't' + (++addCounter);
         var newStart = t.startDate ? addDays(t.startDate, 7) : null;
         var newEnd = t.endDate && !isDuration(t.endDate) ? addDays(t.endDate, 7) : t.endDate;
         mmdText = addTask(mmdText, t.sectionIndex, t.label, newId, newStart, newEnd);
