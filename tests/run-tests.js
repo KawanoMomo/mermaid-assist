@@ -11,6 +11,7 @@ const sourceFiles = [
   'src/core/parser-utils.js',
   'src/core/history.js',
   'src/core/selection.js',
+  'src/core/connection-mode.js',
   'src/app.js',
 ];
 
