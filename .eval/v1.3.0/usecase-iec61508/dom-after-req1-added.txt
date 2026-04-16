@@ -1,0 +1,99 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: MermaidAssist
+      - button "Open" [ref=e5] [cursor=pointer]
+      - button "Save" [ref=e6] [cursor=pointer]
+      - button "↩ Undo" [ref=e8] [cursor=pointer]
+      - button "↪ Redo" [disabled] [ref=e9]
+      - button "－" [ref=e11] [cursor=pointer]
+      - generic [ref=e12]: 50%
+      - button "＋" [ref=e13] [cursor=pointer]
+      - button "Fit" [ref=e14] [cursor=pointer]
+      - button "Export ▾" [ref=e17] [cursor=pointer]
+      - combobox "図の種類" [ref=e18] [cursor=pointer]:
+        - option "Gantt"
+        - option "Sequence"
+        - option "Flowchart"
+        - option "State"
+        - option "Class"
+        - option "ER"
+        - option "Requirement" [selected]
+    - generic [ref=e19]:
+      - generic [ref=e20]:
+        - generic [ref=e21]: Editor
+        - generic [ref=e22]:
+          - generic [ref=e23]: 1 2 3 4 5 6 7 8
+          - textbox [ref=e24]: "requirementDiagram functionalRequirement over_current_stop { id: \"\" text: \"\" risk: medium verifymethod: analysis }"
+      - generic [ref=e26]:
+        - generic [ref=e27]: Preview
+        - generic [ref=e28]:
+          - paragraph [ref=e279]:
+            - text: "Render error:"
+            - text: "Error: Parse error on line 3: ...nt_stop { id: \"\" text: \"\" ri ----------------------^ Expecting 'unqString', 'qString', got 'NEWLINE'"
+          - img
+      - generic [ref=e76]:
+        - generic [ref=e77]: Properties
+        - generic [ref=e78]:
+          - generic [ref=e280]: Requirement Diagram
+          - generic [ref=e281]:
+            - generic [ref=e282]: 要件を追加
+            - generic [ref=e283]:
+              - generic [ref=e284]: Type
+              - combobox [ref=e285]:
+                - option "requirement" [selected]
+                - option "functionalRequirement"
+                - option "interfaceRequirement"
+                - option "performanceRequirement"
+                - option "physicalRequirement"
+                - option "designConstraint"
+            - generic [ref=e286]:
+              - generic [ref=e287]: Name
+              - textbox [ref=e288]
+            - button "+ 要件追加" [ref=e289] [cursor=pointer]
+          - generic [ref=e290]:
+            - generic [ref=e291]: エレメントを追加
+            - generic [ref=e292]:
+              - generic [ref=e293]: Name
+              - textbox [ref=e294]
+            - button "+ エレメント追加" [ref=e295] [cursor=pointer]
+          - generic [ref=e296]:
+            - generic [ref=e297]: リレーションを追加
+            - generic [ref=e298]:
+              - generic [ref=e299]: From
+              - combobox [ref=e300]:
+                - option "over_current_stop" [selected]
+            - generic [ref=e301]:
+              - generic [ref=e302]: Type
+              - combobox [ref=e303]:
+                - option "contains"
+                - option "copies"
+                - option "derives"
+                - option "satisfies" [selected]
+                - option "verifies"
+                - option "refines"
+                - option "traces"
+            - generic [ref=e304]:
+              - generic [ref=e305]: To
+              - combobox [ref=e306]:
+                - option "over_current_stop" [selected]
+            - button "+ リレーション追加" [ref=e307] [cursor=pointer]
+          - generic [ref=e308]:
+            - generic [ref=e309]: 要件一覧
+            - generic [ref=e311]:
+              - generic [ref=e312]: over_current_stop (functionalRequirement)
+              - button "編集" [ref=e313] [cursor=pointer]
+              - button "✕" [ref=e314] [cursor=pointer]
+          - generic [ref=e315]:
+            - generic [ref=e316]: エレメント一覧
+            - generic [ref=e318]: （要素なし）
+          - generic [ref=e319]:
+            - generic [ref=e320]: リレーション一覧
+            - generic [ref=e322]: （リレーションなし）
+    - generic [ref=e117]:
+      - generic [ref=e118]: Error
+      - generic [ref=e119]: "タスク: 0 | プロパティパネルからタスクを追加してください"
+  - document [ref=e324]:
+    - generic [ref=e325]:
+      - generic [ref=e332]: Syntax error in text
+      - generic [ref=e333]: mermaid version 11.13.0

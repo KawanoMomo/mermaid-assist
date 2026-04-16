@@ -1,0 +1,45 @@
+requirementDiagram
+
+functionalRequirement over_current_stop {
+    id: "SR-001"
+    text: "過電流時はモータを停止する"
+    risk: high
+    verifymethod: test
+}
+
+performanceRequirement detection_time {
+    id: "SR-002"
+    text: "過電流検出は10ms以内"
+    risk: high
+    verifymethod: test
+}
+
+functionalRequirement self_diagnosis {
+    id: "SR-003"
+    text: "起動時に自己診断を実行"
+    risk: medium
+    verifymethod: inspection
+}
+
+functionalRequirement safe_mode_transition {
+    id: "SR-004"
+    text: "異常検出時にセーフモードへ遷移"
+    risk: high
+    verifymethod: test
+}
+
+element ecu_firmware {
+    type: "code module"
+    docref: "src/ecu.c"
+}
+
+element safety_test_suite {
+    type: "test suite"
+    docref: "tests/safety/"
+}
+
+ecu_firmware - satisfies -> over_current_stop
+ecu_firmware - satisfies -> detection_time
+over_current_stop - derives -> safe_mode_transition
+safety_test_suite - verifies -> over_current_stop
+over_current_stop - refines -> self_diagnosis
