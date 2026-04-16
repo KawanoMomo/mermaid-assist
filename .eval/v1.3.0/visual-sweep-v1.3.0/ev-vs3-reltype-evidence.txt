@@ -1,0 +1,20 @@
+EV-VS3: 7 reltype descriptor verification
+==========================================
+SVG viewBox: 0 0 161.21875 2006
+<g> count: 93
+<path> count (edges + shapes): 32
+<foreignObject> count: 55
+
+Relationship labels found in rendered SVG foreignObject labels:
+  «contains»   (a -> b)   present
+  «copies»     (b -> c)   present
+  «derives»    (c -> d)   present
+  «satisfies»  (d -> e)   present
+  «verifies»   (e -> f)   present
+  «refines»    (f -> g)   present
+  «traces»     (g -> h)   present
+
+Requirement headers rendered: a, b, c, d, e, f, g, h (all 8)
+
+Conclusion: All 7 reltype render and all 8 nodes render correctly.
+Screenshots: ev-vs3-7-reltypes.png, ev-vs3-7-reltypes-zoomed.png, ev-vs3-7-reltypes-fullview.png

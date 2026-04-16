@@ -1,0 +1,7 @@
+[GET] http://127.0.0.1:8765/src/app.js => [200] OK
+[GET] http://127.0.0.1:8765/src/app.js => [200] OK
+[GET] http://127.0.0.1:8765/src/app.js => [200] OK
+[GET] http://127.0.0.1:8765/src/app.js => [200] OK
+[GET] http://127.0.0.1:8765/src/app.js => [200] OK
+[GET] http://127.0.0.1:8765/src/modules/gantt.js => [200] OK
+[GET] http://127.0.0.1:8765/src/app.js => [200] OK
