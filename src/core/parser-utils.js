@@ -16,6 +16,7 @@ window.MA.parserUtils = (function() {
     if (firstNonEmpty.indexOf('classDiagram') === 0) return 'classDiagram';
     if (firstNonEmpty.indexOf('stateDiagram') === 0) return 'stateDiagram';
     if (firstNonEmpty.indexOf('erDiagram') === 0) return 'erDiagram';
+    if (firstNonEmpty.indexOf('requirementDiagram') === 0) return 'requirementDiagram';
     return null;
   }
 
