@@ -42,3 +42,35 @@ describe('addRelation', function() {
     });
   });
 });
+
+describe('deleteElement', function() {
+  test('removes requirement block', function() {
+    var t = 'requirementDiagram\nrequirement r1 {\n    id: X\n}\n';
+    var parsed = req.parseRequirement(t);
+    var out = req.deleteElement(t, parsed.elements[0].line, 'r1');
+    expect(out).not.toContain('requirement r1');
+  });
+
+  test('cascade removes relations referencing deleted element (as from)', function() {
+    var t = 'requirementDiagram\nrequirement r1 {\n    id: A\n}\nrequirement r2 {\n    id: B\n}\nr1 - contains -> r2\n';
+    var parsed = req.parseRequirement(t);
+    var out = req.deleteElement(t, parsed.elements[0].line, 'r1');
+    expect(out).not.toContain('r1 - contains -> r2');
+  });
+
+  test('cascade removes relations referencing deleted element (as to)', function() {
+    var t = 'requirementDiagram\nrequirement r1 {\n    id: A\n}\nrequirement r2 {\n    id: B\n}\nr1 - contains -> r2\n';
+    var parsed = req.parseRequirement(t);
+    var out = req.deleteElement(t, parsed.elements[1].line, 'r2');
+    expect(out).not.toContain('-> r2');
+  });
+});
+
+describe('deleteRelation', function() {
+  test('removes single relation line', function() {
+    var t = 'requirementDiagram\nrequirement a {\n    id: A\n}\nrequirement b {\n    id: B\n}\na - contains -> b\n';
+    var parsed = req.parseRequirement(t);
+    var out = req.deleteRelation(t, parsed.relations[0].line);
+    expect(out).not.toContain('a - contains -> b');
+  });
+});

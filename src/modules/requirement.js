@@ -121,6 +121,35 @@ window.MA.modules.requirementDiagram = (function() {
     return lines.join('\n');
   }
 
+  function deleteElement(text, lineNum, elementName) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    var trimmed = lines[idx].trim();
+    if (/\{\s*$/.test(trimmed)) {
+      var endIdx = idx;
+      for (var j = idx + 1; j < lines.length; j++) {
+        if (lines[j].trim() === '}') { endIdx = j; break; }
+      }
+      lines.splice(idx, (endIdx - idx + 1));
+    } else {
+      lines.splice(idx, 1);
+    }
+    if (elementName) {
+      var relRe = new RegExp('^\\s*([A-Za-z_][A-Za-z0-9_-]*)\\s+-\\s+\\S+\\s+->\\s+([A-Za-z_][A-Za-z0-9_-]*)\\s*$');
+      lines = lines.filter(function(ln) {
+        var m = ln.match(relRe);
+        if (!m) return true;
+        return m[1] !== elementName && m[2] !== elementName;
+      });
+    }
+    return lines.join('\n');
+  }
+
+  function deleteRelation(text, lineNum) {
+    return window.MA.textUpdater.deleteLine(text, lineNum);
+  }
+
   return {
     type: 'requirementDiagram',
     displayName: 'Requirement',
@@ -136,6 +165,8 @@ window.MA.modules.requirementDiagram = (function() {
     addRequirement: addRequirement,
     addElement: addElement,
     addRelation: addRelation,
+    deleteElement: deleteElement,
+    deleteRelation: deleteRelation,
     template: function() {
       return [
         'requirementDiagram',
