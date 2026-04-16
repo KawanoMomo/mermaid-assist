@@ -36,7 +36,11 @@ function rebuildOverlay() {
   if (!currentModule || !overlayEl) return;
   var svgEl = previewSvgEl ? previewSvgEl.querySelector('svg') : null;
   if (svgEl) {
-    currentModule.buildOverlay(svgEl, parsed);
+    if (currentModule.type === 'gantt') {
+      currentModule.buildOverlay(svgEl, parsed);
+    } else {
+      currentModule.buildOverlay(svgEl, parsed, overlayEl);
+    }
   }
 }
 
@@ -60,6 +64,19 @@ var clipboard = null;
 var addCounter = 0;
 var modules = {};
 var currentModule = null;
+
+// Register all window.MA.modules into local modules dict, keyed by module.type
+// (gantt is defined inline below; sequence and future modules come from window.MA.modules)
+// We key by .type so that the diagram-type select value (which matches .type) works directly.
+function _registerWindowModules() {
+  var mm = window.MA.modules || {};
+  var keys = Object.keys(mm);
+  for (var _i = 0; _i < keys.length; _i++) {
+    var _mod = mm[keys[_i]];
+    var _key = (_mod && _mod.type) ? _mod.type : keys[_i];
+    if (!modules[_key]) modules[_key] = _mod;
+  }
+}
 
 // ── DOM References ─────────────────────────────────────────────────────────
 var editorEl, lineNumEl, previewSvgEl, overlayEl, propsEl;
@@ -722,6 +739,9 @@ modules.gantt = {
   exportMmd: function(parsedData) { return mmdText; },
 };
 
+// Register window.MA.modules (sequence, etc.) into local modules dict
+_registerWindowModules();
+
 // ── Line Numbers ───────────────────────────────────────────────────────────
 function syncLineNumbers() {
   if (!editorEl || !lineNumEl) return;
@@ -755,6 +775,12 @@ async function refresh(skipRender) {
 
   // Detect diagram module
   currentModule = detectModule(mmdText);
+
+  // Sync diagram-type select to reflect current diagram type
+  var _dtSelect = document.getElementById('diagram-type');
+  if (_dtSelect && currentModule) {
+    if (_dtSelect.value !== currentModule.type) _dtSelect.value = currentModule.type;
+  }
 
   // Parse (always — it's fast)
   if (currentModule) {
@@ -826,7 +852,11 @@ async function refresh(skipRender) {
 
     // Build overlay (skip during drag to prevent jitter)
     if (currentModule && svgEl && !dragState) {
-      currentModule.buildOverlay(svgEl, parsed);
+      if (currentModule.type === 'gantt') {
+        currentModule.buildOverlay(svgEl, parsed);
+      } else {
+        currentModule.buildOverlay(svgEl, parsed, overlayEl);
+      }
     }
 
     statusParseEl.textContent = 'OK';
@@ -866,7 +896,23 @@ function renderStatus() {
 // ── Properties Panel ───────────────────────────────────────────────────────
 function renderProps() {
   if (!propsEl || !currentModule) return;
-  currentModule.renderProps(sel, parsed);
+  // Gantt's renderProps uses the old 2-arg form (inline in app.js)
+  // Sequence and future modules use the 4-arg form: (selData, parsedData, propsEl, ctx)
+  if (currentModule.type === 'gantt') {
+    currentModule.renderProps(sel, parsed);
+  } else {
+    currentModule.renderProps(sel, parsed, propsEl, {
+      getMmdText: function() { return mmdText; },
+      setMmdText: function(t) {
+        mmdText = t;
+        suppressSync = true;
+        editorEl.value = mmdText;
+        suppressSync = false;
+        syncLineNumbers();
+      },
+      onUpdate: function() { scheduleRefresh(); },
+    });
+  }
 }
 
 // ── Zoom ───────────────────────────────────────────────────────────────────
@@ -1467,6 +1513,24 @@ function init() {
 
   setupResizer('resizer-left', 'editor-pane', null, 'left');
   setupResizer('resizer-right', null, 'props-pane', 'right');
+
+  // ── Diagram type select ──────────────────────────────────────────────────
+  var diagramTypeSelect = document.getElementById('diagram-type');
+  if (diagramTypeSelect) {
+    diagramTypeSelect.addEventListener('change', function() {
+      var targetType = this.value;
+      var mod = modules[targetType];
+      if (!mod) return;
+      window.MA.history.pushHistory();
+      mmdText = mod.template();
+      suppressSync = true;
+      editorEl.value = mmdText;
+      suppressSync = false;
+      window.MA.selection.clearSelection();
+      syncLineNumbers();
+      scheduleRefresh();
+    });
+  }
 
   // ── Initial render ───────────────────────────────────────────────────────
   scheduleRefresh();

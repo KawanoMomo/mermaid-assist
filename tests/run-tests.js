@@ -14,6 +14,7 @@ const sourceFiles = [
   'src/core/connection-mode.js',
   'src/ui/properties.js',
   'src/modules/gantt.js',
+  'src/modules/sequence.js',
   'src/app.js',
 ];
 
@@ -58,6 +59,7 @@ for (const relPath of sourceFiles) {
 }
 
 global.fns = fns;
+global.window = sandbox.window;
 
 // ── Minimal test framework ──
 let passed = 0, failed = 0, currentDescribe = '';
