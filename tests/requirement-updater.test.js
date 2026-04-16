@@ -74,3 +74,61 @@ describe('deleteRelation', function() {
     expect(out).not.toContain('a - contains -> b');
   });
 });
+
+describe('updateRequirementField', function() {
+  test('updates id', function() {
+    var t = 'requirementDiagram\nrequirement r1 {\n    id: OLD\n    text: hi\n}\n';
+    var parsed = req.parseRequirement(t);
+    var out = req.updateRequirementField(t, parsed.elements[0].line, 'id', 'NEW');
+    expect(out).toContain('id: NEW');
+    expect(out).not.toContain('id: OLD');
+  });
+
+  test('updates text', function() {
+    var t = 'requirementDiagram\nrequirement r1 {\n    id: X\n    text: hi\n}\n';
+    var parsed = req.parseRequirement(t);
+    var out = req.updateRequirementField(t, parsed.elements[0].line, 'text', 'changed');
+    expect(out).toContain('text: changed');
+  });
+
+  test('appends field if missing', function() {
+    var t = 'requirementDiagram\nrequirement r1 {\n    id: X\n}\n';
+    var parsed = req.parseRequirement(t);
+    var out = req.updateRequirementField(t, parsed.elements[0].line, 'risk', 'high');
+    expect(out).toContain('risk: high');
+  });
+});
+
+describe('updateRequirementType', function() {
+  test('changes reqType', function() {
+    var t = 'requirementDiagram\nrequirement r1 {\n    id: X\n}\n';
+    var parsed = req.parseRequirement(t);
+    var out = req.updateRequirementType(t, parsed.elements[0].line, 'functionalRequirement');
+    expect(out).toContain('functionalRequirement r1 {');
+  });
+});
+
+describe('updateElementField', function() {
+  test('updates docref', function() {
+    var t = 'requirementDiagram\nelement e1 {\n    type: code\n    docref: old\n}\n';
+    var parsed = req.parseRequirement(t);
+    var out = req.updateElementField(t, parsed.elements[0].line, 'docref', 'src/new.c');
+    expect(out).toContain('docref: src/new.c');
+  });
+});
+
+describe('updateRelation', function() {
+  test('updates reltype', function() {
+    var t = 'requirementDiagram\nrequirement a {\n    id: A\n}\nrequirement b {\n    id: B\n}\na - contains -> b\n';
+    var parsed = req.parseRequirement(t);
+    var out = req.updateRelation(t, parsed.relations[0].line, 'reltype', 'derives');
+    expect(out).toContain('a - derives -> b');
+  });
+
+  test('updates from', function() {
+    var t = 'requirementDiagram\nrequirement a {\n    id: A\n}\nrequirement b {\n    id: B\n}\na - contains -> b\n';
+    var parsed = req.parseRequirement(t);
+    var out = req.updateRelation(t, parsed.relations[0].line, 'from', 'c');
+    expect(out).toContain('c - contains -> b');
+  });
+});

@@ -150,6 +150,57 @@ window.MA.modules.requirementDiagram = (function() {
     return window.MA.textUpdater.deleteLine(text, lineNum);
   }
 
+  function updateRequirementField(text, lineNum, field, value) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    var fieldKey = field.toLowerCase();
+    for (var j = idx + 1; j < lines.length; j++) {
+      var t2 = lines[j].trim();
+      if (t2 === '}') {
+        lines.splice(j, 0, '    ' + fieldKey + ': ' + value);
+        return lines.join('\n');
+      }
+      var m = t2.match(/^([A-Za-z]+)\s*:\s*(.*)$/);
+      if (m && m[1].toLowerCase() === fieldKey) {
+        var indent = lines[j].match(/^(\s*)/)[1];
+        lines[j] = indent + fieldKey + ': ' + value;
+        return lines.join('\n');
+      }
+    }
+    return text;
+  }
+
+  function updateRequirementType(text, lineNum, newReqType) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    var indent = lines[idx].match(/^(\s*)/)[1];
+    var m = lines[idx].trim().match(REQ_BLOCK_RE);
+    if (!m) return text;
+    lines[idx] = indent + newReqType + ' ' + m[2] + ' {';
+    return lines.join('\n');
+  }
+
+  function updateElementField(text, lineNum, field, value) {
+    return updateRequirementField(text, lineNum, field, value);
+  }
+
+  function updateRelation(text, lineNum, field, value) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    var indent = lines[idx].match(/^(\s*)/)[1];
+    var m = lines[idx].trim().match(/^([A-Za-z_][A-Za-z0-9_-]*)\s+-\s+(\S+)\s+->\s+([A-Za-z_][A-Za-z0-9_-]*)\s*$/);
+    if (!m) return text;
+    var from = m[1], reltype = m[2], to = m[3];
+    if (field === 'from') from = value;
+    else if (field === 'reltype') reltype = value;
+    else if (field === 'to') to = value;
+    lines[idx] = indent + from + ' - ' + reltype + ' -> ' + to;
+    return lines.join('\n');
+  }
+
   return {
     type: 'requirementDiagram',
     displayName: 'Requirement',
@@ -167,6 +218,10 @@ window.MA.modules.requirementDiagram = (function() {
     addRelation: addRelation,
     deleteElement: deleteElement,
     deleteRelation: deleteRelation,
+    updateRequirementField: updateRequirementField,
+    updateRequirementType: updateRequirementType,
+    updateElementField: updateElementField,
+    updateRelation: updateRelation,
     template: function() {
       return [
         'requirementDiagram',
