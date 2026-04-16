@@ -15,6 +15,7 @@ const sourceFiles = [
   'src/ui/properties.js',
   'src/modules/gantt.js',
   'src/modules/sequence.js',
+  'src/modules/flowchart.js',
   'src/app.js',
 ];
 
