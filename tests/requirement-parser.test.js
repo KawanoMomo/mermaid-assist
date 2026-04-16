@@ -56,3 +56,38 @@ describe('parseRequirement — comments and blank lines', function() {
     expect(r.elements.length).toBe(1);
   });
 });
+
+describe('parseRequirement — element', function() {
+  test('parses element with type and docref', function() {
+    var r = req.parseRequirement('requirementDiagram\nelement ecu {\n    type: code module\n    docref: src/ecu.c\n}\n');
+    expect(r.elements.length).toBe(1);
+    expect(r.elements[0].kind).toBe('element');
+    expect(r.elements[0].name).toBe('ecu');
+    expect(r.elements[0].type).toBe('code module');
+    expect(r.elements[0].docref).toBe('src/ecu.c');
+  });
+
+  test('parses element with empty docref', function() {
+    var r = req.parseRequirement('requirementDiagram\nelement e1 {\n    type: simulation\n}\n');
+    expect(r.elements[0].docref).toBe('');
+  });
+});
+
+describe('parseRequirement — relations (7 reltype)', function() {
+  var reltypes = ['contains', 'copies', 'derives', 'satisfies', 'verifies', 'refines', 'traces'];
+  reltypes.forEach(function(rt) {
+    test('parses reltype ' + rt, function() {
+      var r = req.parseRequirement('requirementDiagram\nrequirement a {\n    id: A\n}\nrequirement b {\n    id: B\n}\na - ' + rt + ' -> b\n');
+      expect(r.relations.length).toBe(1);
+      expect(r.relations[0].from).toBe('a');
+      expect(r.relations[0].to).toBe('b');
+      expect(r.relations[0].reltype).toBe(rt);
+    });
+  });
+
+  test('multiple relations get unique IDs', function() {
+    var r = req.parseRequirement('requirementDiagram\nrequirement a { id: A }\nrequirement b { id: B }\nrequirement c { id: C }\na - contains -> b\nb - derives -> c\n');
+    expect(r.relations.length).toBe(2);
+    expect(r.relations[0].id).not.toBe(r.relations[1].id);
+  });
+});
