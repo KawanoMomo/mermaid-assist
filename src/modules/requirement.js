@@ -402,8 +402,62 @@ window.MA.modules.requirementDiagram = (function() {
         return;
       }
 
-      // Detail panels: implemented in subsequent tasks (T14-T16)
-      propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">詳細パネル (実装中)</p>';
+      // Single selection
+      if (selData.length === 1) {
+        var sel = selData[0];
+        if (sel.type === 'requirement') {
+          var rq = null;
+          for (var ri = 0; ri < reqs.length; ri++) if (reqs[ri].name === sel.id) { rq = reqs[ri]; break; }
+          if (!rq) { propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">要件が見つかりません</p>'; return; }
+          var reqTypeOpts2 = REQ_TYPES.map(function(rt) { return { value: rt, label: rt, selected: rt === rq.reqType }; });
+          var riskOpts = RISKS.map(function(rs) { return { value: rs, label: rs, selected: rs === rq.risk }; });
+          var verifyOpts = VERIFY_METHODS.map(function(vm) { return { value: vm, label: vm, selected: vm === rq.verifymethod }; });
+
+          propsEl.innerHTML =
+            P.panelHeaderHtml(rq.name) +
+            P.selectFieldHtml('Type', 'req-edit-type', reqTypeOpts2) +
+            P.fieldHtml('Name', 'req-edit-name', rq.name) +
+            P.fieldHtml('id', 'req-edit-id', rq.id) +
+            '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">text</label><textarea id="req-edit-text" rows="3" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;font-family:inherit;resize:vertical;">' + escHtml(rq.text) + '</textarea></div>' +
+            P.selectFieldHtml('risk', 'req-edit-risk', riskOpts) +
+            P.selectFieldHtml('verifymethod', 'req-edit-verify', verifyOpts) +
+            P.dangerButtonHtml('req-edit-delete', '要件削除');
+
+          var reqLine = rq.line, reqOldName = rq.name;
+          document.getElementById('req-edit-type').addEventListener('change', function() {
+            window.MA.history.pushHistory();
+            ctx.setMmdText(updateRequirementType(ctx.getMmdText(), reqLine, this.value));
+            ctx.onUpdate();
+          });
+          document.getElementById('req-edit-name').addEventListener('change', function() {
+            var nv = this.value.trim();
+            if (!nv || nv === reqOldName) return;
+            window.MA.history.pushHistory();
+            ctx.setMmdText(updateName(ctx.getMmdText(), reqLine, reqOldName, nv));
+            ctx.onUpdate();
+          });
+          ['id', 'text', 'risk', 'verify'].forEach(function(suffix) {
+            var inputId = 'req-edit-' + suffix;
+            var fieldKey = suffix === 'verify' ? 'verifymethod' : suffix;
+            document.getElementById(inputId).addEventListener('change', function() {
+              window.MA.history.pushHistory();
+              ctx.setMmdText(updateRequirementField(ctx.getMmdText(), reqLine, fieldKey, this.value));
+              ctx.onUpdate();
+            });
+          });
+          P.bindEvent('req-edit-delete', 'click', function() {
+            window.MA.history.pushHistory();
+            ctx.setMmdText(deleteElement(ctx.getMmdText(), reqLine, reqOldName));
+            window.MA.selection.clearSelection();
+            ctx.onUpdate();
+          });
+          return;
+        }
+
+        // element / relation panels: implemented in T15, T16
+      }
+
+      propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">未対応の選択状態</p>';
     },
     operations: {
       add: function(text, kind, props) {
