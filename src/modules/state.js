@@ -273,10 +273,9 @@ window.MA.modules.state = (function() {
   function renderProps(selData, parsedData, propsEl, ctx) {
     if (!propsEl) return;
     var escHtml = window.MA.htmlUtils.escHtml;
-
-    function fieldHtml(label, id, value, placeholder) {
-      return '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">' + escHtml(label) + '</label><input id="' + id + '" type="text" value="' + escHtml(value || '') + '" placeholder="' + escHtml(placeholder || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;"></div>';
-    }
+    var P = window.MA.properties;
+    var fieldHtml = P.fieldHtml;
+    var bindEvent = P.bindEvent;
 
     if (!selData || selData.length === 0) {
       var states = parsedData.elements.filter(function(e) { return e.kind === 'state'; });
@@ -293,34 +292,23 @@ window.MA.modules.state = (function() {
       var statesList = '';
       for (var lsi = 0; lsi < states.length; lsi++) {
         var s = states[lsi];
-        statesList += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
-          '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(s.label) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + escHtml(s.id) + ', ' + escHtml(s.type || 'simple') + ')</span></div>' +
-          '<button class="st-select-state" data-element-id="' + escHtml(s.id) + '" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' +
-          '<button class="st-delete-state" data-line="' + s.line + '" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
-        '</div>';
+        statesList += P.listItemHtml({ label: s.label, sublabel: '(' + s.id + ', ' + (s.type || 'simple') + ')', selectClass: 'st-select-state', deleteClass: 'st-delete-state', dataElementId: s.id, dataLine: s.line });
       }
-      if (!statesList) statesList = '<div style="font-size:11px;color:var(--text-secondary);">（状態なし）</div>';
+      if (!statesList) statesList = P.emptyListHtml('（状態なし）');
 
       var transList = '';
       for (var lti = 0; lti < transitions.length; lti++) {
         var tr = transitions[lti];
-        transList += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
-          '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-mono);">' + escHtml(tr.from) + ' → ' + escHtml(tr.to) + (tr.label ? ' : ' + escHtml(tr.label) : '') + '</div>' +
-          '<button class="st-select-trans" data-element-id="' + escHtml(tr.id) + '" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' +
-          '<button class="st-delete-trans" data-line="' + tr.line + '" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
-        '</div>';
+        transList += P.listItemHtml({ label: tr.from + ' → ' + tr.to + (tr.label ? ' : ' + tr.label : ''), selectClass: 'st-select-trans', deleteClass: 'st-delete-trans', dataElementId: tr.id, dataLine: tr.line, mono: true });
       }
-      if (!transList) transList = '<div style="font-size:11px;color:var(--text-secondary);">（遷移なし）</div>';
+      if (!transList) transList = P.emptyListHtml('（遷移なし）');
 
       var compList = '';
       for (var lci = 0; lci < composites.length; lci++) {
         var c = composites[lci];
-        compList += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
-          '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(c.label) + '</div>' +
-          '<button class="st-delete-comp" data-line="' + c.line + '" data-end-line="' + c.endLine + '" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
-        '</div>';
+        compList += P.listItemHtml({ label: c.label, deleteClass: 'st-delete-comp', dataLine: c.line, dataEndLine: c.endLine });
       }
-      if (!compList) compList = '<div style="font-size:11px;color:var(--text-secondary);">（なし）</div>';
+      if (!compList) compList = P.emptyListHtml('（なし）');
 
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">State Diagram</div>' +
@@ -340,7 +328,7 @@ window.MA.modules.state = (function() {
             '<select id="st-add-tr-to" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + stateOpts + '</select>' +
           '</div>' +
           fieldHtml('イベント', 'st-add-tr-event', '', 'click') +
-          '<button id="st-add-tr-btn" style="width:100%;background:var(--accent);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;">+ 遷移追加</button>' +
+          P.primaryButtonHtml('st-add-tr-btn', '+ 遷移追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">複合状態を追加</label>' +
@@ -363,11 +351,7 @@ window.MA.modules.state = (function() {
           '<div>' + compList + '</div>' +
         '</div>';
 
-      function bindEvt(id, event, handler) {
-        var el = document.getElementById(id);
-        if (el) el.addEventListener(event, handler);
-      }
-      bindEvt('st-add-state-btn', 'click', function() {
+      bindEvent('st-add-state-btn', 'click', function() {
         var id = document.getElementById('st-add-state-id').value.trim();
         var label = document.getElementById('st-add-state-label').value.trim();
         var type = document.getElementById('st-add-state-type').value;
@@ -376,7 +360,7 @@ window.MA.modules.state = (function() {
         ctx.setMmdText(addState(ctx.getMmdText(), id, label || id, type));
         ctx.onUpdate();
       });
-      bindEvt('st-add-tr-btn', 'click', function() {
+      bindEvent('st-add-tr-btn', 'click', function() {
         var from = document.getElementById('st-add-tr-from').value;
         var to = document.getElementById('st-add-tr-to').value;
         var event = document.getElementById('st-add-tr-event').value.trim();
@@ -385,7 +369,7 @@ window.MA.modules.state = (function() {
         ctx.setMmdText(addTransition(ctx.getMmdText(), from, to, event));
         ctx.onUpdate();
       });
-      bindEvt('st-add-comp-btn', 'click', function() {
+      bindEvent('st-add-comp-btn', 'click', function() {
         var id = document.getElementById('st-add-comp-id').value.trim();
         var label = document.getElementById('st-add-comp-label').value.trim();
         if (!id) { alert('IDは必須です'); return; }
@@ -393,43 +377,11 @@ window.MA.modules.state = (function() {
         ctx.setMmdText(addComposite(ctx.getMmdText(), id, label));
         ctx.onUpdate();
       });
-      var selS = propsEl.querySelectorAll('.st-select-state');
-      for (var ssi = 0; ssi < selS.length; ssi++) {
-        (function(btn) { btn.addEventListener('click', function() { window.MA.selection.setSelected([{ type: 'state', id: btn.getAttribute('data-element-id') }]); }); })(selS[ssi]);
-      }
-      var delS = propsEl.querySelectorAll('.st-delete-state');
-      for (var dsi = 0; dsi < delS.length; dsi++) {
-        (function(btn) { btn.addEventListener('click', function() {
-          var ln = parseInt(btn.getAttribute('data-line'), 10);
-          window.MA.history.pushHistory();
-          ctx.setMmdText(deleteState(ctx.getMmdText(), ln));
-          ctx.onUpdate();
-        }); })(delS[dsi]);
-      }
-      var selT = propsEl.querySelectorAll('.st-select-trans');
-      for (var sti2 = 0; sti2 < selT.length; sti2++) {
-        (function(btn) { btn.addEventListener('click', function() { window.MA.selection.setSelected([{ type: 'transition', id: btn.getAttribute('data-element-id') }]); }); })(selT[sti2]);
-      }
-      var delT = propsEl.querySelectorAll('.st-delete-trans');
-      for (var dti = 0; dti < delT.length; dti++) {
-        (function(btn) { btn.addEventListener('click', function() {
-          var ln = parseInt(btn.getAttribute('data-line'), 10);
-          window.MA.history.pushHistory();
-          ctx.setMmdText(deleteTransition(ctx.getMmdText(), ln));
-          ctx.onUpdate();
-        }); })(delT[dti]);
-      }
-      var delC = propsEl.querySelectorAll('.st-delete-comp');
-      for (var dci = 0; dci < delC.length; dci++) {
-        (function(btn) { btn.addEventListener('click', function() {
-          var sl = parseInt(btn.getAttribute('data-line'), 10);
-          var el2 = parseInt(btn.getAttribute('data-end-line'), 10);
-          if (isNaN(el2) || el2 <= 0) return;
-          window.MA.history.pushHistory();
-          ctx.setMmdText(deleteComposite(ctx.getMmdText(), sl, el2));
-          ctx.onUpdate();
-        }); })(delC[dci]);
-      }
+      P.bindSelectButtons(propsEl, 'st-select-state', 'state');
+      P.bindSelectButtons(propsEl, 'st-select-trans', 'transition');
+      P.bindDeleteButtons(propsEl, 'st-delete-state', ctx, deleteState);
+      P.bindDeleteButtons(propsEl, 'st-delete-trans', ctx, deleteTransition);
+      P.bindDeleteButtons(propsEl, 'st-delete-comp', ctx, deleteComposite, true);
       return;
     }
 
@@ -442,11 +394,11 @@ window.MA.modules.state = (function() {
       }
       if (!st) { propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">状態が見つかりません</p>'; return; }
       propsEl.innerHTML =
-        '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);font-weight:bold;color:var(--text-primary);font-size:13px;">' + escHtml(st.label) + '</div>' +
+        P.panelHeaderHtml(st.label) +
         fieldHtml('ID', 'sel-state-id', st.id) +
         fieldHtml('ラベル', 'sel-state-label', st.label) +
         '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">種別: ' + escHtml(st.type || 'simple') + '</div>' +
-        '<button id="sel-state-delete" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">状態削除</button>';
+        P.dangerButtonHtml('sel-state-delete', '状態削除');
 
       document.getElementById('sel-state-label').addEventListener('change', function() {
         window.MA.history.pushHistory();
@@ -479,11 +431,11 @@ window.MA.modules.state = (function() {
         toOpts += '<option value="' + escHtml(sid2) + '"' + (sid2 === tr.to ? ' selected' : '') + '>' + escHtml(states2[so].label) + '</option>';
       }
       propsEl.innerHTML =
-        '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);font-weight:bold;color:var(--text-primary);font-size:13px;">Transition</div>' +
+        P.panelHeaderHtml('Transition') +
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">From</label><select id="sel-tr-from" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + fromOpts + '</select></div>' +
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">To</label><select id="sel-tr-to" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + toOpts + '</select></div>' +
         fieldHtml('イベント', 'sel-tr-event', tr.label) +
-        '<button id="sel-tr-delete" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">遷移削除</button>';
+        P.dangerButtonHtml('sel-tr-delete', '遷移削除');
 
       document.getElementById('sel-tr-from').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateTransition(ctx.getMmdText(), tr.line, 'from', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-tr-to').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateTransition(ctx.getMmdText(), tr.line, 'to', this.value)); ctx.onUpdate(); });
