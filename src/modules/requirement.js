@@ -13,6 +13,13 @@ window.MA.modules.requirementDiagram = (function() {
   var FIELD_RE = /^([A-Za-z]+)\s*:\s*(.+)$/;
   var REL_RE = new RegExp('^([A-Za-z_][A-Za-z0-9_-]*)\\s+-\\s+(' + RELTYPES.join('|') + ')\\s+->\\s+([A-Za-z_][A-Za-z0-9_-]*)\\s*$');
 
+  function stripQuotes(s) {
+    if (s.length >= 2 && s.charAt(0) === '"' && s.charAt(s.length - 1) === '"') {
+      return s.substring(1, s.length - 1);
+    }
+    return s;
+  }
+
   function parseRequirement(text) {
     var result = { meta: {}, elements: [], relations: [] };
     if (!text || !text.trim()) return result;
@@ -57,13 +64,13 @@ window.MA.modules.requirementDiagram = (function() {
           var key = fm[1].toLowerCase();
           var val = fm[2].trim();
           if (current.kind === 'requirement') {
-            if (key === 'id') current.id = val;
-            else if (key === 'text') current.text = val;
+            if (key === 'id') current.id = stripQuotes(val);
+            else if (key === 'text') current.text = stripQuotes(val);
             else if (key === 'risk') current.risk = val.toLowerCase();
             else if (key === 'verifymethod') current.verifymethod = val.toLowerCase();
           } else if (current.kind === 'element') {
-            if (key === 'type') current.type = val;
-            else if (key === 'docref') current.docref = val;
+            if (key === 'type') current.type = stripQuotes(val);
+            else if (key === 'docref') current.docref = stripQuotes(val);
           }
           continue;
         }
@@ -85,8 +92,8 @@ window.MA.modules.requirementDiagram = (function() {
   function addRequirement(text, reqType, name) {
     var block = [
       reqType + ' ' + name + ' {',
-      '    id: ',
-      '    text: ',
+      '    id: ""',
+      '    text: ""',
       '    risk: medium',
       '    verifymethod: analysis',
       '}',
@@ -101,8 +108,8 @@ window.MA.modules.requirementDiagram = (function() {
   function addElement(text, name) {
     var block = [
       'element ' + name + ' {',
-      '    type: ',
-      '    docref: ',
+      '    type: ""',
+      '    docref: ""',
       '}',
     ];
     var lines = text.split('\n');
@@ -155,16 +162,22 @@ window.MA.modules.requirementDiagram = (function() {
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var fieldKey = field.toLowerCase();
+    var quotedFields = { id: 1, text: 1, type: 1, docref: 1 };
+    var formatted = value;
+    if (quotedFields[fieldKey]) {
+      var clean = typeof value === 'string' ? value.replace(/^"|"$/g, '') : value;
+      formatted = '"' + clean + '"';
+    }
     for (var j = idx + 1; j < lines.length; j++) {
       var t2 = lines[j].trim();
       if (t2 === '}') {
-        lines.splice(j, 0, '    ' + fieldKey + ': ' + value);
+        lines.splice(j, 0, '    ' + fieldKey + ': ' + formatted);
         return lines.join('\n');
       }
       var m = t2.match(/^([A-Za-z]+)\s*:\s*(.*)$/);
       if (m && m[1].toLowerCase() === fieldKey) {
         var indent = lines[j].match(/^(\s*)/)[1];
-        lines[j] = indent + fieldKey + ': ' + value;
+        lines[j] = indent + fieldKey + ': ' + formatted;
         return lines.join('\n');
       }
     }

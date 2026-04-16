@@ -91,3 +91,17 @@ describe('parseRequirement — relations (7 reltype)', function() {
     expect(r.relations[0].id).not.toBe(r.relations[1].id);
   });
 });
+
+describe('parseRequirement — quote stripping', function() {
+  test('strips quotes from id and text fields', function() {
+    var r = req.parseRequirement('requirementDiagram\nrequirement r1 {\n    id: "REQ-001"\n    text: "hello world"\n}\n');
+    expect(r.elements[0].id).toBe('REQ-001');
+    expect(r.elements[0].text).toBe('hello world');
+  });
+
+  test('strips quotes from element type and docref', function() {
+    var r = req.parseRequirement('requirementDiagram\nelement e1 {\n    type: "code module"\n    docref: "src/x.c"\n}\n');
+    expect(r.elements[0].type).toBe('code module');
+    expect(r.elements[0].docref).toBe('src/x.c');
+  });
+});

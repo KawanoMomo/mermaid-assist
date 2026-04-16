@@ -7,7 +7,7 @@ describe('addRequirement', function() {
     var t = 'requirementDiagram\n';
     var out = req.addRequirement(t, 'functionalRequirement', 'fr1');
     expect(out).toContain('functionalRequirement fr1 {');
-    expect(out).toContain('id: ');
+    expect(out).toContain('id: ""');
     expect(out).toContain('risk: medium');
     expect(out).toContain('verifymethod: analysis');
   });
@@ -24,8 +24,8 @@ describe('addElement', function() {
   test('adds element block', function() {
     var out = req.addElement('requirementDiagram\n', 'ecu');
     expect(out).toContain('element ecu {');
-    expect(out).toContain('type: ');
-    expect(out).toContain('docref: ');
+    expect(out).toContain('type: ""');
+    expect(out).toContain('docref: ""');
   });
 });
 
@@ -80,7 +80,7 @@ describe('updateRequirementField', function() {
     var t = 'requirementDiagram\nrequirement r1 {\n    id: OLD\n    text: hi\n}\n';
     var parsed = req.parseRequirement(t);
     var out = req.updateRequirementField(t, parsed.elements[0].line, 'id', 'NEW');
-    expect(out).toContain('id: NEW');
+    expect(out).toContain('id: "NEW"');
     expect(out).not.toContain('id: OLD');
   });
 
@@ -88,7 +88,7 @@ describe('updateRequirementField', function() {
     var t = 'requirementDiagram\nrequirement r1 {\n    id: X\n    text: hi\n}\n';
     var parsed = req.parseRequirement(t);
     var out = req.updateRequirementField(t, parsed.elements[0].line, 'text', 'changed');
-    expect(out).toContain('text: changed');
+    expect(out).toContain('text: "changed"');
   });
 
   test('appends field if missing', function() {
@@ -113,7 +113,7 @@ describe('updateElementField', function() {
     var t = 'requirementDiagram\nelement e1 {\n    type: code\n    docref: old\n}\n';
     var parsed = req.parseRequirement(t);
     var out = req.updateElementField(t, parsed.elements[0].line, 'docref', 'src/new.c');
-    expect(out).toContain('docref: src/new.c');
+    expect(out).toContain('docref: "src/new.c"');
   });
 });
 
