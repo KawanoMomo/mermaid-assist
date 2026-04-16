@@ -299,10 +299,9 @@ window.MA.modules.classDiagram = (function() {
   function renderProps(selData, parsedData, propsEl, ctx) {
     if (!propsEl) return;
     var escHtml = window.MA.htmlUtils.escHtml;
-
-    function fieldHtml(label, id, value, placeholder) {
-      return '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">' + escHtml(label) + '</label><input id="' + id + '" type="text" value="' + escHtml(value || '') + '" placeholder="' + escHtml(placeholder || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;"></div>';
-    }
+    var props = window.MA.properties;
+    var fieldHtml = props.fieldHtml;
+    var bindEvent = props.bindEvent;
 
     if (!selData || selData.length === 0) {
       var classes = parsedData.elements.filter(function(e) { return e.kind === 'class'; });
@@ -325,34 +324,23 @@ window.MA.modules.classDiagram = (function() {
       var classesList = '';
       for (var lci = 0; lci < classes.length; lci++) {
         var c = classes[lci];
-        classesList += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
-          '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(c.label) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + c.members.length + ' members)</span></div>' +
-          '<button class="cl-select-class" data-element-id="' + escHtml(c.id) + '" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' +
-          '<button class="cl-delete-class" data-line="' + c.line + '" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">&#x2715;</button>' +
-        '</div>';
+        classesList += props.listItemHtml({ label: c.label, sublabel: '(' + c.members.length + ' members)', selectClass: 'cl-select-class', deleteClass: 'cl-delete-class', dataElementId: c.id, dataLine: c.line });
       }
-      if (!classesList) classesList = '<div style="font-size:11px;color:var(--text-secondary);">（クラスなし）</div>';
+      if (!classesList) classesList = props.emptyListHtml('（クラスなし）');
 
       var relsList = '';
       for (var lri = 0; lri < rels.length; lri++) {
         var r = rels[lri];
-        relsList += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
-          '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-mono);">' + escHtml(r.from) + ' ' + escHtml(r.arrow) + ' ' + escHtml(r.to) + (r.label ? ' : ' + escHtml(r.label) : '') + '</div>' +
-          '<button class="cl-select-rel" data-element-id="' + escHtml(r.id) + '" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' +
-          '<button class="cl-delete-rel" data-line="' + r.line + '" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">&#x2715;</button>' +
-        '</div>';
+        relsList += props.listItemHtml({ label: r.from + ' ' + r.arrow + ' ' + r.to + (r.label ? ' : ' + r.label : ''), selectClass: 'cl-select-rel', deleteClass: 'cl-delete-rel', dataElementId: r.id, dataLine: r.line, mono: true });
       }
-      if (!relsList) relsList = '<div style="font-size:11px;color:var(--text-secondary);">（関連なし）</div>';
+      if (!relsList) relsList = props.emptyListHtml('（関連なし）');
 
       var nsList = '';
       for (var lni = 0; lni < namespaces.length; lni++) {
         var ns = namespaces[lni];
-        nsList += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
-          '<div style="flex:1;color:var(--text-primary);">' + escHtml(ns.label) + '</div>' +
-          '<button class="cl-delete-ns" data-line="' + ns.line + '" data-end-line="' + ns.endLine + '" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">&#x2715;</button>' +
-        '</div>';
+        nsList += props.listItemHtml({ label: ns.label, deleteClass: 'cl-delete-ns', dataLine: ns.line, dataEndLine: ns.endLine });
       }
-      if (!nsList) nsList = '<div style="font-size:11px;color:var(--text-secondary);">（なし）</div>';
+      if (!nsList) nsList = props.emptyListHtml('（なし）');
 
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">Class Diagram</div>' +
@@ -384,7 +372,7 @@ window.MA.modules.classDiagram = (function() {
             '<select id="cl-add-rel-to" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + classOpts + '</select>' +
           '</div>' +
           fieldHtml('ラベル', 'cl-add-rel-label', '', '') +
-          '<button id="cl-add-rel-btn" style="width:100%;background:var(--accent);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;">+ 関連追加</button>' +
+          props.primaryButtonHtml('cl-add-rel-btn', '+ 関連追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">名前空間を追加</label>' +
@@ -406,18 +394,14 @@ window.MA.modules.classDiagram = (function() {
           '<div>' + nsList + '</div>' +
         '</div>';
 
-      function bindEvt(id, event, handler) {
-        var el = document.getElementById(id);
-        if (el) el.addEventListener(event, handler);
-      }
-      bindEvt('cl-add-class-btn', 'click', function() {
+      bindEvent('cl-add-class-btn', 'click', function() {
         var id = document.getElementById('cl-add-class-id').value.trim();
         if (!id) { alert('IDは必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addClass(ctx.getMmdText(), id));
         ctx.onUpdate();
       });
-      bindEvt('cl-add-mem-btn', 'click', function() {
+      bindEvent('cl-add-mem-btn', 'click', function() {
         var clsId = document.getElementById('cl-add-mem-class').value;
         var vis = document.getElementById('cl-add-mem-vis').value;
         var name = document.getElementById('cl-add-mem-name').value.trim();
@@ -428,7 +412,7 @@ window.MA.modules.classDiagram = (function() {
         ctx.setMmdText(addMember(ctx.getMmdText(), clsId, vis, name, type, isMethod));
         ctx.onUpdate();
       });
-      bindEvt('cl-add-rel-btn', 'click', function() {
+      bindEvent('cl-add-rel-btn', 'click', function() {
         var from = document.getElementById('cl-add-rel-from').value;
         var to = document.getElementById('cl-add-rel-to').value;
         var arrow = document.getElementById('cl-add-rel-arrow').value;
@@ -438,7 +422,7 @@ window.MA.modules.classDiagram = (function() {
         ctx.setMmdText(addRelation(ctx.getMmdText(), from, to, arrow, label));
         ctx.onUpdate();
       });
-      bindEvt('cl-add-ns-btn', 'click', function() {
+      bindEvent('cl-add-ns-btn', 'click', function() {
         var id = document.getElementById('cl-add-ns-id').value.trim();
         if (!id) { alert('IDは必須です'); return; }
         window.MA.history.pushHistory();
@@ -446,43 +430,11 @@ window.MA.modules.classDiagram = (function() {
         ctx.onUpdate();
       });
 
-      var selC = propsEl.querySelectorAll('.cl-select-class');
-      for (var sci2 = 0; sci2 < selC.length; sci2++) {
-        (function(btn) { btn.addEventListener('click', function() { window.MA.selection.setSelected([{ type: 'class', id: btn.getAttribute('data-element-id') }]); }); })(selC[sci2]);
-      }
-      var delC = propsEl.querySelectorAll('.cl-delete-class');
-      for (var dci = 0; dci < delC.length; dci++) {
-        (function(btn) { btn.addEventListener('click', function() {
-          var ln = parseInt(btn.getAttribute('data-line'), 10);
-          window.MA.history.pushHistory();
-          ctx.setMmdText(deleteClass(ctx.getMmdText(), ln));
-          ctx.onUpdate();
-        }); })(delC[dci]);
-      }
-      var selR = propsEl.querySelectorAll('.cl-select-rel');
-      for (var sri = 0; sri < selR.length; sri++) {
-        (function(btn) { btn.addEventListener('click', function() { window.MA.selection.setSelected([{ type: 'relation', id: btn.getAttribute('data-element-id') }]); }); })(selR[sri]);
-      }
-      var delR = propsEl.querySelectorAll('.cl-delete-rel');
-      for (var dri = 0; dri < delR.length; dri++) {
-        (function(btn) { btn.addEventListener('click', function() {
-          var ln = parseInt(btn.getAttribute('data-line'), 10);
-          window.MA.history.pushHistory();
-          ctx.setMmdText(deleteRelation(ctx.getMmdText(), ln));
-          ctx.onUpdate();
-        }); })(delR[dri]);
-      }
-      var delN = propsEl.querySelectorAll('.cl-delete-ns');
-      for (var dni = 0; dni < delN.length; dni++) {
-        (function(btn) { btn.addEventListener('click', function() {
-          var sl = parseInt(btn.getAttribute('data-line'), 10);
-          var el2 = parseInt(btn.getAttribute('data-end-line'), 10);
-          if (isNaN(el2) || el2 <= 0) return;
-          window.MA.history.pushHistory();
-          ctx.setMmdText(deleteNamespace(ctx.getMmdText(), sl, el2));
-          ctx.onUpdate();
-        }); })(delN[dni]);
-      }
+      props.bindSelectButtons(propsEl, 'cl-select-class', 'class');
+      props.bindDeleteButtons(propsEl, 'cl-delete-class', ctx, deleteClass);
+      props.bindSelectButtons(propsEl, 'cl-select-rel', 'relation');
+      props.bindDeleteButtons(propsEl, 'cl-delete-rel', ctx, deleteRelation);
+      props.bindDeleteButtons(propsEl, 'cl-delete-ns', ctx, deleteNamespace, true);
       return;
     }
 
@@ -497,36 +449,25 @@ window.MA.modules.classDiagram = (function() {
       var membersList = '';
       for (var mi = 0; mi < cls.members.length; mi++) {
         var m = cls.members[mi];
-        membersList += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;font-family:var(--font-mono);">' +
-          '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(m.visibility) + escHtml(m.name) + escHtml(m.params || '') + (m.type ? ' ' + escHtml(m.type) : '') + '</div>' +
-          '<button class="cl-delete-mem" data-line="' + m.line + '" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">&#x2715;</button>' +
-        '</div>';
+        membersList += props.listItemHtml({ label: m.visibility + m.name + (m.params || '') + (m.type ? ' ' + m.type : ''), deleteClass: 'cl-delete-mem', dataLine: m.line, mono: true });
       }
-      if (!membersList) membersList = '<div style="font-size:11px;color:var(--text-secondary);">（メンバなし）</div>';
+      if (!membersList) membersList = props.emptyListHtml('（メンバなし）');
       propsEl.innerHTML =
-        '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);font-weight:bold;color:var(--text-primary);font-size:13px;">' + escHtml(cls.label) + '</div>' +
+        props.panelHeaderHtml(cls.label) +
         '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">クラス: ' + escHtml(cls.id) + '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">メンバ一覧</label>' +
           '<div>' + membersList + '</div>' +
         '</div>' +
-        '<button id="sel-class-delete" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">クラス削除</button>';
+        props.dangerButtonHtml('sel-class-delete', 'クラス削除');
 
-      document.getElementById('sel-class-delete').addEventListener('click', function() {
+      bindEvent('sel-class-delete', 'click', function() {
         window.MA.history.pushHistory();
         ctx.setMmdText(deleteClass(ctx.getMmdText(), cls.line));
         window.MA.selection.clearSelection();
         ctx.onUpdate();
       });
-      var delM = propsEl.querySelectorAll('.cl-delete-mem');
-      for (var dmi = 0; dmi < delM.length; dmi++) {
-        (function(btn) { btn.addEventListener('click', function() {
-          var ln = parseInt(btn.getAttribute('data-line'), 10);
-          window.MA.history.pushHistory();
-          ctx.setMmdText(window.MA.textUpdater.deleteLine(ctx.getMmdText(), ln));
-          ctx.onUpdate();
-        }); })(delM[dmi]);
-      }
+      props.bindDeleteButtons(propsEl, 'cl-delete-mem', ctx, window.MA.textUpdater.deleteLine);
       return;
     }
 
@@ -550,18 +491,18 @@ window.MA.modules.classDiagram = (function() {
       for (var ai4 = 0; ai4 < arrows3.length; ai4++) arrowOpts3 += '<option value="' + arrows3[ai4] + '"' + (arrows3[ai4] === rel.arrow ? ' selected' : '') + '>' + arrows3[ai4] + '</option>';
 
       propsEl.innerHTML =
-        '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);font-weight:bold;color:var(--text-primary);font-size:13px;">Relation</div>' +
+        props.panelHeaderHtml('Relation') +
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">From</label><select id="sel-rel-from" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + fromOpts + '</select></div>' +
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">Arrow</label><select id="sel-rel-arrow" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;font-family:var(--font-mono);">' + arrowOpts3 + '</select></div>' +
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">To</label><select id="sel-rel-to" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + toOpts + '</select></div>' +
         fieldHtml('ラベル', 'sel-rel-label', rel.label) +
-        '<button id="sel-rel-delete" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">関連削除</button>';
+        props.dangerButtonHtml('sel-rel-delete', '関連削除');
 
       document.getElementById('sel-rel-from').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateRelation(ctx.getMmdText(), rel.line, 'from', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-rel-arrow').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateRelation(ctx.getMmdText(), rel.line, 'arrow', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-rel-to').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateRelation(ctx.getMmdText(), rel.line, 'to', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-rel-label').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateRelation(ctx.getMmdText(), rel.line, 'label', this.value)); ctx.onUpdate(); });
-      document.getElementById('sel-rel-delete').addEventListener('click', function() { window.MA.history.pushHistory(); ctx.setMmdText(deleteRelation(ctx.getMmdText(), rel.line)); window.MA.selection.clearSelection(); ctx.onUpdate(); });
+      bindEvent('sel-rel-delete', 'click', function() { window.MA.history.pushHistory(); ctx.setMmdText(deleteRelation(ctx.getMmdText(), rel.line)); window.MA.selection.clearSelection(); ctx.onUpdate(); });
       return;
     }
 
