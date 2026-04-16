@@ -461,14 +461,12 @@ window.MA.modules.sequence = (function() {
           '</div>' +
         '</div>' +
 
-        // Add message
+        // Add message — vertical layout with labeled From/Arrow/To
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">メッセージを追加</label>' +
-          '<div style="display:flex;gap:4px;margin-bottom:6px;">' +
-            '<select id="seq-add-msg-from" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + participantOpts + '</select>' +
-            '<select id="seq-add-msg-arrow" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;font-family:var(--font-mono);">' + arrowOpts + '</select>' +
-            '<select id="seq-add-msg-to" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + participantOpts + '</select>' +
-          '</div>' +
+          props.selectFieldHtml('From', 'seq-add-msg-from', participants.length === 0 ? [{value: '', label: '（参加者を先に追加）'}] : participants.map(function(p) { return { value: p.id, label: p.label }; })) +
+          props.selectFieldHtml('Arrow', 'seq-add-msg-arrow', arrows.map(function(a) { return { value: a, label: a }; }), true) +
+          props.selectFieldHtml('To', 'seq-add-msg-to', participants.length === 0 ? [{value: '', label: '（参加者を先に追加）'}] : participants.map(function(p) { return { value: p.id, label: p.label }; })) +
           fieldHtml('ラベル', 'seq-add-msg-label', '', 'Message') +
           props.primaryButtonHtml('seq-add-msg-btn', '+ メッセージ追加') +
         '</div>' +
