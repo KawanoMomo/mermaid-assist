@@ -323,10 +323,8 @@ window.MA.modules.state = (function() {
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">遷移を追加</label>' +
-          '<div style="display:flex;gap:4px;margin-bottom:6px;">' +
-            '<select id="st-add-tr-from" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + stateOpts + '</select>' +
-            '<select id="st-add-tr-to" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + stateOpts + '</select>' +
-          '</div>' +
+          props.selectFieldHtml('From', 'st-add-tr-from', [{value: '[*]', label: '[*] (start/end)'}].concat(states.map(function(s) { return { value: s.id, label: s.label }; }))) +
+          props.selectFieldHtml('To', 'st-add-tr-to', [{value: '[*]', label: '[*] (start/end)'}].concat(states.map(function(s) { return { value: s.id, label: s.label }; }))) +
           fieldHtml('イベント', 'st-add-tr-event', '', 'click') +
           P.primaryButtonHtml('st-add-tr-btn', '+ 遷移追加') +
         '</div>' +
