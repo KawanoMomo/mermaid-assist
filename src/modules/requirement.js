@@ -454,7 +454,87 @@ window.MA.modules.requirementDiagram = (function() {
           return;
         }
 
-        // element / relation panels: implemented in T15, T16
+        if (sel.type === 'element') {
+          var el = null;
+          for (var ei = 0; ei < elems.length; ei++) if (elems[ei].name === sel.id) { el = elems[ei]; break; }
+          if (!el) { propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">エレメントが見つかりません</p>'; return; }
+
+          propsEl.innerHTML =
+            P.panelHeaderHtml(el.name) +
+            P.fieldHtml('Name', 'req-edit-elem-name', el.name) +
+            P.fieldHtml('type', 'req-edit-elem-type', el.type) +
+            P.fieldHtml('docref', 'req-edit-elem-docref', el.docref, '空可') +
+            P.dangerButtonHtml('req-edit-elem-delete', 'エレメント削除');
+
+          var elLine = el.line, elOldName = el.name;
+          document.getElementById('req-edit-elem-name').addEventListener('change', function() {
+            var nv = this.value.trim();
+            if (!nv || nv === elOldName) return;
+            window.MA.history.pushHistory();
+            ctx.setMmdText(updateName(ctx.getMmdText(), elLine, elOldName, nv));
+            ctx.onUpdate();
+          });
+          document.getElementById('req-edit-elem-type').addEventListener('change', function() {
+            window.MA.history.pushHistory();
+            ctx.setMmdText(updateElementField(ctx.getMmdText(), elLine, 'type', this.value));
+            ctx.onUpdate();
+          });
+          document.getElementById('req-edit-elem-docref').addEventListener('change', function() {
+            window.MA.history.pushHistory();
+            ctx.setMmdText(updateElementField(ctx.getMmdText(), elLine, 'docref', this.value));
+            ctx.onUpdate();
+          });
+          P.bindEvent('req-edit-elem-delete', 'click', function() {
+            window.MA.history.pushHistory();
+            ctx.setMmdText(deleteElement(ctx.getMmdText(), elLine, elOldName));
+            window.MA.selection.clearSelection();
+            ctx.onUpdate();
+          });
+          return;
+        }
+
+        if (sel.type === 'relation') {
+          var rel = null;
+          for (var rli = 0; rli < rels.length; rli++) if (rels[rli].id === sel.id) { rel = rels[rli]; break; }
+          if (!rel) { propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">リレーションが見つかりません</p>'; return; }
+
+          var allOpts = parsedData.elements.map(function(e) { return { value: e.name, label: e.name }; });
+          if (allOpts.length === 0) allOpts = [{ value: '', label: '（要素なし）' }];
+          var fromOpts = allOpts.map(function(o) { return { value: o.value, label: o.label, selected: o.value === rel.from }; });
+          var toOpts = allOpts.map(function(o) { return { value: o.value, label: o.label, selected: o.value === rel.to }; });
+          var rtOpts = RELTYPES.map(function(rt) { return { value: rt, label: rt, selected: rt === rel.reltype }; });
+
+          propsEl.innerHTML =
+            P.panelHeaderHtml('Relation') +
+            P.selectFieldHtml('From', 'req-edit-rel-from', fromOpts) +
+            P.selectFieldHtml('Type', 'req-edit-rel-type', rtOpts) +
+            P.selectFieldHtml('To', 'req-edit-rel-to', toOpts) +
+            P.dangerButtonHtml('req-edit-rel-delete', 'リレーション削除');
+
+          var relLine = rel.line;
+          document.getElementById('req-edit-rel-from').addEventListener('change', function() {
+            window.MA.history.pushHistory();
+            ctx.setMmdText(updateRelation(ctx.getMmdText(), relLine, 'from', this.value));
+            ctx.onUpdate();
+          });
+          document.getElementById('req-edit-rel-type').addEventListener('change', function() {
+            window.MA.history.pushHistory();
+            ctx.setMmdText(updateRelation(ctx.getMmdText(), relLine, 'reltype', this.value));
+            ctx.onUpdate();
+          });
+          document.getElementById('req-edit-rel-to').addEventListener('change', function() {
+            window.MA.history.pushHistory();
+            ctx.setMmdText(updateRelation(ctx.getMmdText(), relLine, 'to', this.value));
+            ctx.onUpdate();
+          });
+          P.bindEvent('req-edit-rel-delete', 'click', function() {
+            window.MA.history.pushHistory();
+            ctx.setMmdText(deleteRelation(ctx.getMmdText(), relLine));
+            window.MA.selection.clearSelection();
+            ctx.onUpdate();
+          });
+          return;
+        }
       }
 
       propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">未対応の選択状態</p>';
