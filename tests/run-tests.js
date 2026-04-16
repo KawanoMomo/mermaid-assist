@@ -17,6 +17,7 @@ const sourceFiles = [
   'src/modules/sequence.js',
   'src/modules/flowchart.js',
   'src/modules/state.js',
+  'src/modules/class.js',
   'src/app.js',
 ];
 
