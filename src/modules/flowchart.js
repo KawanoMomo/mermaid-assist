@@ -446,6 +446,7 @@ window.MA.modules.flowchart = (function() {
     if (!propsEl) return;
     var escHtml = window.MA.htmlUtils.escHtml;
     var fieldHtml = window.MA.properties.fieldHtml;
+    var props = window.MA.properties;
 
     if (!selData || selData.length === 0) {
       var nodes = parsedData.elements.filter(function(e) { return e.kind === 'node'; });
@@ -524,11 +525,9 @@ window.MA.modules.flowchart = (function() {
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">エッジを追加</label>' +
-          '<div style="display:flex;gap:4px;margin-bottom:6px;">' +
-            '<select id="fc-add-edge-from" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + nodeOpts + '</select>' +
-            '<select id="fc-add-edge-arrow" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;font-family:var(--font-mono);">' + arrowOpts + '</select>' +
-            '<select id="fc-add-edge-to" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + nodeOpts + '</select>' +
-          '</div>' +
+          props.selectFieldHtml('From', 'fc-add-edge-from', nodes.length === 0 ? [{value: '', label: '（ノードを先に追加）'}] : nodes.map(function(n) { return { value: n.id, label: n.label }; })) +
+          props.selectFieldHtml('Arrow', 'fc-add-edge-arrow', arrows.map(function(a) { return { value: a, label: a }; }), true) +
+          props.selectFieldHtml('To', 'fc-add-edge-to', nodes.length === 0 ? [{value: '', label: '（ノードを先に追加）'}] : nodes.map(function(n) { return { value: n.id, label: n.label }; })) +
           fieldHtml('ラベル', 'fc-add-edge-label', '', '') +
           window.MA.properties.primaryButtonHtml('fc-add-edge-btn', '+ エッジ追加') +
         '</div>' +
