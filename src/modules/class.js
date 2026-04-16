@@ -366,11 +366,9 @@ window.MA.modules.classDiagram = (function() {
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">関連を追加</label>' +
-          '<div style="display:flex;gap:4px;margin-bottom:4px;">' +
-            '<select id="cl-add-rel-from" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + classOpts + '</select>' +
-            '<select id="cl-add-rel-arrow" style="flex:1.5;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;font-family:var(--font-mono);">' + relOpts + '</select>' +
-            '<select id="cl-add-rel-to" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + classOpts + '</select>' +
-          '</div>' +
+          props.selectFieldHtml('From', 'cl-add-rel-from', classes.length === 0 ? [{value: '', label: '（クラスを先に追加）'}] : classes.map(function(c) { return { value: c.id, label: c.label }; })) +
+          props.selectFieldHtml('Arrow', 'cl-add-rel-arrow', rels_arrows.map(function(a) { return { value: a, label: a + ' (' + relLabels[a] + ')' }; }), true) +
+          props.selectFieldHtml('To', 'cl-add-rel-to', classes.length === 0 ? [{value: '', label: '（クラスを先に追加）'}] : classes.map(function(c) { return { value: c.id, label: c.label }; })) +
           fieldHtml('ラベル', 'cl-add-rel-label', '', '') +
           props.primaryButtonHtml('cl-add-rel-btn', '+ 関連追加') +
         '</div>' +
