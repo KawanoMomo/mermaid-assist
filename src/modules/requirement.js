@@ -82,6 +82,45 @@ window.MA.modules.requirementDiagram = (function() {
     return result;
   }
 
+  function addRequirement(text, reqType, name) {
+    var block = [
+      reqType + ' ' + name + ' {',
+      '    id: ',
+      '    text: ',
+      '    risk: medium',
+      '    verifymethod: analysis',
+      '}',
+    ];
+    var lines = text.split('\n');
+    var insertAt = lines.length;
+    while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
+    lines.splice.apply(lines, [insertAt, 0].concat(block));
+    return lines.join('\n');
+  }
+
+  function addElement(text, name) {
+    var block = [
+      'element ' + name + ' {',
+      '    type: ',
+      '    docref: ',
+      '}',
+    ];
+    var lines = text.split('\n');
+    var insertAt = lines.length;
+    while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
+    lines.splice.apply(lines, [insertAt, 0].concat(block));
+    return lines.join('\n');
+  }
+
+  function addRelation(text, from, reltype, to) {
+    var newLine = from + ' - ' + reltype + ' -> ' + to;
+    var lines = text.split('\n');
+    var insertAt = lines.length;
+    while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
+    lines.splice(insertAt, 0, newLine);
+    return lines.join('\n');
+  }
+
   return {
     type: 'requirementDiagram',
     displayName: 'Requirement',
@@ -94,6 +133,9 @@ window.MA.modules.requirementDiagram = (function() {
     },
     parse: parseRequirement,
     parseRequirement: parseRequirement,
+    addRequirement: addRequirement,
+    addElement: addElement,
+    addRelation: addRelation,
     template: function() {
       return [
         'requirementDiagram',
