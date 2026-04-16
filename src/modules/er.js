@@ -209,10 +209,7 @@ window.MA.modules.erDiagram = (function() {
   function renderProps(selData, parsedData, propsEl, ctx) {
     if (!propsEl) return;
     var escHtml = window.MA.htmlUtils.escHtml;
-
-    function fieldHtml(label, id, value, placeholder) {
-      return '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">' + escHtml(label) + '</label><input id="' + id + '" type="text" value="' + escHtml(value || '') + '" placeholder="' + escHtml(placeholder || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;"></div>';
-    }
+    var P = window.MA.properties;
 
     if (!selData || selData.length === 0) {
       var entities = parsedData.elements.filter(function(e) { return e.kind === 'entity'; });
@@ -234,24 +231,16 @@ window.MA.modules.erDiagram = (function() {
       var entitiesList = '';
       for (var lei = 0; lei < entities.length; lei++) {
         var ent = entities[lei];
-        entitiesList += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
-          '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(ent.label) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + ent.attributes.length + ' attrs)</span></div>' +
-          '<button class="er-select-entity" data-element-id="' + escHtml(ent.id) + '" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' +
-          '<button class="er-delete-entity" data-line="' + ent.line + '" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
-        '</div>';
+        entitiesList += P.listItemHtml({ label: ent.label, sublabel: '(' + ent.attributes.length + ' attrs)', selectClass: 'er-select-entity', deleteClass: 'er-delete-entity', dataElementId: ent.id, dataLine: ent.line });
       }
-      if (!entitiesList) entitiesList = '<div style="font-size:11px;color:var(--text-secondary);">（エンティティなし）</div>';
+      if (!entitiesList) entitiesList = P.emptyListHtml('（エンティティなし）');
 
       var relsList = '';
       for (var lri = 0; lri < rels.length; lri++) {
         var rel = rels[lri];
-        relsList += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
-          '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-mono);">' + escHtml(rel.from) + ' ' + escHtml(rel.leftCard) + (rel.dashStyle || '--') + escHtml(rel.rightCard) + ' ' + escHtml(rel.to) + (rel.label ? ' : ' + escHtml(rel.label) : '') + '</div>' +
-          '<button class="er-select-rel" data-element-id="' + escHtml(rel.id) + '" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' +
-          '<button class="er-delete-rel" data-line="' + rel.line + '" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
-        '</div>';
+        relsList += P.listItemHtml({ label: rel.from + ' ' + rel.leftCard + (rel.dashStyle || '--') + rel.rightCard + ' ' + rel.to + (rel.label ? ' : ' + rel.label : ''), selectClass: 'er-select-rel', deleteClass: 'er-delete-rel', dataElementId: rel.id, dataLine: rel.line, mono: true });
       }
-      if (!relsList) relsList = '<div style="font-size:11px;color:var(--text-secondary);">（リレーションシップなし）</div>';
+      if (!relsList) relsList = P.emptyListHtml('（リレーションシップなし）');
 
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">ER Diagram</div>' +
@@ -270,8 +259,8 @@ window.MA.modules.erDiagram = (function() {
             '<input id="er-add-attr-name" type="text" placeholder="name" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' +
             '<select id="er-add-attr-key" style="flex:0 0 60px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + keyOpts + '</select>' +
           '</div>' +
-          fieldHtml('コメント', 'er-add-attr-comment', '', '') +
-          '<button id="er-add-attr-btn" style="width:100%;background:var(--accent);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;">+ 属性追加</button>' +
+          P.fieldHtml('コメント', 'er-add-attr-comment', '', '') +
+          P.primaryButtonHtml('er-add-attr-btn', '+ 属性追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">リレーションシップを追加</label>' +
@@ -281,8 +270,8 @@ window.MA.modules.erDiagram = (function() {
             '<select id="er-add-rel-rc" style="flex:0 0 50px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;font-family:var(--font-mono);">' + rightCardOpts + '</select>' +
             '<select id="er-add-rel-to" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + entityOpts + '</select>' +
           '</div>' +
-          fieldHtml('ラベル', 'er-add-rel-label', '', 'has') +
-          '<button id="er-add-rel-btn" style="width:100%;background:var(--accent);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;">+ リレーションシップ追加</button>' +
+          P.fieldHtml('ラベル', 'er-add-rel-label', '', 'has') +
+          P.primaryButtonHtml('er-add-rel-btn', '+ リレーションシップ追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">エンティティ一覧</label>' +
@@ -297,18 +286,14 @@ window.MA.modules.erDiagram = (function() {
       var rcSelInit = document.getElementById('er-add-rel-rc');
       if (rcSelInit) rcSelInit.value = 'o{';
 
-      function bindEvt(id, event, handler) {
-        var el = document.getElementById(id);
-        if (el) el.addEventListener(event, handler);
-      }
-      bindEvt('er-add-ent-btn', 'click', function() {
+      P.bindEvent('er-add-ent-btn', 'click', function() {
         var id = document.getElementById('er-add-ent-id').value.trim();
         if (!id) { alert('IDは必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addEntity(ctx.getMmdText(), id));
         ctx.onUpdate();
       });
-      bindEvt('er-add-attr-btn', 'click', function() {
+      P.bindEvent('er-add-attr-btn', 'click', function() {
         var entId = document.getElementById('er-add-attr-entity').value;
         var type = document.getElementById('er-add-attr-type').value.trim();
         var name = document.getElementById('er-add-attr-name').value.trim();
@@ -319,7 +304,7 @@ window.MA.modules.erDiagram = (function() {
         ctx.setMmdText(addAttribute(ctx.getMmdText(), entId, type, name, key, comment));
         ctx.onUpdate();
       });
-      bindEvt('er-add-rel-btn', 'click', function() {
+      P.bindEvent('er-add-rel-btn', 'click', function() {
         var from = document.getElementById('er-add-rel-from').value;
         var to = document.getElementById('er-add-rel-to').value;
         var lc = document.getElementById('er-add-rel-lc').value;
@@ -331,32 +316,10 @@ window.MA.modules.erDiagram = (function() {
         ctx.onUpdate();
       });
 
-      var selE = propsEl.querySelectorAll('.er-select-entity');
-      for (var sei = 0; sei < selE.length; sei++) {
-        (function(btn) { btn.addEventListener('click', function() { window.MA.selection.setSelected([{ type: 'entity', id: btn.getAttribute('data-element-id') }]); }); })(selE[sei]);
-      }
-      var delE = propsEl.querySelectorAll('.er-delete-entity');
-      for (var dei = 0; dei < delE.length; dei++) {
-        (function(btn) { btn.addEventListener('click', function() {
-          var ln = parseInt(btn.getAttribute('data-line'), 10);
-          window.MA.history.pushHistory();
-          ctx.setMmdText(deleteEntity(ctx.getMmdText(), ln));
-          ctx.onUpdate();
-        }); })(delE[dei]);
-      }
-      var selR = propsEl.querySelectorAll('.er-select-rel');
-      for (var sri = 0; sri < selR.length; sri++) {
-        (function(btn) { btn.addEventListener('click', function() { window.MA.selection.setSelected([{ type: 'relationship', id: btn.getAttribute('data-element-id') }]); }); })(selR[sri]);
-      }
-      var delR = propsEl.querySelectorAll('.er-delete-rel');
-      for (var dri = 0; dri < delR.length; dri++) {
-        (function(btn) { btn.addEventListener('click', function() {
-          var ln = parseInt(btn.getAttribute('data-line'), 10);
-          window.MA.history.pushHistory();
-          ctx.setMmdText(deleteRelationship(ctx.getMmdText(), ln));
-          ctx.onUpdate();
-        }); })(delR[dri]);
-      }
+      P.bindSelectButtons(propsEl, 'er-select-entity', 'entity');
+      P.bindDeleteButtons(propsEl, 'er-delete-entity', ctx, deleteEntity);
+      P.bindSelectButtons(propsEl, 'er-select-rel', 'relationship');
+      P.bindDeleteButtons(propsEl, 'er-delete-rel', ctx, deleteRelationship);
       return;
     }
 
@@ -371,36 +334,25 @@ window.MA.modules.erDiagram = (function() {
       var attrsList = '';
       for (var ai = 0; ai < ent.attributes.length; ai++) {
         var a = ent.attributes[ai];
-        attrsList += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;font-family:var(--font-mono);">' +
-          '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(a.type) + ' ' + escHtml(a.name) + (a.key ? ' [' + escHtml(a.key) + ']' : '') + '</div>' +
-          '<button class="er-delete-attr" data-line="' + a.line + '" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
-        '</div>';
+        attrsList += P.listItemHtml({ label: a.type + ' ' + a.name + (a.key ? ' [' + a.key + ']' : ''), deleteClass: 'er-delete-attr', dataLine: a.line, mono: true });
       }
-      if (!attrsList) attrsList = '<div style="font-size:11px;color:var(--text-secondary);">（属性なし）</div>';
+      if (!attrsList) attrsList = P.emptyListHtml('（属性なし）');
       propsEl.innerHTML =
-        '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);font-weight:bold;color:var(--text-primary);font-size:13px;">' + escHtml(ent.label) + '</div>' +
+        P.panelHeaderHtml(ent.label) +
         '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">エンティティ: ' + escHtml(ent.id) + '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">属性一覧</label>' +
           '<div>' + attrsList + '</div>' +
         '</div>' +
-        '<button id="sel-ent-delete" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">エンティティ削除</button>';
+        P.dangerButtonHtml('sel-ent-delete', 'エンティティ削除');
 
-      document.getElementById('sel-ent-delete').addEventListener('click', function() {
+      P.bindEvent('sel-ent-delete', 'click', function() {
         window.MA.history.pushHistory();
         ctx.setMmdText(deleteEntity(ctx.getMmdText(), ent.line));
         window.MA.selection.clearSelection();
         ctx.onUpdate();
       });
-      var delA = propsEl.querySelectorAll('.er-delete-attr');
-      for (var dai = 0; dai < delA.length; dai++) {
-        (function(btn) { btn.addEventListener('click', function() {
-          var ln = parseInt(btn.getAttribute('data-line'), 10);
-          window.MA.history.pushHistory();
-          ctx.setMmdText(deleteAttribute(ctx.getMmdText(), ln));
-          ctx.onUpdate();
-        }); })(delA[dai]);
-      }
+      P.bindDeleteButtons(propsEl, 'er-delete-attr', ctx, deleteAttribute);
       return;
     }
 
@@ -426,22 +378,23 @@ window.MA.modules.erDiagram = (function() {
         rcOpts2 += '<option value="' + cards2[ci2] + '"' + (cards2[ci2] === rel2.rightCard ? ' selected' : '') + '>' + cards2[ci2] + '</option>';
       }
       propsEl.innerHTML =
-        '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);font-weight:bold;color:var(--text-primary);font-size:13px;">Relationship</div>' +
+        P.panelHeaderHtml('Relationship') +
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">From</label><select id="sel-rel-from" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + fromOpts + '</select></div>' +
         '<div style="margin-bottom:8px;display:flex;gap:4px;">' +
           '<div style="flex:1;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">Left card</label><select id="sel-rel-lc" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;font-family:var(--font-mono);">' + lcOpts + '</select></div>' +
           '<div style="flex:1;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">Right card</label><select id="sel-rel-rc" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;font-family:var(--font-mono);">' + rcOpts2 + '</select></div>' +
         '</div>' +
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">To</label><select id="sel-rel-to" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + toOpts + '</select></div>' +
-        fieldHtml('ラベル', 'sel-rel-label', rel2.label) +
-        '<button id="sel-rel-delete" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">リレーションシップ削除</button>';
+        P.fieldHtml('ラベル', 'sel-rel-label', rel2.label) +
+        P.dangerButtonHtml('sel-rel-delete', 'リレーションシップ削除');
 
       document.getElementById('sel-rel-from').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateRelationship(ctx.getMmdText(), rel2.line, 'from', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-rel-lc').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateRelationship(ctx.getMmdText(), rel2.line, 'leftCard', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-rel-rc').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateRelationship(ctx.getMmdText(), rel2.line, 'rightCard', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-rel-to').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateRelationship(ctx.getMmdText(), rel2.line, 'to', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-rel-label').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateRelationship(ctx.getMmdText(), rel2.line, 'label', this.value)); ctx.onUpdate(); });
-      document.getElementById('sel-rel-delete').addEventListener('click', function() { window.MA.history.pushHistory(); ctx.setMmdText(deleteRelationship(ctx.getMmdText(), rel2.line)); window.MA.selection.clearSelection(); ctx.onUpdate(); });
+      P.bindDeleteButtons(propsEl, 'er-delete-rel', ctx, deleteRelationship);
+      P.bindEvent('sel-rel-delete', 'click', function() { window.MA.history.pushHistory(); ctx.setMmdText(deleteRelationship(ctx.getMmdText(), rel2.line)); window.MA.selection.clearSelection(); ctx.onUpdate(); });
       return;
     }
 
