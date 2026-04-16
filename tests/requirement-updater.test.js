@@ -161,3 +161,30 @@ describe('updateName', function() {
     expect(out).toContain('ecu - satisfies -> r1');
   });
 });
+
+describe('operations.moveUp / moveDown / connect', function() {
+  test('moveUp swaps with previous line', function() {
+    var t = 'A\nB\nC\n';
+    var out = req.operations.moveUp(t, 2);
+    expect(out.split('\n')[0]).toBe('B');
+    expect(out.split('\n')[1]).toBe('A');
+  });
+
+  test('moveDown swaps with next line', function() {
+    var t = 'A\nB\nC\n';
+    var out = req.operations.moveDown(t, 1);
+    expect(out.split('\n')[0]).toBe('B');
+    expect(out.split('\n')[1]).toBe('A');
+  });
+
+  test('connect creates a satisfies relation by default', function() {
+    var t = 'requirementDiagram\nrequirement r1 { id: A }\nelement e1 { type: x }\n';
+    var out = req.operations.connect(t, 'e1', 'r1');
+    expect(out).toContain('e1 - satisfies -> r1');
+  });
+
+  test('connect with reltype prop', function() {
+    var out = req.operations.connect('requirementDiagram\n', 'a', 'b', { reltype: 'derives' });
+    expect(out).toContain('a - derives -> b');
+  });
+});

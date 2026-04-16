@@ -282,6 +282,39 @@ window.MA.modules.requirementDiagram = (function() {
     renderProps: function(selData, parsedData, propsEl, ctx) {
       if (propsEl) propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">Requirement (実装中)</p>';
     },
-    operations: { add: function(t) { return t; }, delete: function(t) { return t; }, update: function(t) { return t; }, moveUp: function(t) { return t; }, moveDown: function(t) { return t; }, connect: function(t) { return t; } },
+    operations: {
+      add: function(text, kind, props) {
+        if (kind === 'requirement') return addRequirement(text, props.reqType || 'requirement', props.name);
+        if (kind === 'element') return addElement(text, props.name);
+        if (kind === 'relation') return addRelation(text, props.from, props.reltype, props.to);
+        return text;
+      },
+      delete: function(text, lineNum, opts) {
+        opts = opts || {};
+        if (opts.kind === 'relation') return deleteRelation(text, lineNum);
+        return deleteElement(text, lineNum, opts.elementName);
+      },
+      update: function(text, lineNum, field, value, opts) {
+        opts = opts || {};
+        if (opts.kind === 'relation') return updateRelation(text, lineNum, field, value);
+        if (opts.kind === 'element') return updateElementField(text, lineNum, field, value);
+        if (field === 'reqType') return updateRequirementType(text, lineNum, value);
+        if (field === 'name') return updateName(text, lineNum, opts.oldName, value);
+        return updateRequirementField(text, lineNum, field, value);
+      },
+      moveUp: function(text, lineNum) {
+        if (lineNum <= 1) return text;
+        return window.MA.textUpdater.swapLines(text, lineNum, lineNum - 1);
+      },
+      moveDown: function(text, lineNum) {
+        var total = text.split('\n').length;
+        if (lineNum >= total) return text;
+        return window.MA.textUpdater.swapLines(text, lineNum, lineNum + 1);
+      },
+      connect: function(text, fromName, toName, props) {
+        props = props || {};
+        return addRelation(text, fromName, props.reltype || 'satisfies', toName);
+      },
+    },
   };
 })();
