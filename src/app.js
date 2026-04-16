@@ -74,7 +74,16 @@ function _registerWindowModules() {
   for (var _i = 0; _i < keys.length; _i++) {
     var _mod = mm[keys[_i]];
     var _key = (_mod && _mod.type) ? _mod.type : keys[_i];
-    if (!modules[_key]) modules[_key] = _mod;
+    if (!modules[_key]) {
+      modules[_key] = _mod;
+    } else {
+      // Fill in any methods missing on the inline definition from the external module
+      for (var _prop in _mod) {
+        if (Object.prototype.hasOwnProperty.call(_mod, _prop) && !(_prop in modules[_key])) {
+          modules[_key][_prop] = _mod[_prop];
+        }
+      }
+    }
   }
 }
 
