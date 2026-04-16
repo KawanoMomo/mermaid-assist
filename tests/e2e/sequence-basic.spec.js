@@ -122,3 +122,68 @@ test.describe('Sequence: Add block', () => {
     expect(text).toContain('    end');
   });
 });
+
+test.describe('E15-E16: Sequence add form unification', () => {
+  test('E15: メッセージ追加フォームに From/Arrow/To のラベル表示', async ({ page }) => {
+    await page.goto(HTML_URL);
+    await waitForRender(page);
+    await switchToSequence(page);
+    await page.waitForTimeout(800);
+
+    // labels exist for from/arrow/to selects
+    const fromLabel = await page.locator('label:has-text("From")').count();
+    const arrowLabel = await page.locator('label:has-text("Arrow")').count();
+    const toLabel = await page.locator('label:has-text("To")').count();
+    expect(fromLabel).toBeGreaterThan(0);
+    expect(arrowLabel).toBeGreaterThan(0);
+    expect(toLabel).toBeGreaterThan(0);
+  });
+
+  test('E16: OAuthミニシナリオ — 新参加者追加 + 3メッセージ追加', async ({ page }) => {
+    await page.goto(HTML_URL);
+    await waitForRender(page);
+    await switchToSequence(page);
+    await page.waitForTimeout(500);
+
+    // Add User
+    await page.locator('#seq-add-part-id').fill('User');
+    await page.locator('#seq-add-part-label').fill('User');
+    await page.locator('#seq-add-part-btn').click();
+    await page.waitForTimeout(300);
+
+    // Add AuthServer
+    await page.locator('#seq-add-part-id').fill('AuthServer');
+    await page.locator('#seq-add-part-label').fill('AuthServer');
+    await page.locator('#seq-add-part-btn').click();
+    await page.waitForTimeout(300);
+
+    // Add 3 messages
+    await page.locator('#seq-add-msg-from').selectOption('User');
+    await page.locator('#seq-add-msg-to').selectOption('A');
+    await page.locator('#seq-add-msg-arrow').selectOption('->>');
+    await page.locator('#seq-add-msg-label').fill('認可開始');
+    await page.locator('#seq-add-msg-btn').click();
+    await page.waitForTimeout(300);
+
+    await page.locator('#seq-add-msg-from').selectOption('A');
+    await page.locator('#seq-add-msg-to').selectOption('AuthServer');
+    await page.locator('#seq-add-msg-arrow').selectOption('->>');
+    await page.locator('#seq-add-msg-label').fill('認可リクエスト');
+    await page.locator('#seq-add-msg-btn').click();
+    await page.waitForTimeout(300);
+
+    await page.locator('#seq-add-msg-from').selectOption('AuthServer');
+    await page.locator('#seq-add-msg-to').selectOption('A');
+    await page.locator('#seq-add-msg-arrow').selectOption('-->>');
+    await page.locator('#seq-add-msg-label').fill('認可コード');
+    await page.locator('#seq-add-msg-btn').click();
+    await page.waitForTimeout(500);
+
+    const text = await editorText(page);
+    expect(text).toContain('participant User');
+    expect(text).toContain('participant AuthServer');
+    expect(text).toContain('認可開始');
+    expect(text).toContain('認可リクエスト');
+    expect(text).toContain('認可コード');
+  });
+});

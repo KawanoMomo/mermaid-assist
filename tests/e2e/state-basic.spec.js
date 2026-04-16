@@ -78,3 +78,52 @@ test.describe('State: Operations', () => {
     expect(await editorText(page)).toContain('state "Super" as SuperState');
   });
 });
+
+test.describe('E19-E20: State add form unification', () => {
+  test('E19: 遷移追加フォームに From/To のラベル表示', async ({ page }) => {
+    await page.goto(HTML_URL);
+    await waitForRender(page);
+    await switchToState(page);
+    await page.waitForTimeout(800);
+
+    const fromLabel = await page.locator('label:has-text("From")').count();
+    const toLabel = await page.locator('label:has-text("To")').count();
+    expect(fromLabel).toBeGreaterThan(0);
+    expect(toLabel).toBeGreaterThan(0);
+  });
+
+  test('E20: 状態遷移ミニ — 2 states + 2 transitions', async ({ page }) => {
+    await page.goto(HTML_URL);
+    await waitForRender(page);
+    await switchToState(page);
+    await page.waitForTimeout(500);
+
+    await page.locator('#st-add-state-id').fill('Booting');
+    await page.locator('#st-add-state-label').fill('Booting');
+    await page.locator('#st-add-state-btn').click();
+    await page.waitForTimeout(300);
+
+    await page.locator('#st-add-state-id').fill('Error');
+    await page.locator('#st-add-state-label').fill('Error');
+    await page.locator('#st-add-state-btn').click();
+    await page.waitForTimeout(300);
+
+    await page.locator('#st-add-tr-from').selectOption('Booting');
+    await page.locator('#st-add-tr-to').selectOption('Idle');
+    await page.locator('#st-add-tr-event').fill('boot_complete');
+    await page.locator('#st-add-tr-btn').click();
+    await page.waitForTimeout(300);
+
+    await page.locator('#st-add-tr-from').selectOption('Running');
+    await page.locator('#st-add-tr-to').selectOption('Error');
+    await page.locator('#st-add-tr-event').fill('fault');
+    await page.locator('#st-add-tr-btn').click();
+    await page.waitForTimeout(500);
+
+    const text = await editorText(page);
+    expect(text).toContain('state Booting');
+    expect(text).toContain('state Error');
+    expect(text).toContain('boot_complete');
+    expect(text).toContain('fault');
+  });
+});

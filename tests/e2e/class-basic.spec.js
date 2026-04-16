@@ -89,3 +89,46 @@ test.describe('Class: Operations', () => {
     expect(await editorText(page)).toContain('namespace NS1');
   });
 });
+
+test.describe('E21-E22: Class add form unification', () => {
+  test('E21: 関連追加フォームに From/Arrow/To のラベル表示', async ({ page }) => {
+    await page.goto(HTML_URL);
+    await waitForRender(page);
+    await switchToClass(page);
+    await page.waitForTimeout(800);
+
+    const fromLabel = await page.locator('label:has-text("From")').count();
+    const arrowLabel = await page.locator('label:has-text("Arrow")').count();
+    const toLabel = await page.locator('label:has-text("To")').count();
+    expect(fromLabel).toBeGreaterThan(0);
+    expect(arrowLabel).toBeGreaterThan(0);
+    expect(toLabel).toBeGreaterThan(0);
+  });
+
+  test('E22: ECドメインミニ — 2 classes + 1 relation', async ({ page }) => {
+    await page.goto(HTML_URL);
+    await waitForRender(page);
+    await switchToClass(page);
+    await page.waitForTimeout(500);
+
+    await page.locator('#cl-add-class-id').fill('Customer');
+    await page.locator('#cl-add-class-btn').click();
+    await page.waitForTimeout(300);
+
+    await page.locator('#cl-add-class-id').fill('Order');
+    await page.locator('#cl-add-class-btn').click();
+    await page.waitForTimeout(300);
+
+    await page.locator('#cl-add-rel-from').selectOption('Customer');
+    await page.locator('#cl-add-rel-arrow').selectOption('-->');
+    await page.locator('#cl-add-rel-to').selectOption('Order');
+    await page.locator('#cl-add-rel-label').fill('places');
+    await page.locator('#cl-add-rel-btn').click();
+    await page.waitForTimeout(500);
+
+    const text = await editorText(page);
+    expect(text).toContain('class Customer');
+    expect(text).toContain('class Order');
+    expect(text).toContain('Customer --> Order : places');
+  });
+});

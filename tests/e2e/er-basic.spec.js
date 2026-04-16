@@ -77,3 +77,50 @@ test.describe('ER: Operations', () => {
     expect(await editorText(page)).toContain('newrel');
   });
 });
+
+test.describe('E23-E24: ER add form unification', () => {
+  test('E23: リレーションシップ追加フォームに From/Cards/To のラベル表示', async ({ page }) => {
+    await page.goto(HTML_URL);
+    await waitForRender(page);
+    await switchToER(page);
+    await page.waitForTimeout(800);
+
+    const fromLabel = await page.locator('label:has-text("From")').count();
+    const lcLabel = await page.locator('label:has-text("Left card")').count();
+    const rcLabel = await page.locator('label:has-text("Right card")').count();
+    const toLabel = await page.locator('label:has-text("To")').count();
+    expect(fromLabel).toBeGreaterThan(0);
+    expect(lcLabel).toBeGreaterThan(0);
+    expect(rcLabel).toBeGreaterThan(0);
+    expect(toLabel).toBeGreaterThan(0);
+  });
+
+  test('E24: DB設計ミニ — 1 entity + attribute + 1 relationship', async ({ page }) => {
+    await page.goto(HTML_URL);
+    await waitForRender(page);
+    await switchToER(page);
+    await page.waitForTimeout(500);
+
+    await page.locator('#er-add-ent-id').fill('PRODUCT');
+    await page.locator('#er-add-ent-btn').click();
+    await page.waitForTimeout(300);
+
+    await page.locator('#er-add-attr-entity').selectOption('PRODUCT');
+    await page.locator('#er-add-attr-type').fill('int');
+    await page.locator('#er-add-attr-name').fill('id');
+    await page.locator('#er-add-attr-key').selectOption('PK');
+    await page.locator('#er-add-attr-btn').click();
+    await page.waitForTimeout(300);
+
+    await page.locator('#er-add-rel-from').selectOption('PRODUCT');
+    await page.locator('#er-add-rel-to').selectOption('CUSTOMER');
+    await page.locator('#er-add-rel-label').fill('owned-by');
+    await page.locator('#er-add-rel-btn').click();
+    await page.waitForTimeout(500);
+
+    const text = await editorText(page);
+    expect(text).toContain('PRODUCT {');
+    expect(text).toContain('int id PK');
+    expect(text).toContain('PRODUCT ||--o{ CUSTOMER : owned-by');
+  });
+});
