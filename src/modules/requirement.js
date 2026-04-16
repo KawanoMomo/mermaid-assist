@@ -201,6 +201,33 @@ window.MA.modules.requirementDiagram = (function() {
     return lines.join('\n');
   }
 
+  function updateName(text, lineNum, oldName, newName) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    var indent = lines[idx].match(/^(\s*)/)[1];
+    var trimmed = lines[idx].trim();
+    var rm = trimmed.match(REQ_BLOCK_RE);
+    if (rm) {
+      lines[idx] = indent + rm[1] + ' ' + newName + ' {';
+    } else {
+      var em = trimmed.match(ELEMENT_BLOCK_RE);
+      if (em) {
+        lines[idx] = indent + 'element ' + newName + ' {';
+      }
+    }
+    var relRe = /^(\s*)([A-Za-z_][A-Za-z0-9_-]*)(\s+-\s+\S+\s+->\s+)([A-Za-z_][A-Za-z0-9_-]*)(\s*)$/;
+    for (var j = 0; j < lines.length; j++) {
+      var rm2 = lines[j].match(relRe);
+      if (rm2) {
+        var from = rm2[2] === oldName ? newName : rm2[2];
+        var to = rm2[4] === oldName ? newName : rm2[4];
+        lines[j] = rm2[1] + from + rm2[3] + to + rm2[5];
+      }
+    }
+    return lines.join('\n');
+  }
+
   return {
     type: 'requirementDiagram',
     displayName: 'Requirement',
@@ -222,6 +249,7 @@ window.MA.modules.requirementDiagram = (function() {
     updateRequirementType: updateRequirementType,
     updateElementField: updateElementField,
     updateRelation: updateRelation,
+    updateName: updateName,
     template: function() {
       return [
         'requirementDiagram',

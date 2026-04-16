@@ -132,3 +132,32 @@ describe('updateRelation', function() {
     expect(out).toContain('c - contains -> b');
   });
 });
+
+describe('updateName', function() {
+  test('renames requirement and updates from-references', function() {
+    var t = 'requirementDiagram\nrequirement r1 {\n    id: A\n}\nrequirement r2 {\n    id: B\n}\nr1 - contains -> r2\n';
+    var parsed = req.parseRequirement(t);
+    var out = req.updateName(t, parsed.elements[0].line, 'r1', 'alpha');
+    expect(out).toContain('requirement alpha {');
+    expect(out).toContain('alpha - contains -> r2');
+    expect(out).not.toContain('requirement r1');
+    expect(out).not.toContain('r1 - contains');
+  });
+
+  test('renames requirement and updates to-references', function() {
+    var t = 'requirementDiagram\nrequirement r1 {\n    id: A\n}\nrequirement r2 {\n    id: B\n}\nr1 - contains -> r2\n';
+    var parsed = req.parseRequirement(t);
+    var out = req.updateName(t, parsed.elements[1].line, 'r2', 'beta');
+    expect(out).toContain('requirement beta {');
+    expect(out).toContain('-> beta');
+    expect(out).not.toContain('requirement r2');
+  });
+
+  test('renames element and updates references', function() {
+    var t = 'requirementDiagram\nrequirement r1 {\n    id: A\n}\nelement e1 {\n    type: code\n}\ne1 - satisfies -> r1\n';
+    var parsed = req.parseRequirement(t);
+    var out = req.updateName(t, parsed.elements[1].line, 'e1', 'ecu');
+    expect(out).toContain('element ecu {');
+    expect(out).toContain('ecu - satisfies -> r1');
+  });
+});
