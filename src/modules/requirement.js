@@ -280,7 +280,130 @@ window.MA.modules.requirementDiagram = (function() {
       if (svgH) overlayEl.setAttribute('height', svgH);
     },
     renderProps: function(selData, parsedData, propsEl, ctx) {
-      if (propsEl) propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">Requirement (実装中)</p>';
+      if (!propsEl) return;
+      var escHtml = window.MA.htmlUtils.escHtml;
+      var P = window.MA.properties;
+
+      var reqs = parsedData.elements.filter(function(e) { return e.kind === 'requirement'; });
+      var elems = parsedData.elements.filter(function(e) { return e.kind === 'element'; });
+      var rels = parsedData.relations;
+
+      if (!selData || selData.length === 0) {
+        var allNamesOpts = parsedData.elements.map(function(el) { return { value: el.name, label: el.name }; });
+        if (allNamesOpts.length === 0) allNamesOpts = [{ value: '', label: '（要素を先に追加）' }];
+
+        var reqTypeOpts = REQ_TYPES.map(function(rt) { return { value: rt, label: rt, selected: rt === 'requirement' }; });
+        var reltypeOpts = RELTYPES.map(function(rt) { return { value: rt, label: rt, selected: rt === 'satisfies' }; });
+
+        var reqsList = '';
+        for (var i = 0; i < reqs.length; i++) {
+          reqsList += P.listItemHtml({
+            label: reqs[i].name,
+            sublabel: '(' + reqs[i].reqType + (reqs[i].id ? ', id=' + reqs[i].id : '') + ')',
+            selectClass: 'req-select-req', deleteClass: 'req-delete-req',
+            dataElementId: reqs[i].name, dataLine: reqs[i].line,
+          });
+        }
+        if (!reqsList) reqsList = P.emptyListHtml('（要件なし）');
+
+        var elemsList = '';
+        for (var j = 0; j < elems.length; j++) {
+          elemsList += P.listItemHtml({
+            label: elems[j].name,
+            sublabel: elems[j].type ? '(' + elems[j].type + ')' : '',
+            selectClass: 'req-select-elem', deleteClass: 'req-delete-elem',
+            dataElementId: elems[j].name, dataLine: elems[j].line,
+          });
+        }
+        if (!elemsList) elemsList = P.emptyListHtml('（要素なし）');
+
+        var relsList = '';
+        for (var k = 0; k < rels.length; k++) {
+          relsList += P.listItemHtml({
+            label: rels[k].from + ' - ' + rels[k].reltype + ' -> ' + rels[k].to,
+            selectClass: 'req-select-rel', deleteClass: 'req-delete-rel',
+            dataElementId: rels[k].id, dataLine: rels[k].line, mono: true,
+          });
+        }
+        if (!relsList) relsList = P.emptyListHtml('（リレーションなし）');
+
+        propsEl.innerHTML =
+          '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">Requirement Diagram</div>' +
+          '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
+            '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">要件を追加</label>' +
+            P.selectFieldHtml('Type', 'req-add-req-type', reqTypeOpts) +
+            P.fieldHtml('Name', 'req-add-req-name', '', '') +
+            P.primaryButtonHtml('req-add-req-btn', '+ 要件追加') +
+          '</div>' +
+          '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
+            '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">エレメントを追加</label>' +
+            P.fieldHtml('Name', 'req-add-elem-name', '', '') +
+            P.primaryButtonHtml('req-add-elem-btn', '+ エレメント追加') +
+          '</div>' +
+          '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
+            '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">リレーションを追加</label>' +
+            P.selectFieldHtml('From', 'req-add-rel-from', allNamesOpts) +
+            P.selectFieldHtml('Type', 'req-add-rel-type', reltypeOpts) +
+            P.selectFieldHtml('To', 'req-add-rel-to', allNamesOpts) +
+            P.primaryButtonHtml('req-add-rel-btn', '+ リレーション追加') +
+          '</div>' +
+          '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
+            '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">要件一覧</label>' +
+            '<div>' + reqsList + '</div>' +
+          '</div>' +
+          '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
+            '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">エレメント一覧</label>' +
+            '<div>' + elemsList + '</div>' +
+          '</div>' +
+          '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
+            '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">リレーション一覧</label>' +
+            '<div>' + relsList + '</div>' +
+          '</div>';
+
+        P.bindEvent('req-add-req-btn', 'click', function() {
+          var rtv = document.getElementById('req-add-req-type').value;
+          var nv = document.getElementById('req-add-req-name').value.trim();
+          if (!nv) { alert('Name は必須です'); return; }
+          window.MA.history.pushHistory();
+          ctx.setMmdText(addRequirement(ctx.getMmdText(), rtv, nv));
+          ctx.onUpdate();
+        });
+        P.bindEvent('req-add-elem-btn', 'click', function() {
+          var nv = document.getElementById('req-add-elem-name').value.trim();
+          if (!nv) { alert('Name は必須です'); return; }
+          window.MA.history.pushHistory();
+          ctx.setMmdText(addElement(ctx.getMmdText(), nv));
+          ctx.onUpdate();
+        });
+        P.bindEvent('req-add-rel-btn', 'click', function() {
+          var fv = document.getElementById('req-add-rel-from').value;
+          var tv = document.getElementById('req-add-rel-to').value;
+          var rtv = document.getElementById('req-add-rel-type').value;
+          if (!fv || !tv) { alert('From / To を選択してください'); return; }
+          window.MA.history.pushHistory();
+          ctx.setMmdText(addRelation(ctx.getMmdText(), fv, rtv, tv));
+          ctx.onUpdate();
+        });
+
+        P.bindSelectButtons(propsEl, 'req-select-req', 'requirement');
+        P.bindSelectButtons(propsEl, 'req-select-elem', 'element');
+        P.bindSelectButtons(propsEl, 'req-select-rel', 'relation');
+        P.bindDeleteButtons(propsEl, 'req-delete-req', ctx, function(t, ln) {
+          var nm = '';
+          for (var di = 0; di < parsedData.elements.length; di++) if (parsedData.elements[di].line === ln) { nm = parsedData.elements[di].name; break; }
+          return deleteElement(t, ln, nm);
+        });
+        P.bindDeleteButtons(propsEl, 'req-delete-elem', ctx, function(t, ln) {
+          var nm = '';
+          for (var di = 0; di < parsedData.elements.length; di++) if (parsedData.elements[di].line === ln) { nm = parsedData.elements[di].name; break; }
+          return deleteElement(t, ln, nm);
+        });
+        P.bindDeleteButtons(propsEl, 'req-delete-rel', ctx, deleteRelation);
+        return;
+      }
+
+      // Detail panels: implemented in subsequent tasks (T14-T16)
+      propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">詳細パネル (実装中)</p>';
     },
     operations: {
       add: function(text, kind, props) {
