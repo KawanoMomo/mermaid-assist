@@ -18,6 +18,7 @@ const sourceFiles = [
   'src/modules/flowchart.js',
   'src/modules/state.js',
   'src/modules/class.js',
+  'src/modules/er.js',
   'src/app.js',
 ];
 
