@@ -382,15 +382,9 @@ window.MA.modules.sequence = (function() {
   // ── UI: renderProps ──
   function renderProps(selData, parsedData, propsEl, ctx) {
     if (!propsEl) return;
+    var props = window.MA.properties;
+    var fieldHtml = props.fieldHtml;
     var escHtml = window.MA.htmlUtils.escHtml;
-
-    // Helper: build common form layout
-    function fieldHtml(label, id, value, placeholder) {
-      return '<div style="margin-bottom:8px;">' +
-        '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">' + escHtml(label) + '</label>' +
-        '<input id="' + id + '" type="text" value="' + escHtml(value || '') + '" placeholder="' + escHtml(placeholder || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-      '</div>';
-    }
 
     // No selection: show add forms + participant list + message list + title + autonumber
     if (!selData || selData.length === 0) {
@@ -401,23 +395,29 @@ window.MA.modules.sequence = (function() {
 
       for (var pi = 0; pi < participants.length; pi++) {
         var p = participants[pi];
-        participantsList += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
-          '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(p.label) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + escHtml(p.id) + ')</span></div>' +
-          '<button class="seq-select-participant" data-line="' + p.line + '" data-element-id="' + escHtml(p.id) + '" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' +
-          '<button class="seq-delete-participant" data-line="' + p.line + '" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
-        '</div>';
+        participantsList += props.listItemHtml({
+          label: p.label,
+          sublabel: '(' + p.id + ')',
+          selectClass: 'seq-select-participant',
+          deleteClass: 'seq-delete-participant',
+          dataElementId: p.id,
+          dataLine: p.line,
+        });
       }
-      if (!participantsList) participantsList = '<div style="font-size:11px;color:var(--text-secondary);">（参加者なし）</div>';
+      if (!participantsList) participantsList = props.emptyListHtml('（参加者なし）');
 
       for (var mi = 0; mi < messages.length; mi++) {
         var msg = messages[mi];
-        messagesList += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
-          '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-mono);">' + escHtml(msg.from) + escHtml(msg.arrow) + escHtml(msg.to) + ': ' + escHtml(msg.label) + '</div>' +
-          '<button class="seq-select-message" data-line="' + msg.line + '" data-element-id="' + escHtml(msg.id) + '" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' +
-          '<button class="seq-delete-message" data-line="' + msg.line + '" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
-        '</div>';
+        messagesList += props.listItemHtml({
+          label: msg.from + msg.arrow + msg.to + ': ' + msg.label,
+          selectClass: 'seq-select-message',
+          deleteClass: 'seq-delete-message',
+          dataElementId: msg.id,
+          dataLine: msg.line,
+          mono: true,
+        });
       }
-      if (!messagesList) messagesList = '<div style="font-size:11px;color:var(--text-secondary);">（メッセージなし）</div>';
+      if (!messagesList) messagesList = props.emptyListHtml('（メッセージなし）');
 
       // Build participant select options for add-message form
       var participantOpts = '';
@@ -470,7 +470,7 @@ window.MA.modules.sequence = (function() {
             '<select id="seq-add-msg-to" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + participantOpts + '</select>' +
           '</div>' +
           fieldHtml('ラベル', 'seq-add-msg-label', '', 'Message') +
-          '<button id="seq-add-msg-btn" style="width:100%;background:var(--accent);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;">+ メッセージ追加</button>' +
+          props.primaryButtonHtml('seq-add-msg-btn', '+ メッセージ追加') +
         '</div>' +
 
         // Add block
@@ -558,47 +558,12 @@ window.MA.modules.sequence = (function() {
       }
 
       // Participant select/delete buttons
-      var selPartBtns = propsEl.querySelectorAll('.seq-select-participant');
-      for (var spi = 0; spi < selPartBtns.length; spi++) {
-        (function(btn) {
-          btn.addEventListener('click', function() {
-            var id = btn.getAttribute('data-element-id');
-            window.MA.selection.setSelected([{ type: 'participant', id: id }]);
-          });
-        })(selPartBtns[spi]);
-      }
-      var delPartBtns = propsEl.querySelectorAll('.seq-delete-participant');
-      for (var dpi = 0; dpi < delPartBtns.length; dpi++) {
-        (function(btn) {
-          btn.addEventListener('click', function() {
-            var ln = parseInt(btn.getAttribute('data-line'), 10);
-            window.MA.history.pushHistory();
-            ctx.setMmdText(deleteParticipant(ctx.getMmdText(), ln));
-            ctx.onUpdate();
-          });
-        })(delPartBtns[dpi]);
-      }
+      props.bindSelectButtons(propsEl, 'seq-select-participant', 'participant');
+      props.bindDeleteButtons(propsEl, 'seq-delete-participant', ctx, deleteParticipant);
 
-      var selMsgBtns = propsEl.querySelectorAll('.seq-select-message');
-      for (var smi = 0; smi < selMsgBtns.length; smi++) {
-        (function(btn) {
-          btn.addEventListener('click', function() {
-            var id = btn.getAttribute('data-element-id');
-            window.MA.selection.setSelected([{ type: 'message', id: id }]);
-          });
-        })(selMsgBtns[smi]);
-      }
-      var delMsgBtns = propsEl.querySelectorAll('.seq-delete-message');
-      for (var dmi = 0; dmi < delMsgBtns.length; dmi++) {
-        (function(btn) {
-          btn.addEventListener('click', function() {
-            var ln = parseInt(btn.getAttribute('data-line'), 10);
-            window.MA.history.pushHistory();
-            ctx.setMmdText(deleteMessage(ctx.getMmdText(), ln));
-            ctx.onUpdate();
-          });
-        })(delMsgBtns[dmi]);
-      }
+      // Message select/delete buttons
+      props.bindSelectButtons(propsEl, 'seq-select-message', 'message');
+      props.bindDeleteButtons(propsEl, 'seq-delete-message', ctx, deleteMessage);
       return;
     }
 
@@ -619,34 +584,31 @@ window.MA.modules.sequence = (function() {
           return;
         }
         propsEl.innerHTML =
-          '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);font-weight:bold;color:var(--text-primary);font-size:13px;">' + escHtml(part.label) + '</div>' +
-          '<div style="margin-bottom:8px;">' +
-            '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">種別</label>' +
-            '<select id="sel-part-kind" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-              '<option value="participant"' + (part.kind === 'participant' ? ' selected' : '') + '>participant</option>' +
-              '<option value="actor"' + (part.kind === 'actor' ? ' selected' : '') + '>actor</option>' +
-            '</select>' +
-          '</div>' +
+          props.panelHeaderHtml(part.label) +
+          props.selectFieldHtml('種別', 'sel-part-kind', [
+            { value: 'participant', label: 'participant', selected: part.kind === 'participant' },
+            { value: 'actor', label: 'actor', selected: part.kind === 'actor' },
+          ]) +
           fieldHtml('ID', 'sel-part-id', part.id) +
           fieldHtml('ラベル', 'sel-part-label', part.label) +
-          '<button id="sel-part-delete" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">参加者削除</button>';
+          props.dangerButtonHtml('sel-part-delete', '参加者削除');
 
-        document.getElementById('sel-part-kind').addEventListener('change', function() {
+        props.bindEvent('sel-part-kind', 'change', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(updateParticipant(ctx.getMmdText(), part.line, 'kind', this.value));
           ctx.onUpdate();
         });
-        document.getElementById('sel-part-id').addEventListener('change', function() {
+        props.bindEvent('sel-part-id', 'change', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(updateParticipant(ctx.getMmdText(), part.line, 'id', this.value));
           ctx.onUpdate();
         });
-        document.getElementById('sel-part-label').addEventListener('change', function() {
+        props.bindEvent('sel-part-label', 'change', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(updateParticipant(ctx.getMmdText(), part.line, 'label', this.value));
           ctx.onUpdate();
         });
-        document.getElementById('sel-part-delete').addEventListener('click', function() {
+        props.bindEvent('sel-part-delete', 'click', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(deleteParticipant(ctx.getMmdText(), part.line));
           window.MA.selection.clearSelection();
@@ -665,56 +627,46 @@ window.MA.modules.sequence = (function() {
           return;
         }
         var participants2 = parsedData.elements.filter(function(e) { return e.kind === 'participant' || e.kind === 'actor'; });
-        var fromOpts = '', toOpts = '';
+        var arrows2 = ['->>','-->>','->','-->','-x','--x','-)','--)'];
+        var fromOptsArr = [], toOptsArr = [], arrowOptsArr = [];
         for (var poi2 = 0; poi2 < participants2.length; poi2++) {
           var pid = participants2[poi2].id;
-          fromOpts += '<option value="' + escHtml(pid) + '"' + (pid === msg.from ? ' selected' : '') + '>' + escHtml(participants2[poi2].label) + '</option>';
-          toOpts += '<option value="' + escHtml(pid) + '"' + (pid === msg.to ? ' selected' : '') + '>' + escHtml(participants2[poi2].label) + '</option>';
+          fromOptsArr.push({ value: pid, label: participants2[poi2].label, selected: pid === msg.from });
+          toOptsArr.push({ value: pid, label: participants2[poi2].label, selected: pid === msg.to });
         }
-        var arrows2 = ['->>','-->>','->','-->','-x','--x','-)','--)'];
-        var arrowOpts2 = '';
         for (var ao2 = 0; ao2 < arrows2.length; ao2++) {
-          arrowOpts2 += '<option value="' + arrows2[ao2] + '"' + (arrows2[ao2] === msg.arrow ? ' selected' : '') + '>' + arrows2[ao2] + '</option>';
+          arrowOptsArr.push({ value: arrows2[ao2], label: arrows2[ao2], selected: arrows2[ao2] === msg.arrow });
         }
 
         propsEl.innerHTML =
-          '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);font-weight:bold;color:var(--text-primary);font-size:13px;">Message</div>' +
-          '<div style="margin-bottom:8px;">' +
-            '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">From</label>' +
-            '<select id="sel-msg-from" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + fromOpts + '</select>' +
-          '</div>' +
-          '<div style="margin-bottom:8px;">' +
-            '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">Arrow</label>' +
-            '<select id="sel-msg-arrow" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;font-family:var(--font-mono);">' + arrowOpts2 + '</select>' +
-          '</div>' +
-          '<div style="margin-bottom:8px;">' +
-            '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">To</label>' +
-            '<select id="sel-msg-to" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + toOpts + '</select>' +
-          '</div>' +
+          props.panelHeaderHtml('Message') +
+          props.selectFieldHtml('From', 'sel-msg-from', fromOptsArr) +
+          props.selectFieldHtml('Arrow', 'sel-msg-arrow', arrowOptsArr, true) +
+          props.selectFieldHtml('To', 'sel-msg-to', toOptsArr) +
           fieldHtml('ラベル', 'sel-msg-label', msg.label) +
-          '<button id="sel-msg-delete" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">メッセージ削除</button>';
+          props.dangerButtonHtml('sel-msg-delete', 'メッセージ削除');
 
-        document.getElementById('sel-msg-from').addEventListener('change', function() {
+        props.bindEvent('sel-msg-from', 'change', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(updateMessage(ctx.getMmdText(), msg.line, 'from', this.value));
           ctx.onUpdate();
         });
-        document.getElementById('sel-msg-arrow').addEventListener('change', function() {
+        props.bindEvent('sel-msg-arrow', 'change', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(updateMessage(ctx.getMmdText(), msg.line, 'arrow', this.value));
           ctx.onUpdate();
         });
-        document.getElementById('sel-msg-to').addEventListener('change', function() {
+        props.bindEvent('sel-msg-to', 'change', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(updateMessage(ctx.getMmdText(), msg.line, 'to', this.value));
           ctx.onUpdate();
         });
-        document.getElementById('sel-msg-label').addEventListener('change', function() {
+        props.bindEvent('sel-msg-label', 'change', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(updateMessage(ctx.getMmdText(), msg.line, 'label', this.value));
           ctx.onUpdate();
         });
-        document.getElementById('sel-msg-delete').addEventListener('click', function() {
+        props.bindEvent('sel-msg-delete', 'click', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(deleteMessage(ctx.getMmdText(), msg.line));
           window.MA.selection.clearSelection();
