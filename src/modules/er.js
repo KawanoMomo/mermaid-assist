@@ -264,12 +264,10 @@ window.MA.modules.erDiagram = (function() {
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">リレーションシップを追加</label>' +
-          '<div style="display:flex;gap:4px;margin-bottom:4px;">' +
-            '<select id="er-add-rel-from" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + entityOpts + '</select>' +
-            '<select id="er-add-rel-lc" style="flex:0 0 50px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;font-family:var(--font-mono);">' + leftCardOpts + '</select>' +
-            '<select id="er-add-rel-rc" style="flex:0 0 50px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;font-family:var(--font-mono);">' + rightCardOpts + '</select>' +
-            '<select id="er-add-rel-to" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + entityOpts + '</select>' +
-          '</div>' +
+          P.selectFieldHtml('From', 'er-add-rel-from', entities.length === 0 ? [{value: '', label: '（エンティティを先に追加）'}] : entities.map(function(e) { return { value: e.id, label: e.label }; })) +
+          P.selectFieldHtml('Left card', 'er-add-rel-lc', cards.map(function(c) { return { value: c, label: c, selected: c === '||' }; }), true) +
+          P.selectFieldHtml('Right card', 'er-add-rel-rc', cards.map(function(c) { return { value: c, label: c, selected: c === 'o{' }; }), true) +
+          P.selectFieldHtml('To', 'er-add-rel-to', entities.length === 0 ? [{value: '', label: '（エンティティを先に追加）'}] : entities.map(function(e) { return { value: e.id, label: e.label }; })) +
           P.fieldHtml('ラベル', 'er-add-rel-label', '', 'has') +
           P.primaryButtonHtml('er-add-rel-btn', '+ リレーションシップ追加') +
         '</div>' +
@@ -281,10 +279,6 @@ window.MA.modules.erDiagram = (function() {
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">リレーションシップ一覧</label>' +
           '<div>' + relsList + '</div>' +
         '</div>';
-
-      // Set rightCard default to o{ for the dropdown
-      var rcSelInit = document.getElementById('er-add-rel-rc');
-      if (rcSelInit) rcSelInit.value = 'o{';
 
       P.bindEvent('er-add-ent-btn', 'click', function() {
         var id = document.getElementById('er-add-ent-id').value.trim();
