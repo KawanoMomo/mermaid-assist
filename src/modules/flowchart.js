@@ -445,10 +445,7 @@ window.MA.modules.flowchart = (function() {
   function renderProps(selData, parsedData, propsEl, ctx) {
     if (!propsEl) return;
     var escHtml = window.MA.htmlUtils.escHtml;
-
-    function fieldHtml(label, id, value, placeholder) {
-      return '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">' + escHtml(label) + '</label><input id="' + id + '" type="text" value="' + escHtml(value || '') + '" placeholder="' + escHtml(placeholder || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;"></div>';
-    }
+    var fieldHtml = window.MA.properties.fieldHtml;
 
     if (!selData || selData.length === 0) {
       var nodes = parsedData.elements.filter(function(e) { return e.kind === 'node'; });
@@ -470,34 +467,44 @@ window.MA.modules.flowchart = (function() {
       var nodesList = '';
       for (var lni = 0; lni < nodes.length; lni++) {
         var n = nodes[lni];
-        nodesList += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
-          '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(n.label) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + escHtml(n.id) + ', ' + escHtml(n.shape) + ')</span></div>' +
-          '<button class="fc-select-node" data-element-id="' + escHtml(n.id) + '" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' +
-          '<button class="fc-delete-node" data-line="' + n.line + '" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
-        '</div>';
+        nodesList += window.MA.properties.listItemHtml({
+          label: n.label,
+          sublabel: '(' + n.id + ', ' + n.shape + ')',
+          selectClass: 'fc-select-node',
+          deleteClass: 'fc-delete-node',
+          dataElementId: n.id,
+          dataLine: n.line,
+        });
       }
-      if (!nodesList) nodesList = '<div style="font-size:11px;color:var(--text-secondary);">（ノードなし）</div>';
+      if (!nodesList) nodesList = window.MA.properties.emptyListHtml('（ノードなし）');
 
       var edgesList = '';
       for (var lei = 0; lei < edges.length; lei++) {
         var ed = edges[lei];
-        edgesList += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
-          '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--font-mono);">' + escHtml(ed.from) + ' ' + escHtml(ed.arrow) + ' ' + escHtml(ed.to) + (ed.label ? ' |' + escHtml(ed.label) + '|' : '') + '</div>' +
-          '<button class="fc-select-edge" data-element-id="' + escHtml(ed.id) + '" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' +
-          '<button class="fc-delete-edge" data-line="' + ed.line + '" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
-        '</div>';
+        edgesList += window.MA.properties.listItemHtml({
+          label: ed.from + ' ' + ed.arrow + ' ' + ed.to + (ed.label ? ' |' + ed.label + '|' : ''),
+          selectClass: 'fc-select-edge',
+          deleteClass: 'fc-delete-edge',
+          dataElementId: ed.id,
+          dataLine: ed.line,
+          mono: true,
+        });
       }
-      if (!edgesList) edgesList = '<div style="font-size:11px;color:var(--text-secondary);">（エッジなし）</div>';
+      if (!edgesList) edgesList = window.MA.properties.emptyListHtml('（エッジなし）');
 
       var subgraphsList = '';
       for (var sgi = 0; sgi < subgraphs.length; sgi++) {
         var sg = subgraphs[sgi];
-        subgraphsList += '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
-          '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(sg.label) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + escHtml(sg.id) + ')</span></div>' +
-          '<button class="fc-delete-subgraph" data-line="' + sg.line + '" data-end-line="' + sg.endLine + '" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
-        '</div>';
+        subgraphsList += window.MA.properties.listItemHtml({
+          label: sg.label,
+          sublabel: '(' + sg.id + ')',
+          selectClass: null,
+          deleteClass: 'fc-delete-subgraph',
+          dataLine: sg.line,
+          dataEndLine: sg.endLine,
+        });
       }
-      if (!subgraphsList) subgraphsList = '<div style="font-size:11px;color:var(--text-secondary);">（なし）</div>';
+      if (!subgraphsList) subgraphsList = window.MA.properties.emptyListHtml('（なし）');
 
       var dirs = ['TD','TB','BT','LR','RL'];
       var dirOpts = '';
@@ -523,7 +530,7 @@ window.MA.modules.flowchart = (function() {
             '<select id="fc-add-edge-to" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + nodeOpts + '</select>' +
           '</div>' +
           fieldHtml('ラベル', 'fc-add-edge-label', '', '') +
-          '<button id="fc-add-edge-btn" style="width:100%;background:var(--accent);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;">+ エッジ追加</button>' +
+          window.MA.properties.primaryButtonHtml('fc-add-edge-btn', '+ エッジ追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">サブグラフを追加</label>' +
@@ -546,16 +553,12 @@ window.MA.modules.flowchart = (function() {
           '<div>' + subgraphsList + '</div>' +
         '</div>';
 
-      function bindEvt(id, event, handler) {
-        var el = document.getElementById(id);
-        if (el) el.addEventListener(event, handler);
-      }
-      bindEvt('fc-direction', 'change', function() {
+      window.MA.properties.bindEvent('fc-direction', 'change', function() {
         window.MA.history.pushHistory();
         ctx.setMmdText(updateDirection(ctx.getMmdText(), this.value));
         ctx.onUpdate();
       });
-      bindEvt('fc-add-node-btn', 'click', function() {
+      window.MA.properties.bindEvent('fc-add-node-btn', 'click', function() {
         var id = document.getElementById('fc-add-node-id').value.trim();
         var label = document.getElementById('fc-add-node-label').value.trim();
         var shape = document.getElementById('fc-add-node-shape').value;
@@ -564,7 +567,7 @@ window.MA.modules.flowchart = (function() {
         ctx.setMmdText(addNode(ctx.getMmdText(), id, label || id, shape));
         ctx.onUpdate();
       });
-      bindEvt('fc-add-edge-btn', 'click', function() {
+      window.MA.properties.bindEvent('fc-add-edge-btn', 'click', function() {
         var from = document.getElementById('fc-add-edge-from').value;
         var to = document.getElementById('fc-add-edge-to').value;
         var arrow = document.getElementById('fc-add-edge-arrow').value;
@@ -574,7 +577,7 @@ window.MA.modules.flowchart = (function() {
         ctx.setMmdText(addEdge(ctx.getMmdText(), from, to, arrow, label));
         ctx.onUpdate();
       });
-      bindEvt('fc-add-sg-btn', 'click', function() {
+      window.MA.properties.bindEvent('fc-add-sg-btn', 'click', function() {
         var id = document.getElementById('fc-add-sg-id').value.trim();
         var label = document.getElementById('fc-add-sg-label').value.trim();
         if (!id) { alert('IDは必須です'); return; }
@@ -583,43 +586,11 @@ window.MA.modules.flowchart = (function() {
         ctx.onUpdate();
       });
 
-      var selNBtns = propsEl.querySelectorAll('.fc-select-node');
-      for (var sbi = 0; sbi < selNBtns.length; sbi++) {
-        (function(btn) { btn.addEventListener('click', function() { window.MA.selection.setSelected([{ type: 'node', id: btn.getAttribute('data-element-id') }]); }); })(selNBtns[sbi]);
-      }
-      var delNBtns = propsEl.querySelectorAll('.fc-delete-node');
-      for (var dbi = 0; dbi < delNBtns.length; dbi++) {
-        (function(btn) { btn.addEventListener('click', function() {
-          var ln = parseInt(btn.getAttribute('data-line'), 10);
-          window.MA.history.pushHistory();
-          ctx.setMmdText(deleteNode(ctx.getMmdText(), ln));
-          ctx.onUpdate();
-        }); })(delNBtns[dbi]);
-      }
-      var selEBtns = propsEl.querySelectorAll('.fc-select-edge');
-      for (var sei = 0; sei < selEBtns.length; sei++) {
-        (function(btn) { btn.addEventListener('click', function() { window.MA.selection.setSelected([{ type: 'edge', id: btn.getAttribute('data-element-id') }]); }); })(selEBtns[sei]);
-      }
-      var delEBtns = propsEl.querySelectorAll('.fc-delete-edge');
-      for (var dei = 0; dei < delEBtns.length; dei++) {
-        (function(btn) { btn.addEventListener('click', function() {
-          var ln = parseInt(btn.getAttribute('data-line'), 10);
-          window.MA.history.pushHistory();
-          ctx.setMmdText(deleteEdge(ctx.getMmdText(), ln));
-          ctx.onUpdate();
-        }); })(delEBtns[dei]);
-      }
-      var delSGBtns = propsEl.querySelectorAll('.fc-delete-subgraph');
-      for (var dsi = 0; dsi < delSGBtns.length; dsi++) {
-        (function(btn) { btn.addEventListener('click', function() {
-          var sl = parseInt(btn.getAttribute('data-line'), 10);
-          var el = parseInt(btn.getAttribute('data-end-line'), 10);
-          if (isNaN(el) || el <= 0) return;
-          window.MA.history.pushHistory();
-          ctx.setMmdText(deleteSubgraph(ctx.getMmdText(), sl, el));
-          ctx.onUpdate();
-        }); })(delSGBtns[dsi]);
-      }
+      window.MA.properties.bindSelectButtons(propsEl, 'fc-select-node', 'node');
+      window.MA.properties.bindDeleteButtons(propsEl, 'fc-delete-node', ctx, deleteNode);
+      window.MA.properties.bindSelectButtons(propsEl, 'fc-select-edge', 'edge');
+      window.MA.properties.bindDeleteButtons(propsEl, 'fc-delete-edge', ctx, deleteEdge);
+      window.MA.properties.bindDeleteButtons(propsEl, 'fc-delete-subgraph', ctx, deleteSubgraph, true);
       return;
     }
 
@@ -636,11 +607,11 @@ window.MA.modules.flowchart = (function() {
       for (var si = 0; si < shapes.length; si++) shapeOpts += '<option value="' + shapes[si] + '"' + (shapes[si] === node.shape ? ' selected' : '') + '>' + shapes[si] + '</option>';
 
       propsEl.innerHTML =
-        '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);font-weight:bold;color:var(--text-primary);font-size:13px;">' + escHtml(node.label) + '</div>' +
+        window.MA.properties.panelHeaderHtml(node.label) +
         fieldHtml('ID', 'sel-node-id', node.id) +
         fieldHtml('ラベル', 'sel-node-label', node.label) +
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">形状</label><select id="sel-node-shape" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + shapeOpts + '</select></div>' +
-        '<button id="sel-node-delete" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">ノード削除</button>';
+        window.MA.properties.dangerButtonHtml('sel-node-delete', 'ノード削除');
 
       document.getElementById('sel-node-id').addEventListener('change', function() {
         window.MA.history.pushHistory();
@@ -686,12 +657,12 @@ window.MA.modules.flowchart = (function() {
       for (var ai3 = 0; ai3 < arrows.length; ai3++) arrowOpts += '<option value="' + arrows[ai3] + '"' + (arrows[ai3] === edge.arrow ? ' selected' : '') + '>' + arrows[ai3] + '</option>';
 
       propsEl.innerHTML =
-        '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);font-weight:bold;color:var(--text-primary);font-size:13px;">Edge</div>' +
+        window.MA.properties.panelHeaderHtml('Edge') +
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">From</label><select id="sel-edge-from" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + fromOpts + '</select></div>' +
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">Arrow</label><select id="sel-edge-arrow" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;font-family:var(--font-mono);">' + arrowOpts + '</select></div>' +
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">To</label><select id="sel-edge-to" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + toOpts + '</select></div>' +
         fieldHtml('ラベル', 'sel-edge-label', edge.label) +
-        '<button id="sel-edge-delete" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">エッジ削除</button>';
+        window.MA.properties.dangerButtonHtml('sel-edge-delete', 'エッジ削除');
 
       document.getElementById('sel-edge-from').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateEdge(ctx.getMmdText(), edge.line, 'from', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-edge-arrow').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateEdge(ctx.getMmdText(), edge.line, 'arrow', this.value)); ctx.onUpdate(); });
