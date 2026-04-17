@@ -24,6 +24,7 @@ const sourceFiles = [
   'src/modules/timeline.js',
   'src/modules/mindmap.js',
   'src/modules/gitgraph.js',
+  'src/modules/pie.js',
   'src/app.js',
 ];
 
