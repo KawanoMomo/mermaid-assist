@@ -22,6 +22,7 @@ const sourceFiles = [
   'src/modules/requirement.js',
   'src/modules/block.js',
   'src/modules/timeline.js',
+  'src/modules/mindmap.js',
   'src/app.js',
 ];
 
