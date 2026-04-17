@@ -1,0 +1,19 @@
+{
+  "lineCount": 16,
+  "totalLines": 17,
+  "editorMatchesTarget": true,
+  "svg": true,
+  "svgTextCount": 11,
+  "branchLabels": [
+    "main",
+    "develop",
+    "feature-auth",
+    "release-v1"
+  ],
+  "tags": [
+    "v1.0"
+  ],
+  "mergeCount": 3,
+  "taggedMergeCount": 1,
+  "editor": "gitGraph\n    commit id: \"start\"\n    branch develop\n    commit id: \"d1\"\n    branch feature-auth\n    commit id: \"f1\"\n    commit id: \"f2\"\n    checkout develop\n    merge feature-auth\n    branch release-v1\n    commit id: \"rc1\"\n    checkout main\n    merge release-v1 tag: \"v1.0\"\n    checkout develop\n    merge release-v1\n    commit id: \"d2\"\n"
+}
