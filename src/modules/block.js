@@ -215,8 +215,9 @@ window.MA.modules.blockBeta = (function() {
       var links = parsedData.relations;
 
       if (!selData || selData.length === 0) {
-        var allBlockOpts = blocks.map(function(b) { return { value: b.id, label: b.id }; });
-        if (allBlockOpts.length === 0) allBlockOpts = [{ value: '', label: '（ブロックを先に追加）' }];
+        var allBlockOpts = blocks.map(function(b) { return { value: b.id, label: b.id }; })
+          .concat(groups.map(function(g) { return { value: g.id, label: 'block:' + g.id }; }));
+        if (allBlockOpts.length === 0) allBlockOpts = [{ value: '', label: '（ブロック／グループを先に追加）' }];
 
         var groupOpts = [{ value: '', label: '（なし・トップレベル）' }].concat(
           groups.map(function(g) { return { value: g.id, label: g.id }; })
@@ -394,8 +395,9 @@ window.MA.modules.blockBeta = (function() {
           for (var lli = 0; lli < links.length; lli++) if (links[lli].id === sel.id) { link = links[lli]; break; }
           if (!link) { propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">リンクが見つかりません</p>'; return; }
 
-          var blockOpts = blocks.map(function(b) { return { value: b.id, label: b.id }; });
-          if (blockOpts.length === 0) blockOpts = [{ value: '', label: '（ブロックなし）' }];
+          var blockOpts = blocks.map(function(b) { return { value: b.id, label: b.id }; })
+            .concat(groups.map(function(g) { return { value: g.id, label: 'block:' + g.id }; }));
+          if (blockOpts.length === 0) blockOpts = [{ value: '', label: '（ブロック／グループなし）' }];
           var fromOpts = blockOpts.map(function(o) { return { value: o.value, label: o.label, selected: o.value === link.from }; });
           var toOpts = blockOpts.map(function(o) { return { value: o.value, label: o.label, selected: o.value === link.to }; });
 
