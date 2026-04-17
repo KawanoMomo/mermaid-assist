@@ -29,6 +29,7 @@ const sourceFiles = [
   'src/modules/quadrant.js',
   'src/modules/xychart.js',
   'src/modules/sankey.js',
+  'src/modules/c4.js',
   'src/app.js',
 ];
 

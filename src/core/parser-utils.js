@@ -26,6 +26,8 @@ window.MA.parserUtils = (function() {
     if (firstNonEmpty.indexOf('quadrantChart') === 0) return 'quadrantChart';
     if (firstNonEmpty.indexOf('xychart-beta') === 0) return 'xychart-beta';
     if (firstNonEmpty.indexOf('sankey-beta') === 0) return 'sankey-beta';
+    if (firstNonEmpty.indexOf('C4Context') === 0) return 'C4Context';
+    if (firstNonEmpty.indexOf('C4Container') === 0) return 'C4Context';
     return null;
   }
 
