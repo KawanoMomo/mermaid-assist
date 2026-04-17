@@ -18,6 +18,7 @@ window.MA.parserUtils = (function() {
     if (firstNonEmpty.indexOf('erDiagram') === 0) return 'erDiagram';
     if (firstNonEmpty.indexOf('requirementDiagram') === 0) return 'requirementDiagram';
     if (firstNonEmpty.indexOf('block-beta') === 0) return 'block-beta';
+    if (firstNonEmpty.indexOf('timeline') === 0) return 'timeline';
     return null;
   }
 
