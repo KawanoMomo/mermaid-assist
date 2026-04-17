@@ -27,6 +27,7 @@ const sourceFiles = [
   'src/modules/pie.js',
   'src/modules/journey.js',
   'src/modules/quadrant.js',
+  'src/modules/xychart.js',
   'src/app.js',
 ];
 
