@@ -239,16 +239,16 @@ window.MA.modules.quadrantChart = (function() {
     template: function() {
       return [
         'quadrantChart',
-        '    title 施策のリーチ vs エンゲージメント',
+        '    title Reach and Engagement of campaigns',
         '    x-axis Low Reach --> High Reach',
         '    y-axis Low Engagement --> High Engagement',
-        '    quadrant-1 拡大すべき',
-        '    quadrant-2 改善の余地',
-        '    quadrant-3 再評価',
-        '    quadrant-4 促進が必要',
-        '    施策A: [0.3, 0.6]',
-        '    施策B: [0.45, 0.23]',
-        '    施策C: [0.57, 0.69]',
+        '    quadrant-1 We should expand',
+        '    quadrant-2 Need to promote',
+        '    quadrant-3 Re-evaluate',
+        '    quadrant-4 May be improved',
+        '    Campaign A: [0.3, 0.6]',
+        '    Campaign B: [0.45, 0.23]',
+        '    Campaign C: [0.57, 0.69]',
       ].join('\n');
     },
     buildOverlay: function(svgEl, parsedData, overlayEl) {
