@@ -31,6 +31,7 @@ const sourceFiles = [
   'src/modules/sankey.js',
   'src/modules/c4.js',
   'src/modules/packet.js',
+  'src/modules/architecture.js',
   'src/app.js',
 ];
 
