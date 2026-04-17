@@ -1118,6 +1118,26 @@ function init() {
     syncLineNumbers();
   });
 
+  // Tab / Shift+Tab: indent / outdent with 2 spaces (see workspace ADR-011)
+  editorEl.addEventListener('keydown', function(e) {
+    if (e.key !== 'Tab' || e.isComposing) return;
+    e.preventDefault();
+    var start = this.selectionStart;
+    var end = this.selectionEnd;
+    if (e.shiftKey) {
+      var before = this.value.substring(0, start);
+      var lineStart = before.lastIndexOf('\n') + 1;
+      if (this.value.substring(lineStart, lineStart + 2) === '  ') {
+        this.value = this.value.substring(0, lineStart) + this.value.substring(lineStart + 2);
+        this.selectionStart = this.selectionEnd = Math.max(lineStart, start - 2);
+      }
+    } else {
+      this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
+      this.selectionStart = this.selectionEnd = start + 2;
+    }
+    this.dispatchEvent(new Event('input'));
+  });
+
   // ── Toolbar buttons ──────────────────────────────────────────────────────
   document.getElementById('btn-open').addEventListener('click', openFile);
   document.getElementById('btn-save').addEventListener('click', saveFile);
