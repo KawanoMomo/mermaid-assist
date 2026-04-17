@@ -32,6 +32,7 @@ const sourceFiles = [
   'src/modules/c4.js',
   'src/modules/packet.js',
   'src/modules/architecture.js',
+  'src/modules/kanban.js',
   'src/app.js',
 ];
 
