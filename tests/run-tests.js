@@ -21,6 +21,7 @@ const sourceFiles = [
   'src/modules/er.js',
   'src/modules/requirement.js',
   'src/modules/block.js',
+  'src/modules/timeline.js',
   'src/app.js',
 ];
 

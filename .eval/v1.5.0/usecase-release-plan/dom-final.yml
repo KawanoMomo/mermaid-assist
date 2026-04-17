@@ -1,0 +1,35 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]: MermaidAssist
+    - button "Open" [ref=e5] [cursor=pointer]
+    - button "Save" [ref=e6] [cursor=pointer]
+    - button "↩ Undo" [ref=e8] [cursor=pointer]
+    - button "↪ Redo" [disabled] [ref=e9]
+    - button "－" [ref=e11] [cursor=pointer]
+    - generic [ref=e12]: 50%
+    - button "＋" [ref=e13] [cursor=pointer]
+    - button "Fit" [ref=e14] [cursor=pointer]
+    - button "Export ▾" [ref=e17] [cursor=pointer]
+    - combobox "図の種類" [ref=e18] [cursor=pointer]:
+      - option "Gantt"
+      - option "Sequence"
+      - option "Flowchart"
+      - option "State"
+      - option "Class"
+      - option "ER"
+      - option "Requirement"
+      - option "Block"
+      - option "Timeline" [selected]
+  - generic [ref=e19]:
+    - generic [ref=e20]:
+      - generic [ref=e21]: Editor
+      - generic [ref=e22]
+    - generic [ref=e26]:
+      - generic [ref=e27]: Preview
+      - generic [ref=e28]
+    - generic [ref=e76]:
+      - generic [ref=e77]: Properties
+      - generic [ref=e78]
+  - generic [ref=e117]:
+    - generic [ref=e118]: OK
+    - generic [ref=e119]: "タスク: 0 | プロパティパネルからタスクを追加してください"
