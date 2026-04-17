@@ -31,6 +31,7 @@ window.MA.parserUtils = (function() {
     if (firstNonEmpty.indexOf('packet-beta') === 0) return 'packet-beta';
     if (firstNonEmpty.indexOf('architecture-beta') === 0) return 'architecture-beta';
     if (firstNonEmpty.indexOf('kanban') === 0) return 'kanban';
+    if (firstNonEmpty.indexOf('radar-beta') === 0) return 'radar-beta';
     return null;
   }
 
