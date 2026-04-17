@@ -20,6 +20,7 @@ const sourceFiles = [
   'src/modules/class.js',
   'src/modules/er.js',
   'src/modules/requirement.js',
+  'src/modules/block.js',
   'src/app.js',
 ];
 
