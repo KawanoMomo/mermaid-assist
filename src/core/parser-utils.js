@@ -29,6 +29,7 @@ window.MA.parserUtils = (function() {
     if (firstNonEmpty.indexOf('C4Context') === 0) return 'C4Context';
     if (firstNonEmpty.indexOf('C4Container') === 0) return 'C4Context';
     if (firstNonEmpty.indexOf('packet-beta') === 0) return 'packet-beta';
+    if (firstNonEmpty.indexOf('architecture-beta') === 0) return 'architecture-beta';
     return null;
   }
 
