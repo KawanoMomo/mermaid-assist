@@ -20,6 +20,7 @@ window.MA.parserUtils = (function() {
     if (firstNonEmpty.indexOf('block-beta') === 0) return 'block-beta';
     if (firstNonEmpty.indexOf('timeline') === 0) return 'timeline';
     if (firstNonEmpty.indexOf('mindmap') === 0) return 'mindmap';
+    if (firstNonEmpty.indexOf('gitGraph') === 0) return 'gitGraph';
     return null;
   }
 

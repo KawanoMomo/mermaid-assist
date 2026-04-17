@@ -1,0 +1,27 @@
+{
+  "editor": "gitGraph\n    commit\n    commit id: \"init\"\n    branch develop\n    commit\n    checkout main\n    merge develop",
+  "diagramType": "gitGraph",
+  "svgExists": true,
+  "buttons": [
+    {
+      "id": "gg-add-commit-btn",
+      "visible": true
+    },
+    {
+      "id": "gg-add-branch-btn",
+      "visible": true
+    },
+    {
+      "id": "gg-add-checkout-btn",
+      "visible": true
+    },
+    {
+      "id": "gg-add-merge-btn",
+      "visible": true
+    },
+    {
+      "id": "gg-add-cp-btn",
+      "visible": true
+    }
+  ]
+}
