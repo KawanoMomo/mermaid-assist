@@ -23,6 +23,7 @@ const sourceFiles = [
   'src/modules/block.js',
   'src/modules/timeline.js',
   'src/modules/mindmap.js',
+  'src/modules/gitgraph.js',
   'src/app.js',
 ];
 
