@@ -26,6 +26,7 @@ const sourceFiles = [
   'src/modules/gitgraph.js',
   'src/modules/pie.js',
   'src/modules/journey.js',
+  'src/modules/quadrant.js',
   'src/app.js',
 ];
 

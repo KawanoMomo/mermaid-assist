@@ -23,6 +23,7 @@ window.MA.parserUtils = (function() {
     if (firstNonEmpty.indexOf('gitGraph') === 0) return 'gitGraph';
     if (firstNonEmpty.indexOf('pie') === 0) return 'pie';
     if (firstNonEmpty.indexOf('journey') === 0) return 'journey';
+    if (firstNonEmpty.indexOf('quadrantChart') === 0) return 'quadrantChart';
     return null;
   }
 
