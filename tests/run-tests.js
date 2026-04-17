@@ -28,6 +28,7 @@ const sourceFiles = [
   'src/modules/journey.js',
   'src/modules/quadrant.js',
   'src/modules/xychart.js',
+  'src/modules/sankey.js',
   'src/app.js',
 ];
 
