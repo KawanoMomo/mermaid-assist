@@ -33,6 +33,7 @@ const sourceFiles = [
   'src/modules/packet.js',
   'src/modules/architecture.js',
   'src/modules/kanban.js',
+  'src/modules/radar.js',
   'src/app.js',
 ];
 
