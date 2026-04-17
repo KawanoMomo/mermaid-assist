@@ -25,6 +25,7 @@ const sourceFiles = [
   'src/modules/mindmap.js',
   'src/modules/gitgraph.js',
   'src/modules/pie.js',
+  'src/modules/journey.js',
   'src/app.js',
 ];
 
