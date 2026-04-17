@@ -21,6 +21,7 @@ window.MA.parserUtils = (function() {
     if (firstNonEmpty.indexOf('timeline') === 0) return 'timeline';
     if (firstNonEmpty.indexOf('mindmap') === 0) return 'mindmap';
     if (firstNonEmpty.indexOf('gitGraph') === 0) return 'gitGraph';
+    if (firstNonEmpty.indexOf('pie') === 0) return 'pie';
     return null;
   }
 
