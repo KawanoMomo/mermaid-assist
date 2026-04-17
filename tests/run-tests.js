@@ -30,6 +30,7 @@ const sourceFiles = [
   'src/modules/xychart.js',
   'src/modules/sankey.js',
   'src/modules/c4.js',
+  'src/modules/packet.js',
   'src/app.js',
 ];
 
