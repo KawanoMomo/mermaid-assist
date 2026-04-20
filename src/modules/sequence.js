@@ -607,7 +607,11 @@ window.MA.modules.sequence = (function() {
           handle.setAttribute('height', ah);
           handle.setAttribute('fill', 'transparent');
           handle.setAttribute('cursor', 'grab');
-          handle.setAttribute('class', 'overlay-participant-handle');
+          var hCls = 'overlay-participant-handle';
+          if (window.MA.selection && window.MA.selection.isSelected && window.MA.selection.isSelected(participant.id)) {
+            hCls += ' selected';
+          }
+          handle.setAttribute('class', hCls);
           handle.setAttribute('data-element-id', participant.id);
           handle.setAttribute('data-element-kind', 'participant');
           handle.setAttribute('data-line', participant.line);
@@ -645,7 +649,11 @@ window.MA.modules.sequence = (function() {
       grect.setAttribute('height', 20);
       grect.setAttribute('fill', 'transparent');
       grect.setAttribute('cursor', 'pointer');
-      grect.setAttribute('class', 'overlay-group');
+      var grpCls = 'overlay-group';
+      if (window.MA.selection && window.MA.selection.isSelected && window.MA.selection.isSelected(grp.id)) {
+        grpCls += ' selected';
+      }
+      grect.setAttribute('class', grpCls);
       grect.setAttribute('data-element-id', grp.id);
       grect.setAttribute('data-element-kind', 'group');
       grect.setAttribute('data-line', grp.line);
@@ -669,7 +677,11 @@ window.MA.modules.sequence = (function() {
         nrect.setAttribute('height', nr.getAttribute('height'));
         nrect.setAttribute('fill', 'transparent');
         nrect.setAttribute('cursor', 'pointer');
-        nrect.setAttribute('class', 'overlay-note');
+        var noteCls = 'overlay-note';
+        if (window.MA.selection && window.MA.selection.isSelected && window.MA.selection.isSelected(note.id)) {
+          noteCls += ' selected';
+        }
+        nrect.setAttribute('class', noteCls);
         nrect.setAttribute('data-element-id', note.id || ('__note_' + ni));
         nrect.setAttribute('data-element-kind', 'note');
         nrect.setAttribute('data-line', note.line);
@@ -707,7 +719,11 @@ window.MA.modules.sequence = (function() {
         mrect.setAttribute('height', 20);
         mrect.setAttribute('fill', 'transparent');
         mrect.setAttribute('cursor', 'pointer');
-        mrect.setAttribute('class', 'overlay-message');
+        var msgCls = 'overlay-message';
+        if (window.MA.selection && window.MA.selection.isSelected && window.MA.selection.isSelected(rel.id)) {
+          msgCls += ' selected';
+        }
+        mrect.setAttribute('class', msgCls);
         mrect.setAttribute('data-element-id', rel.id);
         mrect.setAttribute('data-element-kind', 'message');
         mrect.setAttribute('data-line', rel.line);

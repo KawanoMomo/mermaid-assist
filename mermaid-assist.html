@@ -377,6 +377,25 @@ html, body {
   fill: rgba(124, 140, 248, 0.15) !important;
   cursor: move;
 }
+
+/* ── Sequence: selected-element highlights ─────────────────────────────────── */
+/* Messages / notes / groups / participants: selected state adds an accent
+   green dashed outline and a subtle fill. Matches the participant-handle
+   selection look used by buildOverlay for label rects. */
+#overlay-layer .overlay-message.selected,
+#overlay-layer .overlay-note.selected,
+#overlay-layer .overlay-group.selected,
+#overlay-layer .overlay-participant-handle.selected {
+  fill: rgba(126, 231, 135, 0.15) !important;
+  stroke: #7ee787;
+  stroke-width: 2;
+  stroke-dasharray: 4 4;
+}
+#overlay-layer .overlay-message:hover,
+#overlay-layer .overlay-note:hover,
+#overlay-layer .overlay-group:hover {
+  fill: rgba(124, 140, 248, 0.12) !important;
+}
 </style>
 </head>
 <body>
