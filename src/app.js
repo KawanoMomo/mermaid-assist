@@ -1330,28 +1330,15 @@ function init() {
     var parsedForSeq = seqMod.parseSequence(mmdText);
     var res = seqMod.resolveInsertLine(svg, parsedForSeq, svgPt.y);
     if (!res) return;
-    // Simple prompt for from/to/label — keeps the cross-apply lightweight.
-    // Future polish: replace with a mini form dialog (like PlantUMLAssist).
-    var participants = parsedForSeq.elements
-      .filter(function(el) { return el.kind === 'participant' || el.kind === 'actor'; })
-      .map(function(el) { return el.id; });
-    if (participants.length < 2) {
-      alert('メッセージ追加には participant が 2 つ以上必要です');
-      return;
-    }
-    var fromId = prompt('From (' + participants.join(', ') + '):', participants[0]);
-    if (!fromId) return;
-    var toId = prompt('To (' + participants.join(', ') + '):', participants[1]);
-    if (!toId) return;
-    var label = prompt('メッセージラベル:', 'msg') || '';
-    window.MA.history.pushHistory();
-    mmdText = seqMod.insertMessageAt(mmdText, res.line, res.position, fromId, toId, '->>', label);
-    suppressSync = true;
-    editorEl.value = mmdText;
-    suppressSync = false;
-    syncLineNumbers();
-    scheduleRefresh();
+    // Open the modal insert form (ported from PlantUMLAssist). The form
+    // handles history push, setMmdText, and onUpdate itself via ctx.
     _clearHoverGuide();
+    if (!seqMod.showInsertForm) return;
+    seqMod.showInsertForm({
+      getMmdText: function() { return mmdText; },
+      setMmdText: function(s) { mmdText = s; suppressSync = true; editorEl.value = s; suppressSync = false; syncLineNumbers(); },
+      onUpdate: function() { scheduleRefresh(); },
+    }, res.line, res.position, 'message');
   });
 
   previewContainer.addEventListener('wheel', function(e) {

@@ -270,6 +270,93 @@ window.MA.modules.sequence = (function() {
     return window.MA.textUpdater.insertBefore(text, lineNum, newLine);
   }
 
+  // _showInsertForm: open a modal form at #seq-modal for inserting a message
+  // before/after a specific line. Ported from PlantUMLAssist so the hover-
+  // insert click produces a structured form instead of 3 × prompt().
+  //
+  // ctx: { getMmdText, setMmdText, onUpdate } — same shape as PlantUMLAssist
+  // line: 1-based line number anchor
+  // position: 'before' | 'after'
+  // kind: 'message' (note kind is PlantUML-specific; Mermaid note syntax is
+  //       different and we keep message-only for now).
+  function _showInsertForm(ctx, line, position, kind) {
+    kind = kind || 'message';
+    var modal = document.getElementById('seq-modal');
+    var content = document.getElementById('seq-modal-content');
+    if (!modal || !content) return;
+    var P = window.MA.properties;
+    var parsed = parseSequence(ctx.getMmdText());
+    var participants = parsed.elements.filter(function(e) { return e.kind === 'participant' || e.kind === 'actor'; });
+    var partOpts = participants.map(function(p) { return { value: p.id, label: p.label }; });
+    if (partOpts.length === 0) partOpts = [{ value: '', label: '（参加者なし）' }];
+    var partOptsWithNew = partOpts.slice();
+    partOptsWithNew.push({ value: '__new__', label: '+ 新規追加…' });
+
+    var title = (position === 'before' ? '前に' : '後に') + 'メッセージを挿入';
+    var arrowOpts = ARROW_TYPES.map(function(a) { return { value: a, label: a, selected: a === '->>' }; });
+
+    content.innerHTML =
+      '<h3 style="margin:0 0 12px 0;font-size:13px;">' + title + '</h3>' +
+      P.selectFieldHtml('From', 'seq-mod-from', partOptsWithNew) +
+      P.selectFieldHtml('Arrow', 'seq-mod-arrow', arrowOpts, true) +
+      P.selectFieldHtml('To', 'seq-mod-to', partOptsWithNew) +
+      P.fieldHtml('本文', 'seq-mod-label', '', 'Message') +
+      '<div id="seq-mod-new-inline" style="display:none;margin-top:6px;padding:8px;background:var(--bg-tertiary);border-left:3px solid var(--accent);border-radius:3px;">' +
+        '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;">新しい参加者を作成</label>' +
+        '<input id="seq-mod-new-id" type="text" placeholder="ID (必須)" style="width:100%;background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:4px 6px;border-radius:3px;font-size:12px;margin-bottom:4px;box-sizing:border-box;">' +
+        '<input id="seq-mod-new-label" type="text" placeholder="ラベル (任意)" style="width:100%;background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:4px 6px;border-radius:3px;font-size:12px;margin-bottom:4px;box-sizing:border-box;">' +
+        '<select id="seq-mod-new-kind" style="width:100%;background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:4px 6px;border-radius:3px;font-size:12px;box-sizing:border-box;">' +
+          '<option value="participant">participant</option>' +
+          '<option value="actor">actor</option>' +
+        '</select>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin-top:12px;">' +
+        '<button id="seq-mod-cancel" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:8px;border-radius:4px;cursor:pointer;">キャンセル</button>' +
+        '<button id="seq-mod-confirm" style="flex:1;background:var(--accent);border:none;color:#fff;padding:8px;border-radius:4px;cursor:pointer;">確定</button>' +
+      '</div>';
+    modal.style.display = 'flex';
+
+    // Inline "new participant" toggle
+    var inlineEl = document.getElementById('seq-mod-new-inline');
+    function maybeShowInline() {
+      var fr = document.getElementById('seq-mod-from');
+      var to = document.getElementById('seq-mod-to');
+      if (!fr || !to || !inlineEl) return;
+      inlineEl.style.display = (fr.value === '__new__' || to.value === '__new__') ? 'block' : 'none';
+    }
+    var frEl = document.getElementById('seq-mod-from');
+    var toEl = document.getElementById('seq-mod-to');
+    if (frEl) frEl.addEventListener('change', maybeShowInline);
+    if (toEl) toEl.addEventListener('change', maybeShowInline);
+
+    function closeModal() { modal.style.display = 'none'; }
+    document.getElementById('seq-mod-cancel').addEventListener('click', closeModal);
+
+    document.getElementById('seq-mod-confirm').addEventListener('click', function() {
+      var t = ctx.getMmdText();
+      var fr = document.getElementById('seq-mod-from').value;
+      var to = document.getElementById('seq-mod-to').value;
+      var arrow = document.getElementById('seq-mod-arrow').value || '->>';
+      var label = document.getElementById('seq-mod-label').value || '';
+      if (fr === '__new__' || to === '__new__') {
+        var newId = document.getElementById('seq-mod-new-id').value.trim();
+        if (!newId) { alert('新しい参加者の ID は必須です'); return; }
+        var newLabel = document.getElementById('seq-mod-new-label').value.trim() || newId;
+        var newKind = document.getElementById('seq-mod-new-kind').value;
+        window.MA.history.pushHistory();
+        t = addParticipant(t, newKind, newId, newLabel);
+        if (fr === '__new__') fr = newId;
+        if (to === '__new__') to = newId;
+      } else {
+        window.MA.history.pushHistory();
+      }
+      t = insertMessageAt(t, line, position, fr, to, arrow, label);
+      ctx.setMmdText(t);
+      closeModal();
+      if (ctx.onUpdate) ctx.onUpdate();
+    });
+  }
+
   // resolveInsertLine: maps a cursor y-coord (in SVG units) to { line, position }
   // describing where a new message should be inserted in the DSL.
   //
@@ -907,6 +994,9 @@ window.MA.modules.sequence = (function() {
     moveParticipant: moveParticipant,
     insertMessageAt: insertMessageAt,
     resolveInsertLine: resolveInsertLine,
+    showInsertForm: function(ctx, line, position, kind) {
+      _showInsertForm(ctx, line, position, kind);
+    },
     updateParticipant: updateParticipant,
     addMessage: addMessage,
     deleteMessage: deleteMessage,
