@@ -146,9 +146,16 @@ window.MA.properties = (function() {
 
   // bindSelectButtons: standardized select-button bindings.
   // For elements with class `selectClass` and attribute `data-element-id`, sets selection on click.
+  //
+  // Uses toggle semantics (selection.selectItem) instead of unconditional setSelected:
+  // clicking the currently-sole-selected item deselects it. Matches the "click again
+  // to deselect" UX applied in PlantUMLAssist and aligns with the selection.js
+  // single-select toggle contract already used by Gantt overlay clicks.
+  // Cross-ref: 06_PlantUMLAssist/docs/direct-manipulation-ux-checklist.md 観点 B.
   function bindSelectButtons(propsEl, selectClass, selectionType) {
     bindAllByClass(propsEl, selectClass, function(btn) {
-      window.MA.selection.setSelected([{ type: selectionType, id: btn.getAttribute('data-element-id') }]);
+      var id = btn.getAttribute('data-element-id');
+      window.MA.selection.selectItem(selectionType, id, false);
     });
   }
 
