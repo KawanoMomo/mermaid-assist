@@ -609,7 +609,44 @@ window.MA.modules.sequence = (function() {
       });
     }
 
-    // ── Step 3: message overlays ──
+    // ── Step 3: group (loop/alt/opt/par) overlays ──
+    // Mermaid renders each block frame as 4 consecutive `<line class="loopLine">`
+    // elements (top / right / bottom / left). Chunk them by 4 to recover the
+    // bbox, then pair with parsedData.groups in DSL order (buildOverlay gets
+    // them in source order so a simple zip works).
+    var loopLines = Array.prototype.slice.call(svgEl.querySelectorAll('line.loopLine'));
+    var groupData = parsedData.groups || [];
+    for (var gi = 0; gi + 3 < loopLines.length && Math.floor(gi / 4) < groupData.length; gi += 4) {
+      var l0 = loopLines[gi], l1 = loopLines[gi + 1], l2 = loopLines[gi + 2], l3 = loopLines[gi + 3];
+      var xs = [l0, l1, l2, l3].map(function(l) {
+        return [parseFloat(l.getAttribute('x1')), parseFloat(l.getAttribute('x2'))];
+      }).reduce(function(a, b) { return a.concat(b); }, []);
+      var ys = [l0, l1, l2, l3].map(function(l) {
+        return [parseFloat(l.getAttribute('y1')), parseFloat(l.getAttribute('y2'))];
+      }).reduce(function(a, b) { return a.concat(b); }, []);
+      var gx = Math.min.apply(null, xs), gy = Math.min.apply(null, ys);
+      var gw = Math.max.apply(null, xs) - gx;
+      var gh = Math.max.apply(null, ys) - gy;
+      if (isNaN(gx) || isNaN(gy) || gw <= 0 || gh <= 0) continue;
+      var grp = groupData[Math.floor(gi / 4)];
+      // Clickable rect only along the top band so it does not swallow clicks
+      // on nested messages. Top bar is ~20px tall matching Mermaid's label bar.
+      var grect = document.createElementNS(NS, 'rect');
+      grect.setAttribute('x', gx);
+      grect.setAttribute('y', gy);
+      grect.setAttribute('width', gw);
+      grect.setAttribute('height', 20);
+      grect.setAttribute('fill', 'transparent');
+      grect.setAttribute('cursor', 'pointer');
+      grect.setAttribute('class', 'overlay-group');
+      grect.setAttribute('data-element-id', grp.id);
+      grect.setAttribute('data-element-kind', 'group');
+      grect.setAttribute('data-line', grp.line);
+      grect.setAttribute('data-end-line', grp.endLine);
+      overlayEl.appendChild(grect);
+    }
+
+    // ── Step 4: message overlays ──
     // Cross-apply of PlantUMLAssist B3 (label-less message selectable): we
     // build one rect per visible message line (line.messageLine0/1) so the
     // arrow itself becomes clickable even when the message has no label.
@@ -989,6 +1026,65 @@ window.MA.modules.sequence = (function() {
         props.bindEvent('sel-msg-delete', 'click', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(deleteMessage(ctx.getMmdText(), msg.line));
+          window.MA.selection.clearSelection();
+          ctx.onUpdate();
+        });
+        return;
+      }
+
+      if (selType === 'group') {
+        // Group block selection — ported from PlantUMLAssist. Mermaid blocks
+        // (loop/alt/opt/par) are detected in parsedData.groups. Offer label
+        // edit + delete + "+ else 行を追加" (alt only).
+        var grp = null;
+        for (var gj = 0; gj < (parsedData.groups || []).length; gj++) {
+          if (parsedData.groups[gj].id === selId) { grp = parsedData.groups[gj]; break; }
+        }
+        if (!grp) {
+          propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">ブロックが見つかりません</p>';
+          return;
+        }
+        var isAlt = grp.kind === 'alt';
+        propsEl.innerHTML =
+          props.panelHeaderHtml(grp.kind) +
+          fieldHtml('ラベル', 'sel-grp-label', grp.label || '') +
+          (isAlt ? '<button id="sel-grp-add-else" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;margin-bottom:6px;">+ else 行を追加</button>' : '') +
+          props.dangerButtonHtml('sel-grp-delete', 'ブロック削除 (中身は保持)');
+
+        props.bindEvent('sel-grp-label', 'change', function() {
+          var text = ctx.getMmdText();
+          var lines = text.split('\n');
+          var idx0 = grp.line - 1;
+          if (idx0 < 0 || idx0 >= lines.length) return;
+          var indent = (lines[idx0].match(/^(\s*)/) || ['',''])[1];
+          var newLabel = this.value;
+          lines[idx0] = indent + grp.kind + (newLabel ? ' ' + newLabel : '');
+          window.MA.history.pushHistory();
+          ctx.setMmdText(lines.join('\n'));
+          ctx.onUpdate();
+        });
+        if (isAlt) {
+          props.bindEvent('sel-grp-add-else', 'click', function() {
+            var cond = prompt('else 条件 (空欄可):', '') || '';
+            var text = ctx.getMmdText();
+            var lines = text.split('\n');
+            var endIdx0 = (grp.endLine || grp.line) - 1;
+            if (endIdx0 < 0 || endIdx0 >= lines.length) return;
+            var indent = (lines[endIdx0].match(/^(\s*)/) || ['',''])[1];
+            lines.splice(endIdx0, 0, indent + 'else' + (cond ? ' ' + cond : ''));
+            window.MA.history.pushHistory();
+            ctx.setMmdText(lines.join('\n'));
+            ctx.onUpdate();
+          });
+        }
+        props.bindEvent('sel-grp-delete', 'click', function() {
+          // Remove the opening and matching end lines, keep inner content.
+          var text = ctx.getMmdText();
+          var lines = text.split('\n');
+          window.MA.history.pushHistory();
+          if (grp.endLine && grp.endLine > grp.line) lines.splice(grp.endLine - 1, 1);
+          lines.splice(grp.line - 1, 1);
+          ctx.setMmdText(lines.join('\n'));
           window.MA.selection.clearSelection();
           ctx.onUpdate();
         });
