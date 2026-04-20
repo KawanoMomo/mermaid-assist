@@ -257,6 +257,59 @@ window.MA.modules.sequence = (function() {
     return lines.join('\n');
   }
 
+  // insertMessageAt: insert a new message line at the specified 1-based position.
+  // position='before' inserts *before* lineNum, 'after' inserts *after* lineNum.
+  // Used by hover-insert / resolveInsertLine to place the new message at the
+  // visual gap the user clicked on.
+  function insertMessageAt(text, lineNum, position, from, to, arrow, label) {
+    arrow = arrow || '->>';
+    var newLine = '    ' + from + arrow + to + (label ? ': ' + label : ': ');
+    if (position === 'after') {
+      return window.MA.textUpdater.insertAfter(text, lineNum, newLine);
+    }
+    return window.MA.textUpdater.insertBefore(text, lineNum, newLine);
+  }
+
+  // resolveInsertLine: maps a cursor y-coord (in SVG units) to { line, position }
+  // describing where a new message should be inserted in the DSL.
+  //
+  // Mermaid renders each message as a `<line class="messageLine0|1">` at a
+  // known y coordinate. We read the visible messages in DOM order, pair them
+  // with parsedData.relations (also in DSL order), and pick the nearest gap.
+  //
+  // Returns null when no messages are present (caller should fall back to
+  // appending at the end of the block).
+  function resolveInsertLine(svgEl, parsedData, cursorSvgY) {
+    if (!svgEl || !parsedData) return null;
+    var msgRelations = (parsedData.relations || []).filter(function(r) { return r.kind === 'message'; });
+    if (msgRelations.length === 0) return null;
+    var lines = svgEl.querySelectorAll('line.messageLine0, line.messageLine1');
+    if (lines.length === 0) return null;
+    // Collect y coordinates and sort ascending
+    var ys = Array.prototype.map.call(lines, function(l) {
+      return parseFloat(l.getAttribute('y1') || l.getAttribute('y') || 0);
+    }).sort(function(a, b) { return a - b; });
+    // Bind messages to sorted y's by index (both are in DSL order).
+    // Build gap midpoints: above first, between each pair, below last.
+    var gaps = [];
+    gaps.push({ y: ys[0] - 20, insertBefore: msgRelations[0] });
+    for (var i = 0; i < ys.length - 1 && i < msgRelations.length - 1; i++) {
+      gaps.push({ y: (ys[i] + ys[i + 1]) / 2, insertBefore: msgRelations[i + 1] });
+    }
+    gaps.push({ y: ys[ys.length - 1] + 20, insertAfter: msgRelations[msgRelations.length - 1] });
+    // Pick the gap closest to cursorSvgY
+    var best = gaps[0];
+    var bestDist = Math.abs(cursorSvgY - gaps[0].y);
+    for (var gi = 1; gi < gaps.length; gi++) {
+      var d = Math.abs(cursorSvgY - gaps[gi].y);
+      if (d < bestDist) { bestDist = d; best = gaps[gi]; }
+    }
+    if (best.insertAfter) {
+      return { line: best.insertAfter.line, position: 'after' };
+    }
+    return { line: best.insertBefore.line, position: 'before' };
+  }
+
   function deleteMessage(text, lineNum) {
     return window.MA.textUpdater.deleteLine(text, lineNum);
   }
@@ -852,6 +905,8 @@ window.MA.modules.sequence = (function() {
     moveParticipantUp: moveParticipantUp,
     moveParticipantDown: moveParticipantDown,
     moveParticipant: moveParticipant,
+    insertMessageAt: insertMessageAt,
+    resolveInsertLine: resolveInsertLine,
     updateParticipant: updateParticipant,
     addMessage: addMessage,
     deleteMessage: deleteMessage,

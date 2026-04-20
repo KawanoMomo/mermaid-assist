@@ -289,6 +289,32 @@ html, body {
   pointer-events: auto;
 }
 
+/* Hover-insert + drop-indicator layer, stacked on top of overlay-layer. */
+#hover-layer {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  pointer-events: none;
+  transform-origin: 0 0;
+}
+#hover-layer .hover-guide {
+  stroke: #7c8cf8;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  opacity: 0.75;
+}
+#hover-layer .hover-label {
+  fill: #7c8cf8;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+#hover-layer .seq-drop-indicator {
+  stroke: #7c8cf8;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  opacity: 0.9;
+}
+
 /* ── Properties Pane ───────────────────────────────────────────────────────── */
 #props-pane {
   display: flex;
@@ -432,6 +458,9 @@ html, body {
       <div id="preview-container">
         <div id="preview-svg"></div>
         <svg id="overlay-layer" width="0" height="0"></svg>
+        <!-- Hover-insert guide / drop indicator layer. Separate from overlay
+             so mermaid re-renders do not clear transient guides. -->
+        <svg id="hover-layer" width="0" height="0"></svg>
       </div>
     </div>
 

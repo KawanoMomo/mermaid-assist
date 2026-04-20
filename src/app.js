@@ -1216,8 +1216,144 @@ function init() {
     exportClipboard();
   });
 
+  // ── Hover-insert guide for Sequence diagram ─────────────────────────────
+  // Uses #hover-layer (separate SVG above overlay-layer) so mermaid re-renders
+  // do not clear the guide. Active only for sequenceDiagram; other modules
+  // ignore the handlers because resolveInsertLine is undefined for them.
+  //
+  // Suppress rules (cross-apply from PlantUMLAssist direct-manipulation
+  // checklist):
+  //   - 観点 C: hide guide whenever something is selected (selection =
+  //     edit mode, insert would be contradictory)
+  //   - 観点 B/C: swallow the synthetic click that follows a drag end
+  //     (SEQ_DRAG_CLICK_SUPPRESS_MS window)
+  var hoverLayerEl = document.getElementById('hover-layer');
+
+  function _clearHoverGuide() {
+    if (!hoverLayerEl) return;
+    var guides = hoverLayerEl.querySelectorAll('.hover-guide, .hover-label');
+    Array.prototype.forEach.call(guides, function(g) { g.parentNode.removeChild(g); });
+  }
+
+  function _syncHoverLayerDims() {
+    if (!hoverLayerEl || !overlayEl) return;
+    var w = overlayEl.getAttribute('width');
+    var h = overlayEl.getAttribute('height');
+    var vb = overlayEl.getAttribute('viewBox');
+    if (w) hoverLayerEl.setAttribute('width', w);
+    if (h) hoverLayerEl.setAttribute('height', h);
+    if (vb) hoverLayerEl.setAttribute('viewBox', vb);
+    hoverLayerEl.style.transform = overlayEl.style.transform;
+  }
+
+  function _drawHoverGuide(svgY) {
+    _clearHoverGuide();
+    if (!hoverLayerEl || !overlayEl) return;
+    _syncHoverLayerDims();
+    var NS = 'http://www.w3.org/2000/svg';
+    var w = parseFloat(overlayEl.getAttribute('width'))
+      || (overlayEl.viewBox && overlayEl.viewBox.baseVal && overlayEl.viewBox.baseVal.width)
+      || 800;
+    var line = document.createElementNS(NS, 'line');
+    line.setAttribute('x1', 0);
+    line.setAttribute('y1', svgY);
+    line.setAttribute('x2', w);
+    line.setAttribute('y2', svgY);
+    line.setAttribute('class', 'hover-guide');
+    hoverLayerEl.appendChild(line);
+    var text = document.createElementNS(NS, 'text');
+    text.setAttribute('x', 10);
+    text.setAttribute('y', svgY - 3);
+    text.setAttribute('class', 'hover-label');
+    text.textContent = '+ ここに挿入';
+    hoverLayerEl.appendChild(text);
+  }
+
+  function _hasAnySelection() {
+    var s = window.MA.selection && window.MA.selection.getSelected && window.MA.selection.getSelected();
+    return !!(s && s.length > 0);
+  }
+
+  function _isSequenceDiagram() {
+    return currentModule && currentModule.type === 'sequenceDiagram';
+  }
+
   // ── Ctrl+wheel zoom / Shift+wheel horizontal scroll on preview ───────────
   var previewContainer = document.getElementById('preview-container');
+  previewContainer.addEventListener('mousemove', function(e) {
+    if (!_isSequenceDiagram()) { _clearHoverGuide(); return; }
+    if (_hasAnySelection()) { _clearHoverGuide(); return; }
+    if (seqDragState) { _clearHoverGuide(); return; }
+    var target = e.target;
+    // Over a participant drag handle or other overlay actor — skip guide
+    if (target && target.getAttribute && target.getAttribute('data-element-kind')) {
+      _clearHoverGuide();
+      return;
+    }
+    if (!overlayEl) return;
+    var rect = overlayEl.getBoundingClientRect();
+    if (e.clientX < rect.left || e.clientX > rect.right
+        || e.clientY < rect.top || e.clientY > rect.bottom) {
+      _clearHoverGuide();
+      return;
+    }
+    // Convert client y to SVG y (account for zoom via CTM)
+    var pt = overlayEl.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    var ctm = overlayEl.getScreenCTM();
+    if (!ctm) return;
+    var svgPt = pt.matrixTransform(ctm.inverse());
+    _drawHoverGuide(svgPt.y);
+  });
+
+  previewContainer.addEventListener('mouseleave', _clearHoverGuide);
+
+  previewContainer.addEventListener('click', function(e) {
+    if (!_isSequenceDiagram()) return;
+    if (Date.now() - seqJustDraggedAt < SEQ_DRAG_CLICK_SUPPRESS_MS) return;
+    if (_hasAnySelection()) return;
+    var target = e.target;
+    // Let overlay click handlers (participant selection etc.) fire first.
+    if (target && target.getAttribute && target.getAttribute('data-element-kind')) return;
+    var seqMod = window.MA.modules && window.MA.modules.sequence;
+    if (!seqMod || !seqMod.resolveInsertLine) return;
+    if (!overlayEl) return;
+    var rect = overlayEl.getBoundingClientRect();
+    if (e.clientX < rect.left || e.clientX > rect.right
+        || e.clientY < rect.top || e.clientY > rect.bottom) return;
+    var pt = overlayEl.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    var ctm = overlayEl.getScreenCTM();
+    if (!ctm) return;
+    var svgPt = pt.matrixTransform(ctm.inverse());
+    var svg = document.querySelector('#preview-svg svg');
+    var parsedForSeq = seqMod.parseSequence(mmdText);
+    var res = seqMod.resolveInsertLine(svg, parsedForSeq, svgPt.y);
+    if (!res) return;
+    // Simple prompt for from/to/label — keeps the cross-apply lightweight.
+    // Future polish: replace with a mini form dialog (like PlantUMLAssist).
+    var participants = parsedForSeq.elements
+      .filter(function(el) { return el.kind === 'participant' || el.kind === 'actor'; })
+      .map(function(el) { return el.id; });
+    if (participants.length < 2) {
+      alert('メッセージ追加には participant が 2 つ以上必要です');
+      return;
+    }
+    var fromId = prompt('From (' + participants.join(', ') + '):', participants[0]);
+    if (!fromId) return;
+    var toId = prompt('To (' + participants.join(', ') + '):', participants[1]);
+    if (!toId) return;
+    var label = prompt('メッセージラベル:', 'msg') || '';
+    window.MA.history.pushHistory();
+    mmdText = seqMod.insertMessageAt(mmdText, res.line, res.position, fromId, toId, '->>', label);
+    suppressSync = true;
+    editorEl.value = mmdText;
+    suppressSync = false;
+    syncLineNumbers();
+    scheduleRefresh();
+    _clearHoverGuide();
+  });
+
   previewContainer.addEventListener('wheel', function(e) {
     if (e.ctrlKey) {
       e.preventDefault();
@@ -1372,7 +1508,11 @@ function init() {
   }
 
   function _seqDrawDropIndicator(overlay, clientX) {
-    var old = overlay.querySelectorAll('.seq-drop-indicator');
+    // Draw into #hover-layer so mermaid re-renders of overlay-layer (which
+    // happen during/after drag) don't clobber the indicator mid-gesture.
+    var hoverL = document.getElementById('hover-layer');
+    if (!hoverL) return;
+    var old = hoverL.querySelectorAll('.seq-drop-indicator');
     Array.prototype.forEach.call(old, function(el) { el.parentNode.removeChild(el); });
     var centers = _seqParticipantCenters(overlay);
     if (centers.length === 0) return;
@@ -1387,23 +1527,26 @@ function init() {
     var h = parseFloat(overlay.getAttribute('height'))
       || (overlay.viewBox && overlay.viewBox.baseVal && overlay.viewBox.baseVal.height)
       || 400;
+    // Keep hover-layer dimensions synced to overlay so viewBox clipping doesn't
+    // hide the indicator.
+    if (overlay.getAttribute('width')) hoverL.setAttribute('width', overlay.getAttribute('width'));
+    if (overlay.getAttribute('height')) hoverL.setAttribute('height', overlay.getAttribute('height'));
+    if (overlay.getAttribute('viewBox')) hoverL.setAttribute('viewBox', overlay.getAttribute('viewBox'));
+    hoverL.style.transform = overlay.style.transform;
     var NS = 'http://www.w3.org/2000/svg';
     var line = document.createElementNS(NS, 'line');
     line.setAttribute('x1', bestX);
     line.setAttribute('y1', 0);
     line.setAttribute('x2', bestX);
     line.setAttribute('y2', h);
-    line.setAttribute('stroke', '#7c8cf8');
-    line.setAttribute('stroke-width', '2');
-    line.setAttribute('stroke-dasharray', '6 4');
     line.setAttribute('class', 'seq-drop-indicator');
-    line.setAttribute('pointer-events', 'none');
-    overlay.appendChild(line);
+    hoverL.appendChild(line);
   }
 
   function _seqClearDropIndicator(overlay) {
-    if (!overlay) return;
-    var old = overlay.querySelectorAll('.seq-drop-indicator');
+    var hoverL = document.getElementById('hover-layer');
+    if (!hoverL) return;
+    var old = hoverL.querySelectorAll('.seq-drop-indicator');
     Array.prototype.forEach.call(old, function(el) { el.parentNode.removeChild(el); });
   }
 
