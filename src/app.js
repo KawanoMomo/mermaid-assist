@@ -1377,6 +1377,14 @@ function init() {
       e.stopPropagation();
       return;
     }
+    // Non-draggable sequence elements (message / note / group) — commit
+    // selection synchronously. selectItem handles toggle-off on re-click.
+    if (seqKind && seqId && (seqKind === 'message' || seqKind === 'note' || seqKind === 'group')) {
+      window.MA.selection.selectItem(seqKind, seqId, e.shiftKey);
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
 
     // Click on empty overlay area (no task): clear selection
     if (!taskId && !e.shiftKey) {
@@ -1711,6 +1719,11 @@ function init() {
         }
         if (overlayEl) _seqClearDropIndicator(overlayEl);
         seqJustDraggedAt = Date.now();
+      } else {
+        // Plain click (no drag motion) → commit selection via selectItem so
+        // toggle-off-on-reclick works consistently. Without this the
+        // seqDragState was discarded and the participant was never selected.
+        window.MA.selection.selectItem('participant', seqDragState.id, false);
       }
       seqDragState = null;
       return;

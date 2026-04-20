@@ -608,6 +608,44 @@ window.MA.modules.sequence = (function() {
         } catch (e) { /* skip */ }
       });
     }
+
+    // ── Step 3: message overlays ──
+    // Cross-apply of PlantUMLAssist B3 (label-less message selectable): we
+    // build one rect per visible message line (line.messageLine0/1) so the
+    // arrow itself becomes clickable even when the message has no label.
+    // The messages in the SVG appear in DSL order (same as parsedData.relations
+    // filtered to kind==='message'), so we zip them together by sorted y.
+    var msgRelations = (parsedData.relations || []).filter(function(r) { return r.kind === 'message'; });
+    var msgLineEls = Array.prototype.slice.call(svgEl.querySelectorAll('line.messageLine0, line.messageLine1'));
+    // Pair by ordinal. Mermaid renders in DSL order so simple zip works.
+    msgLineEls.sort(function(a, b) {
+      return parseFloat(a.getAttribute('y1') || 0) - parseFloat(b.getAttribute('y1') || 0);
+    });
+    for (var mi = 0; mi < msgLineEls.length && mi < msgRelations.length; mi++) {
+      var mLine = msgLineEls[mi];
+      var rel = msgRelations[mi];
+      try {
+        var x1 = parseFloat(mLine.getAttribute('x1'));
+        var x2 = parseFloat(mLine.getAttribute('x2'));
+        var yy = parseFloat(mLine.getAttribute('y1'));
+        if (isNaN(x1) || isNaN(x2) || isNaN(yy)) continue;
+        // Clickable band: ±10px vertical hit-box around the arrow line.
+        var mx = Math.min(x1, x2);
+        var mw = Math.abs(x2 - x1);
+        var mrect = document.createElementNS(NS, 'rect');
+        mrect.setAttribute('x', mx);
+        mrect.setAttribute('y', yy - 10);
+        mrect.setAttribute('width', mw || 20);
+        mrect.setAttribute('height', 20);
+        mrect.setAttribute('fill', 'transparent');
+        mrect.setAttribute('cursor', 'pointer');
+        mrect.setAttribute('class', 'overlay-message');
+        mrect.setAttribute('data-element-id', rel.id);
+        mrect.setAttribute('data-element-kind', 'message');
+        mrect.setAttribute('data-line', rel.line);
+        overlayEl.appendChild(mrect);
+      } catch (e) { /* skip */ }
+    }
   }
 
   // ── UI: renderProps ──
