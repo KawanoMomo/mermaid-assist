@@ -102,6 +102,7 @@ window.MA.modules.sequence = (function() {
         var targets = noteMatch[2].split(',').map(function(s) { return s.trim(); });
         result.elements.push({
           kind: 'note',
+          id: '__note_' + lineNum,
           position: noteMatch[1].toLowerCase(),
           targets: targets,
           text: noteMatch[3],
@@ -646,6 +647,30 @@ window.MA.modules.sequence = (function() {
       overlayEl.appendChild(grect);
     }
 
+    // ── Step 3.5: note overlays ──
+    // Mermaid renders notes as `<rect class="note">` + `<text class="noteText">`.
+    // Notes appear in DSL order so zip with parsedData.elements filtered to kind='note'.
+    var noteRects = Array.prototype.slice.call(svgEl.querySelectorAll('rect.note'));
+    var noteData = (parsedData.elements || []).filter(function(e) { return e.kind === 'note'; });
+    for (var ni = 0; ni < noteRects.length && ni < noteData.length; ni++) {
+      try {
+        var nr = noteRects[ni];
+        var note = noteData[ni];
+        var nrect = document.createElementNS(NS, 'rect');
+        nrect.setAttribute('x', nr.getAttribute('x'));
+        nrect.setAttribute('y', nr.getAttribute('y'));
+        nrect.setAttribute('width', nr.getAttribute('width'));
+        nrect.setAttribute('height', nr.getAttribute('height'));
+        nrect.setAttribute('fill', 'transparent');
+        nrect.setAttribute('cursor', 'pointer');
+        nrect.setAttribute('class', 'overlay-note');
+        nrect.setAttribute('data-element-id', note.id || ('__note_' + ni));
+        nrect.setAttribute('data-element-kind', 'note');
+        nrect.setAttribute('data-line', note.line);
+        overlayEl.appendChild(nrect);
+      } catch (e) { /* skip */ }
+    }
+
     // ── Step 4: message overlays ──
     // Cross-apply of PlantUMLAssist B3 (label-less message selectable): we
     // build one rect per visible message line (line.messageLine0/1) so the
@@ -1026,6 +1051,72 @@ window.MA.modules.sequence = (function() {
         props.bindEvent('sel-msg-delete', 'click', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(deleteMessage(ctx.getMmdText(), msg.line));
+          window.MA.selection.clearSelection();
+          ctx.onUpdate();
+        });
+        return;
+      }
+
+      if (selType === 'note') {
+        var note = null;
+        for (var nj = 0; nj < parsedData.elements.length; nj++) {
+          if (parsedData.elements[nj].kind === 'note' && parsedData.elements[nj].id === selId) {
+            note = parsedData.elements[nj]; break;
+          }
+        }
+        if (!note) {
+          propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">注釈が見つかりません</p>';
+          return;
+        }
+        var partList = parsedData.elements.filter(function(e) { return e.kind === 'participant' || e.kind === 'actor'; });
+        var posOptsN = [
+          { value: 'left of', label: 'left of', selected: note.position === 'left of' },
+          { value: 'right of', label: 'right of', selected: note.position === 'right of' },
+          { value: 'over', label: 'over', selected: note.position === 'over' },
+        ];
+        var targetOptsN = partList.map(function(p) {
+          return { value: p.id, label: p.label, selected: note.targets && note.targets[0] === p.id };
+        });
+        propsEl.innerHTML =
+          props.panelHeaderHtml('Note') +
+          props.selectFieldHtml('Position', 'sel-note-pos', posOptsN) +
+          props.selectFieldHtml('Target', 'sel-note-target', targetOptsN) +
+          fieldHtml('本文', 'sel-note-text', note.text) +
+          '<div style="display:flex;gap:4px;margin:8px 0 4px 0;">' +
+            '<button id="sel-note-insert-before" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↑ この前に挿入</button>' +
+            '<button id="sel-note-insert-after" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↓ この後に挿入</button>' +
+          '</div>' +
+          props.dangerButtonHtml('sel-note-delete', '注釈削除');
+
+        function rewriteNoteLine(newPos, newTarget, newText) {
+          var text = ctx.getMmdText();
+          var lines = text.split('\n');
+          var idx0 = note.line - 1;
+          if (idx0 < 0 || idx0 >= lines.length) return;
+          var indent = (lines[idx0].match(/^(\s*)/) || ['',''])[1];
+          lines[idx0] = indent + 'Note ' + newPos + ' ' + newTarget + (newText ? ': ' + newText : '');
+          window.MA.history.pushHistory();
+          ctx.setMmdText(lines.join('\n'));
+          ctx.onUpdate();
+        }
+        props.bindEvent('sel-note-pos', 'change', function() {
+          rewriteNoteLine(this.value, document.getElementById('sel-note-target').value, document.getElementById('sel-note-text').value);
+        });
+        props.bindEvent('sel-note-target', 'change', function() {
+          rewriteNoteLine(document.getElementById('sel-note-pos').value, this.value, document.getElementById('sel-note-text').value);
+        });
+        props.bindEvent('sel-note-text', 'change', function() {
+          rewriteNoteLine(document.getElementById('sel-note-pos').value, document.getElementById('sel-note-target').value, this.value);
+        });
+        props.bindEvent('sel-note-insert-before', 'click', function() {
+          _showInsertForm(ctx, note.line, 'before', 'message');
+        });
+        props.bindEvent('sel-note-insert-after', 'click', function() {
+          _showInsertForm(ctx, note.line, 'after', 'message');
+        });
+        props.bindEvent('sel-note-delete', 'click', function() {
+          window.MA.history.pushHistory();
+          ctx.setMmdText(window.MA.textUpdater.deleteLine(ctx.getMmdText(), note.line));
           window.MA.selection.clearSelection();
           ctx.onUpdate();
         });
