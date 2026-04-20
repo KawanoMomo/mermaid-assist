@@ -812,6 +812,9 @@ window.MA.modules.sequence = (function() {
           propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">参加者が見つかりません</p>';
           return;
         }
+        // Participant action bar ported from PlantUMLAssist: provides
+        // "move left / right" reorder buttons + delete. Mirrors the
+        // PlantUML props panel layout for cross-tool consistency.
         propsEl.innerHTML =
           props.panelHeaderHtml(part.label) +
           props.selectFieldHtml('種別', 'sel-part-kind', [
@@ -820,6 +823,10 @@ window.MA.modules.sequence = (function() {
           ]) +
           fieldHtml('ID', 'sel-part-id', part.id) +
           fieldHtml('ラベル', 'sel-part-label', part.label) +
+          '<div style="display:flex;gap:4px;margin:8px 0;">' +
+            '<button id="sel-part-left" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">← 左へ</button>' +
+            '<button id="sel-part-right" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">右へ →</button>' +
+          '</div>' +
           props.dangerButtonHtml('sel-part-delete', '参加者削除');
 
         props.bindEvent('sel-part-kind', 'change', function() {
@@ -835,6 +842,20 @@ window.MA.modules.sequence = (function() {
         props.bindEvent('sel-part-label', 'change', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(updateParticipant(ctx.getMmdText(), part.line, 'label', this.value));
+          ctx.onUpdate();
+        });
+        props.bindEvent('sel-part-left', 'click', function() {
+          var newText = moveParticipantUp(ctx.getMmdText(), part.line);
+          if (newText === ctx.getMmdText()) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
+          ctx.onUpdate();
+        });
+        props.bindEvent('sel-part-right', 'click', function() {
+          var newText = moveParticipantDown(ctx.getMmdText(), part.line);
+          if (newText === ctx.getMmdText()) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
           ctx.onUpdate();
         });
         props.bindEvent('sel-part-delete', 'click', function() {
@@ -867,12 +888,24 @@ window.MA.modules.sequence = (function() {
           arrowOptsArr.push({ value: arrows2[ao2], label: arrows2[ao2], selected: arrows2[ao2] === msg.arrow });
         }
 
+        // Message action bar ported from PlantUMLAssist: direct insertion-anchor
+        // buttons invoke the modal insert form at the selected line, matching
+        // PlantUML's "↑この前に / ↓この後に" pattern. Also "↑上へ / ↓下へ" for
+        // quick reordering within the DSL.
         propsEl.innerHTML =
           props.panelHeaderHtml('Message') +
           props.selectFieldHtml('From', 'sel-msg-from', fromOptsArr) +
           props.selectFieldHtml('Arrow', 'sel-msg-arrow', arrowOptsArr, true) +
           props.selectFieldHtml('To', 'sel-msg-to', toOptsArr) +
           fieldHtml('ラベル', 'sel-msg-label', msg.label) +
+          '<div style="display:flex;gap:4px;margin:8px 0 4px 0;">' +
+            '<button id="sel-msg-insert-before" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↑ この前に挿入</button>' +
+            '<button id="sel-msg-insert-after" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↓ この後に挿入</button>' +
+          '</div>' +
+          '<div style="display:flex;gap:4px;margin:4px 0;">' +
+            '<button id="sel-msg-up" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↑ 上へ</button>' +
+            '<button id="sel-msg-down" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↓ 下へ</button>' +
+          '</div>' +
           props.dangerButtonHtml('sel-msg-delete', 'メッセージ削除');
 
         props.bindEvent('sel-msg-from', 'change', function() {
@@ -893,6 +926,26 @@ window.MA.modules.sequence = (function() {
         props.bindEvent('sel-msg-label', 'change', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(updateMessage(ctx.getMmdText(), msg.line, 'label', this.value));
+          ctx.onUpdate();
+        });
+        props.bindEvent('sel-msg-insert-before', 'click', function() {
+          _showInsertForm(ctx, msg.line, 'before', 'message');
+        });
+        props.bindEvent('sel-msg-insert-after', 'click', function() {
+          _showInsertForm(ctx, msg.line, 'after', 'message');
+        });
+        props.bindEvent('sel-msg-up', 'click', function() {
+          var newText = moveMessageUp(ctx.getMmdText(), msg.line);
+          if (newText === ctx.getMmdText()) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
+          ctx.onUpdate();
+        });
+        props.bindEvent('sel-msg-down', 'click', function() {
+          var newText = moveMessageDown(ctx.getMmdText(), msg.line);
+          if (newText === ctx.getMmdText()) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
           ctx.onUpdate();
         });
         props.bindEvent('sel-msg-delete', 'click', function() {
