@@ -184,6 +184,51 @@ window.MA.modules.sequence = (function() {
     return window.MA.textUpdater.swapLines(text, lineNum, participants[idx + 1].line);
   }
 
+  // moveParticipant: drag-to-reorder via gap index.
+  // gapIndex is a GAP position in the pre-move participant array, range [0, N]:
+  //   0   = before all participants
+  //   k   = between participants k-1 and k
+  //   N   = after all participants
+  // Gaps adjacent to the dragged participant (at `from` and `from+1`) are no-op
+  // since the participant would land back in its own slot.
+  //
+  // Matches the drop-indicator semantics used by app.js so that dropping on the
+  // visible dotted line puts the participant exactly at that position. See
+  // 06_PlantUMLAssist/docs/direct-manipulation-ux-checklist.md 観点 J.
+  function moveParticipant(text, alias, gapIndex) {
+    if (!alias) return text;
+    var p = parseSequence(text);
+    var participants = p.elements
+      .filter(function(e) { return e.kind === 'participant' || e.kind === 'actor'; })
+      .sort(function(a, b) { return a.line - b.line; });
+    var from = -1;
+    for (var i = 0; i < participants.length; i++) {
+      if (participants[i].id === alias) { from = i; break; }
+    }
+    if (from < 0) return text;
+    var N = participants.length;
+    if (gapIndex < 0) gapIndex = 0;
+    if (gapIndex > N) gapIndex = N;
+    if (gapIndex === from || gapIndex === from + 1) return text;
+    // Translate gap index → post-remove insertion index.
+    var targetIdx = (gapIndex <= from) ? gapIndex : gapIndex - 1;
+    var lines = text.split('\n');
+    var fromLineIdx0 = participants[from].line - 1;
+    var lineContent = lines[fromLineIdx0];
+    lines.splice(fromLineIdx0, 1);
+    var remaining = participants.filter(function(_, idx) { return idx !== from; });
+    var toLineIdx0;
+    if (targetIdx >= remaining.length) {
+      toLineIdx0 = remaining[remaining.length - 1].line;  // line is 1-based, after-last = that line's 0-index + 1
+      if (fromLineIdx0 < toLineIdx0) toLineIdx0--;
+    } else {
+      toLineIdx0 = remaining[targetIdx].line - 1;
+      if (fromLineIdx0 < toLineIdx0) toLineIdx0--;
+    }
+    lines.splice(toLineIdx0, 0, lineContent);
+    return lines.join('\n');
+  }
+
   function updateParticipant(text, lineNum, field, value) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
@@ -346,6 +391,7 @@ window.MA.modules.sequence = (function() {
 
     var NS = 'http://www.w3.org/2000/svg';
 
+    // ── Step 1: label overlays (existing behaviour) ──
     // Map participants to their text labels in the SVG (by matching label text)
     var texts = svgEl.querySelectorAll('text');
     for (var ei = 0; ei < parsedData.elements.length; ei++) {
@@ -376,6 +422,51 @@ window.MA.modules.sequence = (function() {
           break;
         }
       }
+    }
+
+    // ── Step 2: full actor-box drag handles ──
+    // Overlay an invisible rect on top of every Mermaid `rect.actor.actor-top`
+    // and `.actor-bottom` so users can grab the entire actor header (not just
+    // the small label) to select / drag-reorder. All rects carry the same
+    // data-element-id; app.js dedups by id (not by x) when computing drop gaps
+    // — see direct-manipulation-ux-checklist.md 観点 J.
+    var participants = parsedData.elements
+      .filter(function(e) { return e.kind === 'participant' || e.kind === 'actor'; })
+      .sort(function(a, b) { return a.line - b.line; });
+    var actorRects = svgEl.querySelectorAll('rect.actor.actor-top, rect.actor.actor-bottom');
+    // Mermaid lays actors out left-to-right in DSL order. Collect unique x
+    // positions (top & bottom share the same x per actor) to map back to DSL.
+    var actorXGroups = {};  // xRounded -> [rect,...]
+    Array.prototype.forEach.call(actorRects, function(r) {
+      var x = parseFloat(r.getAttribute('x'));
+      var key = Math.round(x);
+      if (!actorXGroups[key]) actorXGroups[key] = [];
+      actorXGroups[key].push(r);
+    });
+    var sortedXs = Object.keys(actorXGroups).map(Number).sort(function(a, b) { return a - b; });
+    for (var xi = 0; xi < sortedXs.length && xi < participants.length; xi++) {
+      var participant = participants[xi];
+      var rects = actorXGroups[sortedXs[xi]];
+      rects.forEach(function(actorRect) {
+        try {
+          var ax = parseFloat(actorRect.getAttribute('x'));
+          var ay = parseFloat(actorRect.getAttribute('y'));
+          var aw = parseFloat(actorRect.getAttribute('width'));
+          var ah = parseFloat(actorRect.getAttribute('height'));
+          var handle = document.createElementNS(NS, 'rect');
+          handle.setAttribute('x', ax);
+          handle.setAttribute('y', ay);
+          handle.setAttribute('width', aw);
+          handle.setAttribute('height', ah);
+          handle.setAttribute('fill', 'transparent');
+          handle.setAttribute('cursor', 'grab');
+          handle.setAttribute('class', 'overlay-participant-handle');
+          handle.setAttribute('data-element-id', participant.id);
+          handle.setAttribute('data-element-kind', 'participant');
+          handle.setAttribute('data-line', participant.line);
+          overlayEl.appendChild(handle);
+        } catch (e) { /* skip */ }
+      });
     }
   }
 
@@ -760,6 +851,7 @@ window.MA.modules.sequence = (function() {
     deleteParticipant: deleteParticipant,
     moveParticipantUp: moveParticipantUp,
     moveParticipantDown: moveParticipantDown,
+    moveParticipant: moveParticipant,
     updateParticipant: updateParticipant,
     addMessage: addMessage,
     deleteMessage: deleteMessage,

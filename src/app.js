@@ -49,6 +49,15 @@ function rebuildOverlay() {
 
 // ── Drag State ────────────────────────────────────────────────────────────
 var dragState = null;
+// Sequence-specific drag state (participant reorder via gap drop).
+// Kept separate from the Gantt date-drag state above since the two handlers
+// run on the same overlay element but track fundamentally different motion.
+var seqDragState = null;
+// Timestamp of the last drag-end, used to suppress the synthetic click that
+// follows a real drag. See PlantUMLAssist: direct-manipulation-ux-checklist
+// 観点 C ("click が drag の残響で発火して popup が暴発する" の対策).
+var seqJustDraggedAt = 0;
+var SEQ_DRAG_CLICK_SUPPRESS_MS = 300;
 
 // ── Application State ──────────────────────────────────────────────────────
 var mmdText = '';
@@ -1229,6 +1238,23 @@ function init() {
     var lineNum = target.getAttribute('data-line');
     var index = target.getAttribute('data-index');
 
+    // Sequence participant drag path: elements have data-element-kind="participant"
+    // rather than data-task-id. Handled by a separate code path below.
+    var seqKind = target.getAttribute('data-element-kind');
+    var seqId = target.getAttribute('data-element-id');
+    if (seqKind === 'participant' && seqId) {
+      seqDragState = {
+        id: seqId,
+        startX: e.clientX,
+        startY: e.clientY,
+        dragging: false,
+        ghostEl: null,
+      };
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
     // Click on empty overlay area (no task): clear selection
     if (!taskId && !e.shiftKey) {
       window.MA.selection.clearSelection();
@@ -1299,8 +1325,125 @@ function init() {
     }
   });
 
+  // ── Sequence participant drag: geometry helpers ─────────────────────────
+  function _seqParticipantCenters(overlay) {
+    // Dedup by data-element-id. Feature: buildOverlay emits actor-top AND
+    // actor-bottom rects, so each participant has 2 rects at the same x.
+    // Dedup by id (not by x coordinate) to avoid the PlantUMLAssist bug where
+    // near-duplicate x values inflated the gap count.
+    var byId = {};
+    var rects = overlay.querySelectorAll('rect[data-element-kind="participant"]');
+    Array.prototype.forEach.call(rects, function(r) {
+      var id = r.getAttribute('data-element-id');
+      if (!id || id in byId) return;
+      var x = parseFloat(r.getAttribute('x'));
+      var w = parseFloat(r.getAttribute('width'));
+      if (isNaN(x) || isNaN(w)) return;
+      byId[id] = { id: id, cx: x + w / 2 };
+    });
+    var arr = [];
+    for (var k in byId) if (Object.prototype.hasOwnProperty.call(byId, k)) arr.push(byId[k]);
+    arr.sort(function(a, b) { return a.cx - b.cx; });
+    return arr;
+  }
+
+  function _seqGaps(overlay, centers) {
+    if (!centers || centers.length === 0) return [];
+    var overlayW = parseFloat(overlay.getAttribute('width'))
+      || (overlay.viewBox && overlay.viewBox.baseVal && overlay.viewBox.baseVal.width)
+      || 800;
+    var left = Math.max(5, centers[0].cx - 40);
+    var right = Math.min(overlayW - 5, centers[centers.length - 1].cx + 40);
+    var gaps = [left];
+    for (var i = 0; i < centers.length - 1; i++) {
+      gaps.push((centers[i].cx + centers[i + 1].cx) / 2);
+    }
+    gaps.push(right);
+    return gaps;
+  }
+
+  function _seqScreenToOverlayX(overlay, clientX) {
+    if (!overlay || !overlay.createSVGPoint) return null;
+    var pt = overlay.createSVGPoint();
+    pt.x = clientX; pt.y = 0;
+    var ctm = overlay.getScreenCTM();
+    if (!ctm) return null;
+    return pt.matrixTransform(ctm.inverse()).x;
+  }
+
+  function _seqDrawDropIndicator(overlay, clientX) {
+    var old = overlay.querySelectorAll('.seq-drop-indicator');
+    Array.prototype.forEach.call(old, function(el) { el.parentNode.removeChild(el); });
+    var centers = _seqParticipantCenters(overlay);
+    if (centers.length === 0) return;
+    var gaps = _seqGaps(overlay, centers);
+    var localX = _seqScreenToOverlayX(overlay, clientX);
+    if (localX == null) return;
+    var bestX = gaps[0], bestDist = Infinity;
+    for (var i = 0; i < gaps.length; i++) {
+      var d = Math.abs(localX - gaps[i]);
+      if (d < bestDist) { bestDist = d; bestX = gaps[i]; }
+    }
+    var h = parseFloat(overlay.getAttribute('height'))
+      || (overlay.viewBox && overlay.viewBox.baseVal && overlay.viewBox.baseVal.height)
+      || 400;
+    var NS = 'http://www.w3.org/2000/svg';
+    var line = document.createElementNS(NS, 'line');
+    line.setAttribute('x1', bestX);
+    line.setAttribute('y1', 0);
+    line.setAttribute('x2', bestX);
+    line.setAttribute('y2', h);
+    line.setAttribute('stroke', '#7c8cf8');
+    line.setAttribute('stroke-width', '2');
+    line.setAttribute('stroke-dasharray', '6 4');
+    line.setAttribute('class', 'seq-drop-indicator');
+    line.setAttribute('pointer-events', 'none');
+    overlay.appendChild(line);
+  }
+
+  function _seqClearDropIndicator(overlay) {
+    if (!overlay) return;
+    var old = overlay.querySelectorAll('.seq-drop-indicator');
+    Array.prototype.forEach.call(old, function(el) { el.parentNode.removeChild(el); });
+  }
+
+  function _seqComputeDropIndex(overlay, clientX) {
+    var centers = _seqParticipantCenters(overlay);
+    if (centers.length === 0) return null;
+    var gaps = _seqGaps(overlay, centers);
+    var localX = _seqScreenToOverlayX(overlay, clientX);
+    if (localX == null) return null;
+    var bestIdx = 0, bestDist = Infinity;
+    for (var i = 0; i < gaps.length; i++) {
+      var d = Math.abs(localX - gaps[i]);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    return bestIdx;
+  }
+
   // ── Document mousemove (drag) ───────────────────────────────────────────
   document.addEventListener('mousemove', function(e) {
+    // Sequence participant drag path
+    if (seqDragState) {
+      var dx = e.clientX - seqDragState.startX;
+      var dy = e.clientY - seqDragState.startY;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      if (!seqDragState.dragging && dist > 4) {
+        seqDragState.dragging = true;
+        var g = document.createElement('div');
+        g.className = 'seq-drag-ghost';
+        g.textContent = seqDragState.id;
+        g.style.cssText = 'position:fixed;pointer-events:none;background:rgba(124,140,248,0.9);color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;z-index:9999;left:' + e.clientX + 'px;top:' + e.clientY + 'px;';
+        document.body.appendChild(g);
+        seqDragState.ghostEl = g;
+      }
+      if (seqDragState.dragging) {
+        seqDragState.ghostEl.style.left = e.clientX + 'px';
+        seqDragState.ghostEl.style.top = e.clientY + 'px';
+        if (overlayEl) _seqDrawDropIndicator(overlayEl, e.clientX);
+      }
+      return;
+    }
     if (!dragState) return;
 
     if (!overlayEl || !overlayEl.createSVGPoint) return;
@@ -1415,7 +1558,33 @@ function init() {
   });
 
   // ── Document mouseup (end drag) ─────────────────────────────────────────
-  document.addEventListener('mouseup', function() {
+  document.addEventListener('mouseup', function(e) {
+    // Sequence participant drag path
+    if (seqDragState) {
+      if (seqDragState.dragging) {
+        var gapIdx = _seqComputeDropIndex(overlayEl, e.clientX);
+        var seqMod = window.MA.modules && window.MA.modules.sequence;
+        if (gapIdx !== null && seqMod && seqMod.moveParticipant) {
+          var newText = seqMod.moveParticipant(mmdText, seqDragState.id, gapIdx);
+          if (newText !== mmdText) {
+            window.MA.history.pushHistory();
+            mmdText = newText;
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            syncLineNumbers();
+            scheduleRefresh();
+          }
+        }
+        if (seqDragState.ghostEl && seqDragState.ghostEl.parentNode) {
+          seqDragState.ghostEl.parentNode.removeChild(seqDragState.ghostEl);
+        }
+        if (overlayEl) _seqClearDropIndicator(overlayEl);
+        seqJustDraggedAt = Date.now();
+      }
+      seqDragState = null;
+      return;
+    }
     if (dragState) {
       dragState = null;
       clearTimeout(dragRenderTimer);
@@ -1441,6 +1610,14 @@ function init() {
     var inInput = (tag === 'INPUT' || tag === 'SELECT');
     var inEditor = (e.target === editorEl);
 
+    if (e.key === 'Escape' && seqDragState && seqDragState.dragging) {
+      if (seqDragState.ghostEl && seqDragState.ghostEl.parentNode) {
+        seqDragState.ghostEl.parentNode.removeChild(seqDragState.ghostEl);
+      }
+      if (overlayEl) _seqClearDropIndicator(overlayEl);
+      seqDragState = null;
+      return;
+    }
     if (e.ctrlKey && e.key === 'z') {
       if (inEditor) return;
       e.preventDefault(); window.MA.history.undo();
