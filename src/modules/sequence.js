@@ -301,7 +301,7 @@ window.MA.modules.sequence = (function() {
       P.selectFieldHtml('From', 'seq-mod-from', partOptsWithNew) +
       P.selectFieldHtml('Arrow', 'seq-mod-arrow', arrowOpts, true) +
       P.selectFieldHtml('To', 'seq-mod-to', partOptsWithNew) +
-      P.fieldHtml('本文', 'seq-mod-label', '', 'Message') +
+      '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">本文</label><div id="seq-mod-label-rle"></div></div>' +
       '<div id="seq-mod-new-inline" style="display:none;margin-top:6px;padding:8px;background:var(--bg-tertiary);border-left:3px solid var(--accent);border-radius:3px;">' +
         '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;">新しい参加者を作成</label>' +
         '<input id="seq-mod-new-id" type="text" placeholder="ID (必須)" style="width:100%;background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:4px 6px;border-radius:3px;font-size:12px;margin-bottom:4px;box-sizing:border-box;">' +
@@ -316,6 +316,12 @@ window.MA.modules.sequence = (function() {
         '<button id="seq-mod-confirm" style="flex:1;background:var(--accent);border:none;color:#fff;padding:8px;border-radius:4px;cursor:pointer;">確定</button>' +
       '</div>';
     modal.style.display = 'flex';
+
+    // Mount rich-label-editor for the body field (B/I/br toolbar + preview)
+    var rleObj = null;
+    if (window.MA.richLabelEditor && window.MA.richLabelEditor.mount) {
+      rleObj = window.MA.richLabelEditor.mount(document.getElementById('seq-mod-label-rle'), '');
+    }
 
     // Inline "new participant" toggle
     var inlineEl = document.getElementById('seq-mod-new-inline');
@@ -338,7 +344,7 @@ window.MA.modules.sequence = (function() {
       var fr = document.getElementById('seq-mod-from').value;
       var to = document.getElementById('seq-mod-to').value;
       var arrow = document.getElementById('seq-mod-arrow').value || '->>';
-      var label = document.getElementById('seq-mod-label').value || '';
+      var label = rleObj ? rleObj.getValue() : '';
       if (fr === '__new__' || to === '__new__') {
         var newId = document.getElementById('seq-mod-new-id').value.trim();
         if (!newId) { alert('新しい参加者の ID は必須です'); return; }
@@ -997,7 +1003,7 @@ window.MA.modules.sequence = (function() {
           props.selectFieldHtml('From', 'sel-msg-from', fromOptsArr) +
           props.selectFieldHtml('Arrow', 'sel-msg-arrow', arrowOptsArr, true) +
           props.selectFieldHtml('To', 'sel-msg-to', toOptsArr) +
-          fieldHtml('ラベル', 'sel-msg-label', msg.label) +
+          '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label><div id="sel-msg-label-rle"></div></div>' +
           '<div style="display:flex;gap:4px;margin:8px 0 4px 0;">' +
             '<button id="sel-msg-insert-before" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↑ この前に挿入</button>' +
             '<button id="sel-msg-insert-after" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↓ この後に挿入</button>' +
@@ -1023,11 +1029,19 @@ window.MA.modules.sequence = (function() {
           ctx.setMmdText(updateMessage(ctx.getMmdText(), msg.line, 'to', this.value));
           ctx.onUpdate();
         });
-        props.bindEvent('sel-msg-label', 'change', function() {
-          window.MA.history.pushHistory();
-          ctx.setMmdText(updateMessage(ctx.getMmdText(), msg.line, 'label', this.value));
-          ctx.onUpdate();
-        });
+        // Rich label editor mount for message body. Uses onChange (blur) so
+        // keystrokes don't churn the DSL — see PlantUMLAssist bug 2+5 fix.
+        if (window.MA.richLabelEditor && window.MA.richLabelEditor.mount) {
+          window.MA.richLabelEditor.mount(
+            document.getElementById('sel-msg-label-rle'),
+            msg.label || '',
+            function(newLabel) {
+              window.MA.history.pushHistory();
+              ctx.setMmdText(updateMessage(ctx.getMmdText(), msg.line, 'label', newLabel));
+              ctx.onUpdate();
+            }
+          );
+        }
         props.bindEvent('sel-msg-insert-before', 'click', function() {
           _showInsertForm(ctx, msg.line, 'before', 'message');
         });
@@ -1081,7 +1095,7 @@ window.MA.modules.sequence = (function() {
           props.panelHeaderHtml('Note') +
           props.selectFieldHtml('Position', 'sel-note-pos', posOptsN) +
           props.selectFieldHtml('Target', 'sel-note-target', targetOptsN) +
-          fieldHtml('本文', 'sel-note-text', note.text) +
+          '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">本文</label><div id="sel-note-text-rle"></div></div>' +
           '<div style="display:flex;gap:4px;margin:8px 0 4px 0;">' +
             '<button id="sel-note-insert-before" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↑ この前に挿入</button>' +
             '<button id="sel-note-insert-after" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↓ この後に挿入</button>' +
@@ -1099,15 +1113,27 @@ window.MA.modules.sequence = (function() {
           ctx.setMmdText(lines.join('\n'));
           ctx.onUpdate();
         }
+        function currentNoteText() { return noteRleObj ? noteRleObj.getValue() : (note.text || ''); }
         props.bindEvent('sel-note-pos', 'change', function() {
-          rewriteNoteLine(this.value, document.getElementById('sel-note-target').value, document.getElementById('sel-note-text').value);
+          rewriteNoteLine(this.value, document.getElementById('sel-note-target').value, currentNoteText());
         });
         props.bindEvent('sel-note-target', 'change', function() {
-          rewriteNoteLine(document.getElementById('sel-note-pos').value, this.value, document.getElementById('sel-note-text').value);
+          rewriteNoteLine(document.getElementById('sel-note-pos').value, this.value, currentNoteText());
         });
-        props.bindEvent('sel-note-text', 'change', function() {
-          rewriteNoteLine(document.getElementById('sel-note-pos').value, document.getElementById('sel-note-target').value, this.value);
-        });
+        var noteRleObj = null;
+        if (window.MA.richLabelEditor && window.MA.richLabelEditor.mount) {
+          noteRleObj = window.MA.richLabelEditor.mount(
+            document.getElementById('sel-note-text-rle'),
+            note.text || '',
+            function(newText) {
+              rewriteNoteLine(
+                document.getElementById('sel-note-pos').value,
+                document.getElementById('sel-note-target').value,
+                newText
+              );
+            }
+          );
+        }
         props.bindEvent('sel-note-insert-before', 'click', function() {
           _showInsertForm(ctx, note.line, 'before', 'message');
         });
