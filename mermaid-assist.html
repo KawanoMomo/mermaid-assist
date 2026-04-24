@@ -378,23 +378,55 @@ html, body {
   cursor: move;
 }
 
-/* ── Sequence: selected-element highlights ─────────────────────────────────── */
-/* Messages / notes / groups / participants: selected state adds an accent
-   green dashed outline and a subtle fill. Matches the participant-handle
-   selection look used by buildOverlay for label rects. */
-#overlay-layer .overlay-message.selected,
-#overlay-layer .overlay-note.selected,
-#overlay-layer .overlay-group.selected,
-#overlay-layer .overlay-participant-handle.selected {
+/* Generic selected / hover feedback for any overlay-* element.
+   Gantt uses .overlay-bar but does NOT add .selected, so this rule does
+   not affect it. See ADR-021. */
+#overlay-layer [class*="overlay-"].selected {
   fill: rgba(126, 231, 135, 0.15) !important;
-  stroke: #7ee787;
+  stroke: var(--accent-green, #7ee787);
   stroke-width: 2;
   stroke-dasharray: 4 4;
 }
-#overlay-layer .overlay-message:hover,
-#overlay-layer .overlay-note:hover,
-#overlay-layer .overlay-group:hover {
+#overlay-layer [class*="overlay-"]:not(.selected):not(.overlay-bar):hover {
   fill: rgba(124, 140, 248, 0.12) !important;
+}
+
+/* Action-bar layout used by window.MA.properties.actionBarHtml. */
+.action-bar-row {
+  display: flex;
+  gap: 4px;
+  margin: 4px 0;
+}
+.action-bar-extra:not(:empty) {
+  margin: 4px 0;
+}
+.action-btn {
+  flex: 1;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 4px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.action-btn:hover {
+  background: var(--bg-primary);
+}
+.action-btn-danger {
+  width: 100%;
+  background: var(--accent-red, #f74a4a);
+  border: none;
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+.action-btn-danger:hover {
+  filter: brightness(1.1);
 }
 </style>
 </head>
