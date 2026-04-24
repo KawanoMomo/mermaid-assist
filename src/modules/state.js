@@ -172,6 +172,36 @@ window.MA.modules.state = (function() {
     return lines.join('\n');
   }
 
+  function _isStateLine(trimmed) {
+    if (!trimmed) return false;
+    if (trimmed.indexOf('%%') === 0) return false;
+    if (/-->|--x|-\.->/.test(trimmed)) return false;
+    if (/^(stateDiagram|state\s+"|direction|\[\*\]|note\s|}\s*$|{)/i.test(trimmed)) return false;
+    return /^\w/.test(trimmed);
+  }
+
+  function _moveStateStep(text, lineNum, direction) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    var target = idx + direction;
+    while (target >= 0 && target < lines.length) {
+      var t = lines[target].trim();
+      if (!t || t.indexOf('%%') === 0) { target += direction; continue; }
+      if (_isStateLine(t)) {
+        var tmp = lines[idx];
+        lines[idx] = lines[target];
+        lines[target] = tmp;
+        return lines.join('\n');
+      }
+      return text;
+    }
+    return text;
+  }
+
+  function moveStateUp(text, lineNum) { return _moveStateStep(text, lineNum, -1); }
+  function moveStateDown(text, lineNum) { return _moveStateStep(text, lineNum, 1); }
+
   function deleteState(text, lineNum) {
     return window.MA.textUpdater.deleteLine(text, lineNum);
   }
@@ -396,18 +426,40 @@ window.MA.modules.state = (function() {
         fieldHtml('ID', 'sel-state-id', st.id) +
         fieldHtml('ラベル', 'sel-state-label', st.label) +
         '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">種別: ' + escHtml(st.type || 'simple') + '</div>' +
-        P.dangerButtonHtml('sel-state-delete', '状態削除');
+        P.actionBarHtml('sel-state', {
+          insertBefore: false, insertAfter: false,
+          move: true, delete: true,
+          labels: { delete: '状態削除' },
+        });
 
       document.getElementById('sel-state-label').addEventListener('change', function() {
         window.MA.history.pushHistory();
         ctx.setMmdText(updateStateLabel(ctx.getMmdText(), st.line, this.value));
         ctx.onUpdate();
       });
-      document.getElementById('sel-state-delete').addEventListener('click', function() {
-        window.MA.history.pushHistory();
-        ctx.setMmdText(deleteState(ctx.getMmdText(), st.line));
-        window.MA.selection.clearSelection();
-        ctx.onUpdate();
+      P.bindActionBar('sel-state', {
+        up: function() {
+          var newText = moveStateUp(ctx.getMmdText(), st.line);
+          if (newText === ctx.getMmdText()) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
+          window.MA.selection.setSelected([{ type: 'state', id: st.id }]);
+          ctx.onUpdate();
+        },
+        down: function() {
+          var newText = moveStateDown(ctx.getMmdText(), st.line);
+          if (newText === ctx.getMmdText()) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
+          window.MA.selection.setSelected([{ type: 'state', id: st.id }]);
+          ctx.onUpdate();
+        },
+        'delete': function() {
+          window.MA.history.pushHistory();
+          ctx.setMmdText(deleteState(ctx.getMmdText(), st.line));
+          window.MA.selection.clearSelection();
+          ctx.onUpdate();
+        },
       });
       return;
     }
@@ -433,12 +485,23 @@ window.MA.modules.state = (function() {
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">From</label><select id="sel-tr-from" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + fromOpts + '</select></div>' +
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">To</label><select id="sel-tr-to" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + toOpts + '</select></div>' +
         fieldHtml('イベント', 'sel-tr-event', tr.label) +
-        P.dangerButtonHtml('sel-tr-delete', '遷移削除');
+        P.actionBarHtml('sel-tr', {
+          insertBefore: false, insertAfter: false,
+          move: false, delete: true,
+          labels: { delete: '遷移削除' },
+        });
 
       document.getElementById('sel-tr-from').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateTransition(ctx.getMmdText(), tr.line, 'from', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-tr-to').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateTransition(ctx.getMmdText(), tr.line, 'to', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-tr-event').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateTransition(ctx.getMmdText(), tr.line, 'event', this.value)); ctx.onUpdate(); });
-      document.getElementById('sel-tr-delete').addEventListener('click', function() { window.MA.history.pushHistory(); ctx.setMmdText(deleteTransition(ctx.getMmdText(), tr.line)); window.MA.selection.clearSelection(); ctx.onUpdate(); });
+      P.bindActionBar('sel-tr', {
+        'delete': function() {
+          window.MA.history.pushHistory();
+          ctx.setMmdText(deleteTransition(ctx.getMmdText(), tr.line));
+          window.MA.selection.clearSelection();
+          ctx.onUpdate();
+        },
+      });
       return;
     }
 
@@ -496,6 +559,8 @@ window.MA.modules.state = (function() {
     parseState: parseState,
     addState: addState,
     deleteState: deleteState,
+    moveStateUp: moveStateUp,
+    moveStateDown: moveStateDown,
     updateStateLabel: updateStateLabel,
     addTransition: addTransition,
     deleteTransition: deleteTransition,
