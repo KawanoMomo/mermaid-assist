@@ -102,6 +102,7 @@ window.MA.modules.sequence = (function() {
         var targets = noteMatch[2].split(',').map(function(s) { return s.trim(); });
         result.elements.push({
           kind: 'note',
+          id: '__note_' + lineNum,
           position: noteMatch[1].toLowerCase(),
           targets: targets,
           text: noteMatch[3],
@@ -184,6 +185,51 @@ window.MA.modules.sequence = (function() {
     return window.MA.textUpdater.swapLines(text, lineNum, participants[idx + 1].line);
   }
 
+  // moveParticipant: drag-to-reorder via gap index.
+  // gapIndex is a GAP position in the pre-move participant array, range [0, N]:
+  //   0   = before all participants
+  //   k   = between participants k-1 and k
+  //   N   = after all participants
+  // Gaps adjacent to the dragged participant (at `from` and `from+1`) are no-op
+  // since the participant would land back in its own slot.
+  //
+  // Matches the drop-indicator semantics used by app.js so that dropping on the
+  // visible dotted line puts the participant exactly at that position. See
+  // 06_PlantUMLAssist/docs/direct-manipulation-ux-checklist.md 観点 J.
+  function moveParticipant(text, alias, gapIndex) {
+    if (!alias) return text;
+    var p = parseSequence(text);
+    var participants = p.elements
+      .filter(function(e) { return e.kind === 'participant' || e.kind === 'actor'; })
+      .sort(function(a, b) { return a.line - b.line; });
+    var from = -1;
+    for (var i = 0; i < participants.length; i++) {
+      if (participants[i].id === alias) { from = i; break; }
+    }
+    if (from < 0) return text;
+    var N = participants.length;
+    if (gapIndex < 0) gapIndex = 0;
+    if (gapIndex > N) gapIndex = N;
+    if (gapIndex === from || gapIndex === from + 1) return text;
+    // Translate gap index → post-remove insertion index.
+    var targetIdx = (gapIndex <= from) ? gapIndex : gapIndex - 1;
+    var lines = text.split('\n');
+    var fromLineIdx0 = participants[from].line - 1;
+    var lineContent = lines[fromLineIdx0];
+    lines.splice(fromLineIdx0, 1);
+    var remaining = participants.filter(function(_, idx) { return idx !== from; });
+    var toLineIdx0;
+    if (targetIdx >= remaining.length) {
+      toLineIdx0 = remaining[remaining.length - 1].line;  // line is 1-based, after-last = that line's 0-index + 1
+      if (fromLineIdx0 < toLineIdx0) toLineIdx0--;
+    } else {
+      toLineIdx0 = remaining[targetIdx].line - 1;
+      if (fromLineIdx0 < toLineIdx0) toLineIdx0--;
+    }
+    lines.splice(toLineIdx0, 0, lineContent);
+    return lines.join('\n');
+  }
+
   function updateParticipant(text, lineNum, field, value) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
@@ -212,16 +258,225 @@ window.MA.modules.sequence = (function() {
     return lines.join('\n');
   }
 
+  // insertMessageAt: insert a new message line at the specified 1-based position.
+  // position='before' inserts *before* lineNum, 'after' inserts *after* lineNum.
+  // Used by hover-insert / resolveInsertLine to place the new message at the
+  // visual gap the user clicked on.
+  function insertMessageAt(text, lineNum, position, from, to, arrow, label) {
+    arrow = arrow || '->>';
+    var newLine = '    ' + from + arrow + to + (label ? ': ' + label : ': ');
+    if (position === 'after') {
+      return window.MA.textUpdater.insertAfter(text, lineNum, newLine);
+    }
+    return window.MA.textUpdater.insertBefore(text, lineNum, newLine);
+  }
+
+  // _showInsertForm: open a modal form at #seq-modal for inserting a message
+  // before/after a specific line. Ported from PlantUMLAssist so the hover-
+  // insert click produces a structured form instead of 3 × prompt().
+  //
+  // ctx: { getMmdText, setMmdText, onUpdate } — same shape as PlantUMLAssist
+  // line: 1-based line number anchor
+  // position: 'before' | 'after'
+  // kind: 'message' (note kind is PlantUML-specific; Mermaid note syntax is
+  //       different and we keep message-only for now).
+  function _showInsertForm(ctx, line, position, kind) {
+    kind = kind || 'message';
+    var modal = document.getElementById('seq-modal');
+    var content = document.getElementById('seq-modal-content');
+    if (!modal || !content) return;
+    var P = window.MA.properties;
+    var parsed = parseSequence(ctx.getMmdText());
+    var participants = parsed.elements.filter(function(e) { return e.kind === 'participant' || e.kind === 'actor'; });
+    var partOpts = participants.map(function(p) { return { value: p.id, label: p.label }; });
+    if (partOpts.length === 0) partOpts = [{ value: '', label: '（参加者なし）' }];
+    var partOptsWithNew = partOpts.slice();
+    partOptsWithNew.push({ value: '__new__', label: '+ 新規追加…' });
+
+    var title = (position === 'before' ? '前に' : '後に') + 'メッセージを挿入';
+    var arrowOpts = ARROW_TYPES.map(function(a) { return { value: a, label: a, selected: a === '->>' }; });
+
+    content.innerHTML =
+      '<h3 style="margin:0 0 12px 0;font-size:13px;">' + title + '</h3>' +
+      P.selectFieldHtml('From', 'seq-mod-from', partOptsWithNew) +
+      P.selectFieldHtml('Arrow', 'seq-mod-arrow', arrowOpts, true) +
+      P.selectFieldHtml('To', 'seq-mod-to', partOptsWithNew) +
+      '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">本文</label><div id="seq-mod-label-rle"></div></div>' +
+      '<div id="seq-mod-new-inline" style="display:none;margin-top:6px;padding:8px;background:var(--bg-tertiary);border-left:3px solid var(--accent);border-radius:3px;">' +
+        '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;">新しい参加者を作成</label>' +
+        '<input id="seq-mod-new-id" type="text" placeholder="ID (必須)" style="width:100%;background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:4px 6px;border-radius:3px;font-size:12px;margin-bottom:4px;box-sizing:border-box;">' +
+        '<input id="seq-mod-new-label" type="text" placeholder="ラベル (任意)" style="width:100%;background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:4px 6px;border-radius:3px;font-size:12px;margin-bottom:4px;box-sizing:border-box;">' +
+        '<select id="seq-mod-new-kind" style="width:100%;background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:4px 6px;border-radius:3px;font-size:12px;box-sizing:border-box;">' +
+          '<option value="participant">participant</option>' +
+          '<option value="actor">actor</option>' +
+        '</select>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin-top:12px;">' +
+        '<button id="seq-mod-cancel" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:8px;border-radius:4px;cursor:pointer;">キャンセル</button>' +
+        '<button id="seq-mod-confirm" style="flex:1;background:var(--accent);border:none;color:#fff;padding:8px;border-radius:4px;cursor:pointer;">確定</button>' +
+      '</div>';
+    modal.style.display = 'flex';
+
+    // Mount rich-label-editor for the body field (B/I/br toolbar + preview)
+    var rleObj = null;
+    if (window.MA.richLabelEditor && window.MA.richLabelEditor.mount) {
+      rleObj = window.MA.richLabelEditor.mount(document.getElementById('seq-mod-label-rle'), '');
+    }
+
+    // Inline "new participant" toggle
+    var inlineEl = document.getElementById('seq-mod-new-inline');
+    function maybeShowInline() {
+      var fr = document.getElementById('seq-mod-from');
+      var to = document.getElementById('seq-mod-to');
+      if (!fr || !to || !inlineEl) return;
+      inlineEl.style.display = (fr.value === '__new__' || to.value === '__new__') ? 'block' : 'none';
+    }
+    var frEl = document.getElementById('seq-mod-from');
+    var toEl = document.getElementById('seq-mod-to');
+    if (frEl) frEl.addEventListener('change', maybeShowInline);
+    if (toEl) toEl.addEventListener('change', maybeShowInline);
+
+    function closeModal() { modal.style.display = 'none'; }
+    document.getElementById('seq-mod-cancel').addEventListener('click', closeModal);
+
+    document.getElementById('seq-mod-confirm').addEventListener('click', function() {
+      var t = ctx.getMmdText();
+      var fr = document.getElementById('seq-mod-from').value;
+      var to = document.getElementById('seq-mod-to').value;
+      var arrow = document.getElementById('seq-mod-arrow').value || '->>';
+      var label = rleObj ? rleObj.getValue() : '';
+      if (fr === '__new__' || to === '__new__') {
+        var newId = document.getElementById('seq-mod-new-id').value.trim();
+        if (!newId) { alert('新しい参加者の ID は必須です'); return; }
+        var newLabel = document.getElementById('seq-mod-new-label').value.trim() || newId;
+        var newKind = document.getElementById('seq-mod-new-kind').value;
+        window.MA.history.pushHistory();
+        t = addParticipant(t, newKind, newId, newLabel);
+        if (fr === '__new__') fr = newId;
+        if (to === '__new__') to = newId;
+      } else {
+        window.MA.history.pushHistory();
+      }
+      t = insertMessageAt(t, line, position, fr, to, arrow, label);
+      ctx.setMmdText(t);
+      closeModal();
+      if (ctx.onUpdate) ctx.onUpdate();
+    });
+  }
+
+  // resolveInsertLine: maps a cursor y-coord (in SVG units) to { line, position }
+  // describing where a new message should be inserted in the DSL.
+  //
+  // Mermaid renders each message as a `<line class="messageLine0|1">` at a
+  // known y coordinate. We read the visible messages in DOM order, pair them
+  // with parsedData.relations (also in DSL order), and pick the nearest gap.
+  //
+  // Returns null when no messages are present (caller should fall back to
+  // appending at the end of the block).
+  function resolveInsertLine(svgEl, parsedData, cursorSvgY) {
+    if (!svgEl || !parsedData) return null;
+    var msgRelations = (parsedData.relations || []).filter(function(r) { return r.kind === 'message'; });
+    if (msgRelations.length === 0) return null;
+    var lines = svgEl.querySelectorAll('line.messageLine0, line.messageLine1');
+    if (lines.length === 0) return null;
+    // Collect y coordinates and sort ascending
+    var ys = Array.prototype.map.call(lines, function(l) {
+      return parseFloat(l.getAttribute('y1') || l.getAttribute('y') || 0);
+    }).sort(function(a, b) { return a - b; });
+    // Bind messages to sorted y's by index (both are in DSL order).
+    // Build gap midpoints: above first, between each pair, below last.
+    var gaps = [];
+    gaps.push({ y: ys[0] - 20, insertBefore: msgRelations[0] });
+    for (var i = 0; i < ys.length - 1 && i < msgRelations.length - 1; i++) {
+      gaps.push({ y: (ys[i] + ys[i + 1]) / 2, insertBefore: msgRelations[i + 1] });
+    }
+    gaps.push({ y: ys[ys.length - 1] + 20, insertAfter: msgRelations[msgRelations.length - 1] });
+    // Pick the gap closest to cursorSvgY
+    var best = gaps[0];
+    var bestDist = Math.abs(cursorSvgY - gaps[0].y);
+    for (var gi = 1; gi < gaps.length; gi++) {
+      var d = Math.abs(cursorSvgY - gaps[gi].y);
+      if (d < bestDist) { bestDist = d; best = gaps[gi]; }
+    }
+    if (best.insertAfter) {
+      return { line: best.insertAfter.line, position: 'after' };
+    }
+    return { line: best.insertBefore.line, position: 'before' };
+  }
+
   function deleteMessage(text, lineNum) {
     return window.MA.textUpdater.deleteLine(text, lineNum);
   }
 
-  function moveMessageUp(text, lineNum) {
-    return window.MA.textUpdater.swapLines(text, lineNum, lineNum - 1);
+  // Returns true when the trimmed line contains one of the ARROW_TYPES, i.e.
+  // it is a message line rather than a note / block keyword / participant.
+  function _isMessageLine(trimmed) {
+    for (var ai = 0; ai < ARROW_TYPES.length; ai++) {
+      var pos = trimmed.indexOf(ARROW_TYPES[ai]);
+      // Must have content before the arrow (the "from" participant) to be a real message.
+      if (pos > 0) return true;
+    }
+    return false;
   }
 
-  function moveMessageDown(text, lineNum) {
-    return window.MA.textUpdater.swapLines(text, lineNum, lineNum + 1);
+  // moveMessage(text, lineNum, direction):
+  // direction = -1 (up) / +1 (down). Moves the selected message past the
+  // nearest adjacent *message* while leaving intervening notes / block
+  // boundaries / participants in place. If no same-kind neighbour exists,
+  // the call is a no-op so unrelated elements never appear to move on their
+  // own (user report: "上へ/下へで選択していないメッセージが動く").
+  function _moveMessageStep(text, lineNum, direction) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    var target = idx + direction;
+    while (target >= 0 && target < lines.length) {
+      var t = lines[target].trim();
+      if (!t || t.indexOf('%%') === 0) { target += direction; continue; }
+      if (_isMessageLine(t)) {
+        return window.MA.textUpdater.swapLines(text, lineNum, target + 1);
+      }
+      return text;  // hit non-message (note / block kwd / participant): bail
+    }
+    return text;
+  }
+
+  function moveMessageUp(text, lineNum) { return _moveMessageStep(text, lineNum, -1); }
+  function moveMessageDown(text, lineNum) { return _moveMessageStep(text, lineNum, 1); }
+
+  // _findMessageSwapTargetLine: mirror of _moveMessageStep's target-search so
+  // callers can compute where the message will end up (1-based) before the
+  // swap fires. Returns -1 if no swap would happen.
+  function _findMessageSwapTargetLine(text, lineNum, direction) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return -1;
+    var target = idx + direction;
+    while (target >= 0 && target < lines.length) {
+      var t = lines[target].trim();
+      if (!t || t.indexOf('%%') === 0) { target += direction; continue; }
+      if (_isMessageLine(t)) return target + 1;
+      return -1;
+    }
+    return -1;
+  }
+
+  // wrapWithBlock: wrap the inclusive line range [startLine, endLine] in
+  // a new alt/opt/loop/par block. Preserves the indent of startLine on the
+  // new opening and closing lines. No-op if the range is invalid.
+  // Cross-ref PlantUMLAssist wrapWith — observation checklist 観点 A
+  // (iterative modify flow, not just initial authoring).
+  function wrapWithBlock(text, startLine, endLine, kind, label) {
+    kind = kind || 'loop';
+    var lines = text.split('\n');
+    var startIdx = startLine - 1;
+    var endIdx = endLine - 1;
+    if (startIdx < 0 || endIdx >= lines.length || startIdx > endIdx) return text;
+    var indent = (lines[startIdx].match(/^(\s*)/) || ['', '    '])[1] || '    ';
+    // Splice `end` first so the start-splice index stays valid.
+    lines.splice(endIdx + 1, 0, indent + 'end');
+    lines.splice(startIdx, 0, indent + kind + (label ? ' ' + label : ''));
+    return lines.join('\n');
   }
 
   function updateMessage(text, lineNum, field, value) {
@@ -346,6 +601,7 @@ window.MA.modules.sequence = (function() {
 
     var NS = 'http://www.w3.org/2000/svg';
 
+    // ── Step 1: label overlays (existing behaviour) ──
     // Map participants to their text labels in the SVG (by matching label text)
     var texts = svgEl.querySelectorAll('text');
     for (var ei = 0; ei < parsedData.elements.length; ei++) {
@@ -376,6 +632,166 @@ window.MA.modules.sequence = (function() {
           break;
         }
       }
+    }
+
+    // ── Step 2: full actor-box drag handles ──
+    // Overlay an invisible rect on top of every Mermaid `rect.actor.actor-top`
+    // and `.actor-bottom` so users can grab the entire actor header (not just
+    // the small label) to select / drag-reorder. All rects carry the same
+    // data-element-id; app.js dedups by id (not by x) when computing drop gaps
+    // — see direct-manipulation-ux-checklist.md 観点 J.
+    var participants = parsedData.elements
+      .filter(function(e) { return e.kind === 'participant' || e.kind === 'actor'; })
+      .sort(function(a, b) { return a.line - b.line; });
+    var actorRects = svgEl.querySelectorAll('rect.actor.actor-top, rect.actor.actor-bottom');
+    // Mermaid lays actors out left-to-right in DSL order. Collect unique x
+    // positions (top & bottom share the same x per actor) to map back to DSL.
+    var actorXGroups = {};  // xRounded -> [rect,...]
+    Array.prototype.forEach.call(actorRects, function(r) {
+      var x = parseFloat(r.getAttribute('x'));
+      var key = Math.round(x);
+      if (!actorXGroups[key]) actorXGroups[key] = [];
+      actorXGroups[key].push(r);
+    });
+    var sortedXs = Object.keys(actorXGroups).map(Number).sort(function(a, b) { return a - b; });
+    for (var xi = 0; xi < sortedXs.length && xi < participants.length; xi++) {
+      var participant = participants[xi];
+      var rects = actorXGroups[sortedXs[xi]];
+      rects.forEach(function(actorRect) {
+        try {
+          var ax = parseFloat(actorRect.getAttribute('x'));
+          var ay = parseFloat(actorRect.getAttribute('y'));
+          var aw = parseFloat(actorRect.getAttribute('width'));
+          var ah = parseFloat(actorRect.getAttribute('height'));
+          var handle = document.createElementNS(NS, 'rect');
+          handle.setAttribute('x', ax);
+          handle.setAttribute('y', ay);
+          handle.setAttribute('width', aw);
+          handle.setAttribute('height', ah);
+          handle.setAttribute('fill', 'transparent');
+          handle.setAttribute('cursor', 'grab');
+          var hCls = 'overlay-participant-handle';
+          if (window.MA.selection && window.MA.selection.isSelected && window.MA.selection.isSelected(participant.id)) {
+            hCls += ' selected';
+          }
+          handle.setAttribute('class', hCls);
+          handle.setAttribute('data-element-id', participant.id);
+          handle.setAttribute('data-element-kind', 'participant');
+          handle.setAttribute('data-line', participant.line);
+          overlayEl.appendChild(handle);
+        } catch (e) { /* skip */ }
+      });
+    }
+
+    // ── Step 3: group (loop/alt/opt/par) overlays ──
+    // Mermaid renders each block frame as 4 consecutive `<line class="loopLine">`
+    // elements (top / right / bottom / left). Chunk them by 4 to recover the
+    // bbox, then pair with parsedData.groups in DSL order (buildOverlay gets
+    // them in source order so a simple zip works).
+    var loopLines = Array.prototype.slice.call(svgEl.querySelectorAll('line.loopLine'));
+    var groupData = parsedData.groups || [];
+    for (var gi = 0; gi + 3 < loopLines.length && Math.floor(gi / 4) < groupData.length; gi += 4) {
+      var l0 = loopLines[gi], l1 = loopLines[gi + 1], l2 = loopLines[gi + 2], l3 = loopLines[gi + 3];
+      var xs = [l0, l1, l2, l3].map(function(l) {
+        return [parseFloat(l.getAttribute('x1')), parseFloat(l.getAttribute('x2'))];
+      }).reduce(function(a, b) { return a.concat(b); }, []);
+      var ys = [l0, l1, l2, l3].map(function(l) {
+        return [parseFloat(l.getAttribute('y1')), parseFloat(l.getAttribute('y2'))];
+      }).reduce(function(a, b) { return a.concat(b); }, []);
+      var gx = Math.min.apply(null, xs), gy = Math.min.apply(null, ys);
+      var gw = Math.max.apply(null, xs) - gx;
+      var gh = Math.max.apply(null, ys) - gy;
+      if (isNaN(gx) || isNaN(gy) || gw <= 0 || gh <= 0) continue;
+      var grp = groupData[Math.floor(gi / 4)];
+      // Clickable rect only along the top band so it does not swallow clicks
+      // on nested messages. Top bar is ~20px tall matching Mermaid's label bar.
+      var grect = document.createElementNS(NS, 'rect');
+      grect.setAttribute('x', gx);
+      grect.setAttribute('y', gy);
+      grect.setAttribute('width', gw);
+      grect.setAttribute('height', 20);
+      grect.setAttribute('fill', 'transparent');
+      grect.setAttribute('cursor', 'pointer');
+      var grpCls = 'overlay-group';
+      if (window.MA.selection && window.MA.selection.isSelected && window.MA.selection.isSelected(grp.id)) {
+        grpCls += ' selected';
+      }
+      grect.setAttribute('class', grpCls);
+      grect.setAttribute('data-element-id', grp.id);
+      grect.setAttribute('data-element-kind', 'group');
+      grect.setAttribute('data-line', grp.line);
+      grect.setAttribute('data-end-line', grp.endLine);
+      overlayEl.appendChild(grect);
+    }
+
+    // ── Step 3.5: note overlays ──
+    // Mermaid renders notes as `<rect class="note">` + `<text class="noteText">`.
+    // Notes appear in DSL order so zip with parsedData.elements filtered to kind='note'.
+    var noteRects = Array.prototype.slice.call(svgEl.querySelectorAll('rect.note'));
+    var noteData = (parsedData.elements || []).filter(function(e) { return e.kind === 'note'; });
+    for (var ni = 0; ni < noteRects.length && ni < noteData.length; ni++) {
+      try {
+        var nr = noteRects[ni];
+        var note = noteData[ni];
+        var nrect = document.createElementNS(NS, 'rect');
+        nrect.setAttribute('x', nr.getAttribute('x'));
+        nrect.setAttribute('y', nr.getAttribute('y'));
+        nrect.setAttribute('width', nr.getAttribute('width'));
+        nrect.setAttribute('height', nr.getAttribute('height'));
+        nrect.setAttribute('fill', 'transparent');
+        nrect.setAttribute('cursor', 'pointer');
+        var noteCls = 'overlay-note';
+        if (window.MA.selection && window.MA.selection.isSelected && window.MA.selection.isSelected(note.id)) {
+          noteCls += ' selected';
+        }
+        nrect.setAttribute('class', noteCls);
+        nrect.setAttribute('data-element-id', note.id || ('__note_' + ni));
+        nrect.setAttribute('data-element-kind', 'note');
+        nrect.setAttribute('data-line', note.line);
+        overlayEl.appendChild(nrect);
+      } catch (e) { /* skip */ }
+    }
+
+    // ── Step 4: message overlays ──
+    // Cross-apply of PlantUMLAssist B3 (label-less message selectable): we
+    // build one rect per visible message line (line.messageLine0/1) so the
+    // arrow itself becomes clickable even when the message has no label.
+    // The messages in the SVG appear in DSL order (same as parsedData.relations
+    // filtered to kind==='message'), so we zip them together by sorted y.
+    var msgRelations = (parsedData.relations || []).filter(function(r) { return r.kind === 'message'; });
+    var msgLineEls = Array.prototype.slice.call(svgEl.querySelectorAll('line.messageLine0, line.messageLine1'));
+    // Pair by ordinal. Mermaid renders in DSL order so simple zip works.
+    msgLineEls.sort(function(a, b) {
+      return parseFloat(a.getAttribute('y1') || 0) - parseFloat(b.getAttribute('y1') || 0);
+    });
+    for (var mi = 0; mi < msgLineEls.length && mi < msgRelations.length; mi++) {
+      var mLine = msgLineEls[mi];
+      var rel = msgRelations[mi];
+      try {
+        var x1 = parseFloat(mLine.getAttribute('x1'));
+        var x2 = parseFloat(mLine.getAttribute('x2'));
+        var yy = parseFloat(mLine.getAttribute('y1'));
+        if (isNaN(x1) || isNaN(x2) || isNaN(yy)) continue;
+        // Clickable band: ±10px vertical hit-box around the arrow line.
+        var mx = Math.min(x1, x2);
+        var mw = Math.abs(x2 - x1);
+        var mrect = document.createElementNS(NS, 'rect');
+        mrect.setAttribute('x', mx);
+        mrect.setAttribute('y', yy - 10);
+        mrect.setAttribute('width', mw || 20);
+        mrect.setAttribute('height', 20);
+        mrect.setAttribute('fill', 'transparent');
+        mrect.setAttribute('cursor', 'pointer');
+        var msgCls = 'overlay-message';
+        if (window.MA.selection && window.MA.selection.isSelected && window.MA.selection.isSelected(rel.id)) {
+          msgCls += ' selected';
+        }
+        mrect.setAttribute('class', msgCls);
+        mrect.setAttribute('data-element-id', rel.id);
+        mrect.setAttribute('data-element-kind', 'message');
+        mrect.setAttribute('data-line', rel.line);
+        overlayEl.appendChild(mrect);
+      } catch (e) { /* skip */ }
     }
   }
 
@@ -581,6 +997,9 @@ window.MA.modules.sequence = (function() {
           propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">参加者が見つかりません</p>';
           return;
         }
+        // Participant action bar ported from PlantUMLAssist: provides
+        // "move left / right" reorder buttons + delete. Mirrors the
+        // PlantUML props panel layout for cross-tool consistency.
         propsEl.innerHTML =
           props.panelHeaderHtml(part.label) +
           props.selectFieldHtml('種別', 'sel-part-kind', [
@@ -589,6 +1008,10 @@ window.MA.modules.sequence = (function() {
           ]) +
           fieldHtml('ID', 'sel-part-id', part.id) +
           fieldHtml('ラベル', 'sel-part-label', part.label) +
+          '<div style="display:flex;gap:4px;margin:8px 0;">' +
+            '<button id="sel-part-left" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">← 左へ</button>' +
+            '<button id="sel-part-right" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">右へ →</button>' +
+          '</div>' +
           props.dangerButtonHtml('sel-part-delete', '参加者削除');
 
         props.bindEvent('sel-part-kind', 'change', function() {
@@ -604,6 +1027,25 @@ window.MA.modules.sequence = (function() {
         props.bindEvent('sel-part-label', 'change', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(updateParticipant(ctx.getMmdText(), part.line, 'label', this.value));
+          ctx.onUpdate();
+        });
+        // Participant aliases are unique and stable across re-parse, so
+        // re-selecting by `part.id` (the alias) works without needing to
+        // track line movement.
+        props.bindEvent('sel-part-left', 'click', function() {
+          var newText = moveParticipantUp(ctx.getMmdText(), part.line);
+          if (newText === ctx.getMmdText()) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
+          window.MA.selection.setSelected([{ type: 'participant', id: part.id }]);
+          ctx.onUpdate();
+        });
+        props.bindEvent('sel-part-right', 'click', function() {
+          var newText = moveParticipantDown(ctx.getMmdText(), part.line);
+          if (newText === ctx.getMmdText()) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
+          window.MA.selection.setSelected([{ type: 'participant', id: part.id }]);
           ctx.onUpdate();
         });
         props.bindEvent('sel-part-delete', 'click', function() {
@@ -636,12 +1078,24 @@ window.MA.modules.sequence = (function() {
           arrowOptsArr.push({ value: arrows2[ao2], label: arrows2[ao2], selected: arrows2[ao2] === msg.arrow });
         }
 
+        // Message action bar ported from PlantUMLAssist: direct insertion-anchor
+        // buttons invoke the modal insert form at the selected line, matching
+        // PlantUML's "↑この前に / ↓この後に" pattern. Also "↑上へ / ↓下へ" for
+        // quick reordering within the DSL.
         propsEl.innerHTML =
           props.panelHeaderHtml('Message') +
           props.selectFieldHtml('From', 'sel-msg-from', fromOptsArr) +
           props.selectFieldHtml('Arrow', 'sel-msg-arrow', arrowOptsArr, true) +
           props.selectFieldHtml('To', 'sel-msg-to', toOptsArr) +
-          fieldHtml('ラベル', 'sel-msg-label', msg.label) +
+          '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label><div id="sel-msg-label-rle"></div></div>' +
+          '<div style="display:flex;gap:4px;margin:8px 0 4px 0;">' +
+            '<button id="sel-msg-insert-before" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↑ この前に挿入</button>' +
+            '<button id="sel-msg-insert-after" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↓ この後に挿入</button>' +
+          '</div>' +
+          '<div style="display:flex;gap:4px;margin:4px 0;">' +
+            '<button id="sel-msg-up" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↑ 上へ</button>' +
+            '<button id="sel-msg-down" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↓ 下へ</button>' +
+          '</div>' +
           props.dangerButtonHtml('sel-msg-delete', 'メッセージ削除');
 
         props.bindEvent('sel-msg-from', 'change', function() {
@@ -659,14 +1113,244 @@ window.MA.modules.sequence = (function() {
           ctx.setMmdText(updateMessage(ctx.getMmdText(), msg.line, 'to', this.value));
           ctx.onUpdate();
         });
-        props.bindEvent('sel-msg-label', 'change', function() {
-          window.MA.history.pushHistory();
-          ctx.setMmdText(updateMessage(ctx.getMmdText(), msg.line, 'label', this.value));
-          ctx.onUpdate();
+        // Rich label editor mount for message body. Uses onChange (blur) so
+        // keystrokes don't churn the DSL — see PlantUMLAssist bug 2+5 fix.
+        if (window.MA.richLabelEditor && window.MA.richLabelEditor.mount) {
+          window.MA.richLabelEditor.mount(
+            document.getElementById('sel-msg-label-rle'),
+            msg.label || '',
+            function(newLabel) {
+              window.MA.history.pushHistory();
+              ctx.setMmdText(updateMessage(ctx.getMmdText(), msg.line, 'label', newLabel));
+              ctx.onUpdate();
+            }
+          );
+        }
+        props.bindEvent('sel-msg-insert-before', 'click', function() {
+          _showInsertForm(ctx, msg.line, 'before', 'message');
         });
+        props.bindEvent('sel-msg-insert-after', 'click', function() {
+          _showInsertForm(ctx, msg.line, 'after', 'message');
+        });
+        function moveAndReselect(direction) {
+          var oldText = ctx.getMmdText();
+          var newLine = _findMessageSwapTargetLine(oldText, msg.line, direction);
+          if (newLine < 0) return;
+          var newText = direction < 0
+            ? moveMessageUp(oldText, msg.line)
+            : moveMessageDown(oldText, msg.line);
+          if (newText === oldText) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
+          // Selection IDs are regenerated per-parse (position-based), so the
+          // original msg.id now points at the *other* message that swapped
+          // places. Look up the message that currently occupies `newLine` in
+          // the fresh parse and re-select that one so the user keeps editing
+          // what they moved.
+          var newParsed = parseSequence(newText);
+          for (var ri = 0; ri < newParsed.relations.length; ri++) {
+            var r = newParsed.relations[ri];
+            if (r.kind === 'message' && r.line === newLine) {
+              window.MA.selection.setSelected([{ type: 'message', id: r.id }]);
+              break;
+            }
+          }
+          ctx.onUpdate();
+        }
+        props.bindEvent('sel-msg-up', 'click', function() { moveAndReselect(-1); });
+        props.bindEvent('sel-msg-down', 'click', function() { moveAndReselect(1); });
         props.bindEvent('sel-msg-delete', 'click', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(deleteMessage(ctx.getMmdText(), msg.line));
+          window.MA.selection.clearSelection();
+          ctx.onUpdate();
+        });
+        return;
+      }
+
+      if (selType === 'note') {
+        var note = null;
+        for (var nj = 0; nj < parsedData.elements.length; nj++) {
+          if (parsedData.elements[nj].kind === 'note' && parsedData.elements[nj].id === selId) {
+            note = parsedData.elements[nj]; break;
+          }
+        }
+        if (!note) {
+          propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">注釈が見つかりません</p>';
+          return;
+        }
+        var partList = parsedData.elements.filter(function(e) { return e.kind === 'participant' || e.kind === 'actor'; });
+        var posOptsN = [
+          { value: 'left of', label: 'left of', selected: note.position === 'left of' },
+          { value: 'right of', label: 'right of', selected: note.position === 'right of' },
+          { value: 'over', label: 'over', selected: note.position === 'over' },
+        ];
+        var targetOptsN = partList.map(function(p) {
+          return { value: p.id, label: p.label, selected: note.targets && note.targets[0] === p.id };
+        });
+        propsEl.innerHTML =
+          props.panelHeaderHtml('Note') +
+          props.selectFieldHtml('Position', 'sel-note-pos', posOptsN) +
+          props.selectFieldHtml('Target', 'sel-note-target', targetOptsN) +
+          '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">本文</label><div id="sel-note-text-rle"></div></div>' +
+          '<div style="display:flex;gap:4px;margin:8px 0 4px 0;">' +
+            '<button id="sel-note-insert-before" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↑ この前に挿入</button>' +
+            '<button id="sel-note-insert-after" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↓ この後に挿入</button>' +
+          '</div>' +
+          props.dangerButtonHtml('sel-note-delete', '注釈削除');
+
+        function rewriteNoteLine(newPos, newTarget, newText) {
+          var text = ctx.getMmdText();
+          var lines = text.split('\n');
+          var idx0 = note.line - 1;
+          if (idx0 < 0 || idx0 >= lines.length) return;
+          var indent = (lines[idx0].match(/^(\s*)/) || ['',''])[1];
+          lines[idx0] = indent + 'Note ' + newPos + ' ' + newTarget + (newText ? ': ' + newText : '');
+          window.MA.history.pushHistory();
+          ctx.setMmdText(lines.join('\n'));
+          ctx.onUpdate();
+        }
+        function currentNoteText() { return noteRleObj ? noteRleObj.getValue() : (note.text || ''); }
+        props.bindEvent('sel-note-pos', 'change', function() {
+          rewriteNoteLine(this.value, document.getElementById('sel-note-target').value, currentNoteText());
+        });
+        props.bindEvent('sel-note-target', 'change', function() {
+          rewriteNoteLine(document.getElementById('sel-note-pos').value, this.value, currentNoteText());
+        });
+        var noteRleObj = null;
+        if (window.MA.richLabelEditor && window.MA.richLabelEditor.mount) {
+          noteRleObj = window.MA.richLabelEditor.mount(
+            document.getElementById('sel-note-text-rle'),
+            note.text || '',
+            function(newText) {
+              rewriteNoteLine(
+                document.getElementById('sel-note-pos').value,
+                document.getElementById('sel-note-target').value,
+                newText
+              );
+            }
+          );
+        }
+        props.bindEvent('sel-note-insert-before', 'click', function() {
+          _showInsertForm(ctx, note.line, 'before', 'message');
+        });
+        props.bindEvent('sel-note-insert-after', 'click', function() {
+          _showInsertForm(ctx, note.line, 'after', 'message');
+        });
+        props.bindEvent('sel-note-delete', 'click', function() {
+          window.MA.history.pushHistory();
+          ctx.setMmdText(window.MA.textUpdater.deleteLine(ctx.getMmdText(), note.line));
+          window.MA.selection.clearSelection();
+          ctx.onUpdate();
+        });
+        return;
+      }
+
+      if (selType === 'group') {
+        // Group block selection — ported from PlantUMLAssist. Mermaid blocks
+        // (loop/alt/opt/par) are detected in parsedData.groups. Offer label
+        // edit + delete + "+ else 行を追加" (alt only).
+        var grp = null;
+        for (var gj = 0; gj < (parsedData.groups || []).length; gj++) {
+          if (parsedData.groups[gj].id === selId) { grp = parsedData.groups[gj]; break; }
+        }
+        if (!grp) {
+          propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">ブロックが見つかりません</p>';
+          return;
+        }
+        var isAlt = grp.kind === 'alt';
+        propsEl.innerHTML =
+          props.panelHeaderHtml(grp.kind) +
+          fieldHtml('ラベル', 'sel-grp-label', grp.label || '') +
+          (isAlt ? '<button id="sel-grp-add-else" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;margin-bottom:6px;">+ else 行を追加</button>' : '') +
+          props.dangerButtonHtml('sel-grp-delete', 'ブロック削除 (中身は保持)');
+
+        props.bindEvent('sel-grp-label', 'change', function() {
+          var text = ctx.getMmdText();
+          var lines = text.split('\n');
+          var idx0 = grp.line - 1;
+          if (idx0 < 0 || idx0 >= lines.length) return;
+          var indent = (lines[idx0].match(/^(\s*)/) || ['',''])[1];
+          var newLabel = this.value;
+          lines[idx0] = indent + grp.kind + (newLabel ? ' ' + newLabel : '');
+          window.MA.history.pushHistory();
+          ctx.setMmdText(lines.join('\n'));
+          ctx.onUpdate();
+        });
+        if (isAlt) {
+          props.bindEvent('sel-grp-add-else', 'click', function() {
+            var cond = prompt('else 条件 (空欄可):', '') || '';
+            var text = ctx.getMmdText();
+            var lines = text.split('\n');
+            var endIdx0 = (grp.endLine || grp.line) - 1;
+            if (endIdx0 < 0 || endIdx0 >= lines.length) return;
+            var indent = (lines[endIdx0].match(/^(\s*)/) || ['',''])[1];
+            lines.splice(endIdx0, 0, indent + 'else' + (cond ? ' ' + cond : ''));
+            window.MA.history.pushHistory();
+            ctx.setMmdText(lines.join('\n'));
+            ctx.onUpdate();
+          });
+        }
+        props.bindEvent('sel-grp-delete', 'click', function() {
+          // Remove the opening and matching end lines, keep inner content.
+          var text = ctx.getMmdText();
+          var lines = text.split('\n');
+          window.MA.history.pushHistory();
+          if (grp.endLine && grp.endLine > grp.line) lines.splice(grp.endLine - 1, 1);
+          lines.splice(grp.line - 1, 1);
+          ctx.setMmdText(lines.join('\n'));
+          window.MA.selection.clearSelection();
+          ctx.onUpdate();
+        });
+        return;
+      }
+    }
+
+    // ── Multi-selection: range-wrap panel ──
+    // When the user Shift+clicks several messages (or notes), offer to wrap
+    // the enclosing line range in an alt / loop / opt / par block. Matches
+    // PlantUMLAssist's "選択範囲を囲む" action.
+    if (selData && selData.length > 1) {
+      var ranges = [];
+      for (var si = 0; si < selData.length; si++) {
+        var s = selData[si];
+        // Resolve each selection to a line via parsedData
+        var line = null;
+        if (s.type === 'message') {
+          for (var rii = 0; rii < parsedData.relations.length; rii++) {
+            if (parsedData.relations[rii].id === s.id) { line = parsedData.relations[rii].line; break; }
+          }
+        } else if (s.type === 'note') {
+          for (var ei = 0; ei < parsedData.elements.length; ei++) {
+            if (parsedData.elements[ei].kind === 'note' && parsedData.elements[ei].id === s.id) {
+              line = parsedData.elements[ei].line; break;
+            }
+          }
+        }
+        if (line) ranges.push(line);
+      }
+      if (ranges.length >= 2) {
+        ranges.sort(function(a, b) { return a - b; });
+        var startLine = ranges[0];
+        var endLine = ranges[ranges.length - 1];
+        propsEl.innerHTML =
+          props.panelHeaderHtml(selData.length + ' 個選択中') +
+          '<div style="margin-bottom:8px;font-size:11px;color:var(--text-secondary);">行 ' + startLine + ' 〜 ' + endLine + ' を囲みます</div>' +
+          props.selectFieldHtml('ブロック種別', 'sel-multi-kind', [
+            { value: 'alt', label: 'alt (分岐)' },
+            { value: 'opt', label: 'opt (任意)' },
+            { value: 'loop', label: 'loop (反復)' },
+            { value: 'par', label: 'par (並列)' },
+          ]) +
+          fieldHtml('条件 / ラベル', 'sel-multi-label', '', 'success') +
+          props.primaryButtonHtml('sel-multi-wrap', '選択範囲を囲む');
+        props.bindEvent('sel-multi-wrap', 'click', function() {
+          var kind = document.getElementById('sel-multi-kind').value;
+          var label = document.getElementById('sel-multi-label').value;
+          var newText = wrapWithBlock(ctx.getMmdText(), startLine, endLine, kind, label);
+          if (newText === ctx.getMmdText()) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
           window.MA.selection.clearSelection();
           ctx.onUpdate();
         });
@@ -760,6 +1444,12 @@ window.MA.modules.sequence = (function() {
     deleteParticipant: deleteParticipant,
     moveParticipantUp: moveParticipantUp,
     moveParticipantDown: moveParticipantDown,
+    moveParticipant: moveParticipant,
+    insertMessageAt: insertMessageAt,
+    resolveInsertLine: resolveInsertLine,
+    showInsertForm: function(ctx, line, position, kind) {
+      _showInsertForm(ctx, line, position, kind);
+    },
     updateParticipant: updateParticipant,
     addMessage: addMessage,
     deleteMessage: deleteMessage,
@@ -767,6 +1457,7 @@ window.MA.modules.sequence = (function() {
     moveMessageDown: moveMessageDown,
     updateMessage: updateMessage,
     addBlock: addBlock,
+    wrapWithBlock: wrapWithBlock,
     deleteBlock: deleteBlock,
     addNote: addNote,
     toggleAutonumber: toggleAutonumber,

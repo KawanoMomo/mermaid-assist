@@ -1,0 +1,101 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]: MermaidAssist
+    - button "Open" [ref=e5] [cursor=pointer]
+    - button "Save" [ref=e6] [cursor=pointer]
+    - button "↩ Undo" [disabled] [ref=e8]
+    - button "↪ Redo" [disabled] [ref=e9]
+    - button "－" [ref=e11] [cursor=pointer]
+    - generic [ref=e12]: 50%
+    - button "＋" [ref=e13] [cursor=pointer]
+    - button "Fit" [ref=e14] [cursor=pointer]
+    - button "Export ▾" [ref=e17] [cursor=pointer]
+    - combobox "図の種類" [ref=e18] [cursor=pointer]:
+      - option "Gantt" [selected]
+      - option "Sequence"
+      - option "Flowchart"
+      - option "State"
+      - option "Class"
+      - option "ER"
+      - option "Requirement"
+  - generic [ref=e19]:
+    - generic [ref=e20]:
+      - generic [ref=e21]: Editor
+      - generic [ref=e22]:
+        - generic [ref=e23]: 1 2 3 4 5 6 7 8 9 10 11 12
+        - textbox [ref=e24]: gantt title プロジェクト計画 dateFormat YYYY-MM-DD axisFormat %m/%d section 要件定義 要件分析 :a1, 2026-04-01, 2026-04-15 仕様書作成 :a2, after a1, 2026-04-25 section 設計 基本設計 :b1, 2026-04-20, 2026-05-05 詳細設計 :b2, after b1, 2026-05-15
+    - generic [ref=e26]:
+      - generic [ref=e27]: Preview
+      - generic [ref=e28]:
+        - document [ref=e30]:
+          - generic [ref=e31]:
+            - generic [ref=e34]: 04/05
+            - generic [ref=e36]: 04/12
+            - generic [ref=e38]: 04/19
+            - generic [ref=e40]: 04/26
+            - generic [ref=e42]: 05/03
+            - generic [ref=e44]: 05/10
+          - generic [ref=e50]:
+            - generic [ref=e55]: 要件分析
+            - generic [ref=e56]: 仕様書作成
+            - generic [ref=e57]: 基本設計
+            - generic [ref=e58]: 詳細設計
+          - generic [ref=e59]:
+            - generic [ref=e60]: 要件定義
+            - generic [ref=e61]: 設計
+          - generic [ref=e62]: プロジェクト計画
+        - img
+    - generic [ref=e76]:
+      - generic [ref=e77]: Properties
+      - generic [ref=e78]:
+        - generic [ref=e79]: タスクを選択するか、新規追加
+        - generic [ref=e80]:
+          - generic [ref=e81]: ラベル
+          - textbox [ref=e82]: 新規タスク
+        - generic [ref=e83]:
+          - generic [ref=e84]: ID
+          - textbox "t1" [ref=e85]
+        - generic [ref=e86]:
+          - generic [ref=e87]: 開始日
+          - textbox [ref=e88]: 2026-04-01
+        - generic [ref=e89]:
+          - generic [ref=e90]: 終了日
+          - textbox [ref=e91]: 2026-04-15
+        - generic [ref=e92]:
+          - generic [ref=e93]: セクション
+          - combobox [ref=e94]:
+            - option "要件定義" [selected]
+            - option "設計"
+        - button "+ タスク追加" [ref=e95] [cursor=pointer]
+        - generic [ref=e96]:
+          - generic [ref=e97]: セクション追加
+          - generic [ref=e98]:
+            - textbox "セクション名" [ref=e99]
+            - button "+" [ref=e100] [cursor=pointer]
+        - generic [ref=e101]:
+          - generic [ref=e102]: セクション一覧
+          - generic [ref=e103]:
+            - generic "要件定義" [ref=e104]: 要件定義 (2)
+            - button "✕" [ref=e105] [cursor=pointer]
+          - generic [ref=e106]:
+            - generic "設計" [ref=e107]: 設計 (2)
+            - button "✕" [ref=e108] [cursor=pointer]
+        - generic [ref=e109]:
+          - generic [ref=e110]: グローバル設定
+          - generic [ref=e111]: title
+          - textbox [ref=e112]: プロジェクト計画
+          - generic [ref=e113]: dateFormat
+          - textbox [ref=e114]: YYYY-MM-DD
+          - generic [ref=e115]: axisFormat
+          - combobox [ref=e116]:
+            - option "2026-04-14 (%Y-%m-%d)"
+            - option "2026/04/14 (%Y/%m/%d)"
+            - option "04/14 (%m/%d)" [selected]
+            - option "04月14日 (%m月%d日)"
+            - option "Apr 14 (%b %d)"
+            - option "14 Apr (%d %b)"
+            - option "Tue (曜日) (%a)"
+            - option "カスタム…"
+  - generic [ref=e117]:
+    - generic [ref=e118]: OK
+    - generic [ref=e119]: "タスク: 4 | セクション: 2 | 期間: 2026-04-01 ~ 2026-05-15"

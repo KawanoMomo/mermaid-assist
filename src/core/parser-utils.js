@@ -16,6 +16,22 @@ window.MA.parserUtils = (function() {
     if (firstNonEmpty.indexOf('classDiagram') === 0) return 'classDiagram';
     if (firstNonEmpty.indexOf('stateDiagram') === 0) return 'stateDiagram';
     if (firstNonEmpty.indexOf('erDiagram') === 0) return 'erDiagram';
+    if (firstNonEmpty.indexOf('requirementDiagram') === 0) return 'requirementDiagram';
+    if (firstNonEmpty.indexOf('block-beta') === 0) return 'block-beta';
+    if (firstNonEmpty.indexOf('timeline') === 0) return 'timeline';
+    if (firstNonEmpty.indexOf('mindmap') === 0) return 'mindmap';
+    if (firstNonEmpty.indexOf('gitGraph') === 0) return 'gitGraph';
+    if (firstNonEmpty.indexOf('pie') === 0) return 'pie';
+    if (firstNonEmpty.indexOf('journey') === 0) return 'journey';
+    if (firstNonEmpty.indexOf('quadrantChart') === 0) return 'quadrantChart';
+    if (firstNonEmpty.indexOf('xychart-beta') === 0) return 'xychart-beta';
+    if (firstNonEmpty.indexOf('sankey-beta') === 0) return 'sankey-beta';
+    if (firstNonEmpty.indexOf('C4Context') === 0) return 'C4Context';
+    if (firstNonEmpty.indexOf('C4Container') === 0) return 'C4Context';
+    if (firstNonEmpty.indexOf('packet-beta') === 0) return 'packet-beta';
+    if (firstNonEmpty.indexOf('architecture-beta') === 0) return 'architecture-beta';
+    if (firstNonEmpty.indexOf('kanban') === 0) return 'kanban';
+    if (firstNonEmpty.indexOf('radar-beta') === 0) return 'radar-beta';
     return null;
   }
 

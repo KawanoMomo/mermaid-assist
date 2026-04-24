@@ -289,6 +289,32 @@ html, body {
   pointer-events: auto;
 }
 
+/* Hover-insert + drop-indicator layer, stacked on top of overlay-layer. */
+#hover-layer {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  pointer-events: none;
+  transform-origin: 0 0;
+}
+#hover-layer .hover-guide {
+  stroke: #7c8cf8;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  opacity: 0.75;
+}
+#hover-layer .hover-label {
+  fill: #7c8cf8;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+#hover-layer .seq-drop-indicator {
+  stroke: #7c8cf8;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  opacity: 0.9;
+}
+
 /* ── Properties Pane ───────────────────────────────────────────────────────── */
 #props-pane {
   display: flex;
@@ -351,6 +377,25 @@ html, body {
   fill: rgba(124, 140, 248, 0.15) !important;
   cursor: move;
 }
+
+/* ── Sequence: selected-element highlights ─────────────────────────────────── */
+/* Messages / notes / groups / participants: selected state adds an accent
+   green dashed outline and a subtle fill. Matches the participant-handle
+   selection look used by buildOverlay for label rects. */
+#overlay-layer .overlay-message.selected,
+#overlay-layer .overlay-note.selected,
+#overlay-layer .overlay-group.selected,
+#overlay-layer .overlay-participant-handle.selected {
+  fill: rgba(126, 231, 135, 0.15) !important;
+  stroke: #7ee787;
+  stroke-width: 2;
+  stroke-dasharray: 4 4;
+}
+#overlay-layer .overlay-message:hover,
+#overlay-layer .overlay-note:hover,
+#overlay-layer .overlay-group:hover {
+  fill: rgba(124, 140, 248, 0.12) !important;
+}
 </style>
 </head>
 <body>
@@ -394,6 +439,21 @@ html, body {
       <option value="stateDiagram">State</option>
       <option value="classDiagram">Class</option>
       <option value="erDiagram">ER</option>
+      <option value="requirementDiagram">Requirement</option>
+      <option value="block-beta">Block</option>
+      <option value="timeline">Timeline</option>
+      <option value="mindmap">Mindmap</option>
+      <option value="gitGraph">Gitgraph</option>
+      <option value="pie">Pie</option>
+      <option value="journey">Journey</option>
+      <option value="quadrantChart">Quadrant</option>
+      <option value="xychart-beta">XY Chart</option>
+      <option value="sankey-beta">Sankey</option>
+      <option value="C4Context">C4</option>
+      <option value="packet-beta">Packet</option>
+      <option value="architecture-beta">Architecture</option>
+      <option value="kanban">Kanban</option>
+      <option value="radar-beta">Radar</option>
     </select>
   </div>
 
@@ -417,6 +477,9 @@ html, body {
       <div id="preview-container">
         <div id="preview-svg"></div>
         <svg id="overlay-layer" width="0" height="0"></svg>
+        <!-- Hover-insert guide / drop indicator layer. Separate from overlay
+             so mermaid re-renders do not clear transient guides. -->
+        <svg id="hover-layer" width="0" height="0"></svg>
       </div>
     </div>
 
@@ -446,6 +509,15 @@ html, body {
     font-family:var(--font-mono); font-size:11px; padding:4px 8px; border-radius:4px;
     box-shadow:0 2px 8px rgba(0,0,0,0.4); white-space:nowrap;"></div>
 
+  <!-- Sequence insert modal (ported from PlantUMLAssist). Content is rebuilt
+       per invocation by sequence.js _showInsertForm. -->
+  <div id="seq-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6);
+    z-index:2000; align-items:center; justify-content:center;">
+    <div id="seq-modal-content" style="background:var(--bg-secondary); border:1px solid var(--border);
+      border-radius:6px; padding:16px; width:320px; max-height:80vh; overflow-y:auto;
+      box-shadow:0 8px 32px rgba(0,0,0,0.6); color:var(--text-primary);"></div>
+  </div>
+
 <!-- Hidden file input -->
 <input type="file" id="file-input" accept=".mmd,.mermaid,.txt" style="display:none">
 
@@ -457,12 +529,28 @@ html, body {
 <script src="src/core/selection.js"></script>
 <script src="src/core/connection-mode.js"></script>
 <script src="src/ui/properties.js"></script>
+<script src="src/ui/rich-label-editor.js"></script>
 <script src="src/modules/gantt.js"></script>
 <script src="src/modules/sequence.js"></script>
 <script src="src/modules/flowchart.js"></script>
 <script src="src/modules/state.js"></script>
 <script src="src/modules/class.js"></script>
 <script src="src/modules/er.js"></script>
+<script src="src/modules/requirement.js"></script>
+<script src="src/modules/block.js"></script>
+<script src="src/modules/timeline.js"></script>
+<script src="src/modules/mindmap.js"></script>
+<script src="src/modules/gitgraph.js"></script>
+<script src="src/modules/pie.js"></script>
+<script src="src/modules/journey.js"></script>
+<script src="src/modules/quadrant.js"></script>
+<script src="src/modules/xychart.js"></script>
+<script src="src/modules/sankey.js"></script>
+<script src="src/modules/c4.js"></script>
+<script src="src/modules/packet.js"></script>
+<script src="src/modules/architecture.js"></script>
+<script src="src/modules/kanban.js"></script>
+<script src="src/modules/radar.js"></script>
 <script src="src/app.js"></script>
 <!-- mermaid.js: loaded after main script; available by DOMContentLoaded -->
 <script src="lib/mermaid.min.js"></script>

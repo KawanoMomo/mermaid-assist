@@ -1,0 +1,19 @@
+block-beta
+  columns 3
+  block:mcu
+    cpu["CPU Core"]
+    ram["RAM"]
+    flash["Flash"]
+  end
+  sensor_temp["Temp Sensor"]
+  sensor_pres["Pressure Sensor"]
+  sensor_curr["Current Sensor"]
+  motor["Motor Driver"]
+  display["LCD"]
+  logger["Data Logger"]
+  sensor_temp --> mcu
+  sensor_pres --> mcu
+  sensor_curr --> mcu
+  mcu --> motor
+  mcu --> display
+  mcu --> logger

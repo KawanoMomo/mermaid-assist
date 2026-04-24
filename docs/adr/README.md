@@ -12,6 +12,9 @@
 | [014](ADR-014-groups-substructure.md) | サブ要素 (groups) のパース・編集モデル | インターフェース | 承認 | 2026-04-14 |
 | [015](ADR-015-vertical-relation-form.md) | リレーション系追加フォーム縦1列レイアウト | UI/UX | 承認 | 2026-04-16 |
 | [016](ADR-016-system-tester-integration.md) | system-tester エージェント連携によるテスト設計トレーサビリティ | エージェント運用 | 承認 | 2026-04-16 |
+| [017](ADR-017-mermaid-parser-auto-quote.md) | Mermaid parser に対する auto-quote 戦略 | インターフェース | 承認 | 2026-04-17 |
+| [018](ADR-018-module-registry-merge.md) | モジュールレジストリの merge 戦略 | アーキテクチャ | 承認 | 2026-04-17 |
+| [019](ADR-019-evaluator-cache-clear.md) | Evaluator の CDP cache clear プロトコル | エージェント運用 | 承認 | 2026-04-17 |
 
 ## 命名規則
 
