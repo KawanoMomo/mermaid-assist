@@ -1091,15 +1091,10 @@ window.MA.modules.sequence = (function() {
           props.selectFieldHtml('Arrow', 'sel-msg-arrow', arrowOptsArr, true) +
           props.selectFieldHtml('To', 'sel-msg-to', toOptsArr) +
           '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label><div id="sel-msg-label-rle"></div></div>' +
-          '<div style="display:flex;gap:4px;margin:8px 0 4px 0;">' +
-            '<button id="sel-msg-insert-before" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↑ この前に挿入</button>' +
-            '<button id="sel-msg-insert-after" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↓ この後に挿入</button>' +
-          '</div>' +
-          '<div style="display:flex;gap:4px;margin:4px 0;">' +
-            '<button id="sel-msg-up" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↑ 上へ</button>' +
-            '<button id="sel-msg-down" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↓ 下へ</button>' +
-          '</div>' +
-          props.dangerButtonHtml('sel-msg-delete', 'メッセージ削除');
+          props.actionBarHtml('sel-msg', {
+            insertBefore: true, insertAfter: true, move: true, delete: true,
+            labels: { delete: 'メッセージ削除' },
+          });
 
         props.bindEvent('sel-msg-from', 'change', function() {
           window.MA.history.pushHistory();
@@ -1129,12 +1124,6 @@ window.MA.modules.sequence = (function() {
             }
           );
         }
-        props.bindEvent('sel-msg-insert-before', 'click', function() {
-          _showInsertForm(ctx, msg.line, 'before', 'message');
-        });
-        props.bindEvent('sel-msg-insert-after', 'click', function() {
-          _showInsertForm(ctx, msg.line, 'after', 'message');
-        });
         function moveAndReselect(direction) {
           var oldText = ctx.getMmdText();
           var newLine = _findMessageSwapTargetLine(oldText, msg.line, direction);
@@ -1160,13 +1149,17 @@ window.MA.modules.sequence = (function() {
           }
           ctx.onUpdate();
         }
-        props.bindEvent('sel-msg-up', 'click', function() { moveAndReselect(-1); });
-        props.bindEvent('sel-msg-down', 'click', function() { moveAndReselect(1); });
-        props.bindEvent('sel-msg-delete', 'click', function() {
-          window.MA.history.pushHistory();
-          ctx.setMmdText(deleteMessage(ctx.getMmdText(), msg.line));
-          window.MA.selection.clearSelection();
-          ctx.onUpdate();
+        props.bindActionBar('sel-msg', {
+          insertBefore: function() { _showInsertForm(ctx, msg.line, 'before', 'message'); },
+          insertAfter: function() { _showInsertForm(ctx, msg.line, 'after', 'message'); },
+          up: function() { moveAndReselect(-1); },
+          down: function() { moveAndReselect(1); },
+          'delete': function() {
+            window.MA.history.pushHistory();
+            ctx.setMmdText(deleteMessage(ctx.getMmdText(), msg.line));
+            window.MA.selection.clearSelection();
+            ctx.onUpdate();
+          },
         });
         return;
       }
@@ -1196,11 +1189,10 @@ window.MA.modules.sequence = (function() {
           props.selectFieldHtml('Position', 'sel-note-pos', posOptsN) +
           props.selectFieldHtml('Target', 'sel-note-target', targetOptsN) +
           '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">本文</label><div id="sel-note-text-rle"></div></div>' +
-          '<div style="display:flex;gap:4px;margin:8px 0 4px 0;">' +
-            '<button id="sel-note-insert-before" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↑ この前に挿入</button>' +
-            '<button id="sel-note-insert-after" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">↓ この後に挿入</button>' +
-          '</div>' +
-          props.dangerButtonHtml('sel-note-delete', '注釈削除');
+          props.actionBarHtml('sel-note', {
+            insertBefore: true, insertAfter: true, move: false, delete: true,
+            labels: { delete: '注釈削除' },
+          });
 
         function rewriteNoteLine(newPos, newTarget, newText) {
           var text = ctx.getMmdText();
@@ -1234,17 +1226,15 @@ window.MA.modules.sequence = (function() {
             }
           );
         }
-        props.bindEvent('sel-note-insert-before', 'click', function() {
-          _showInsertForm(ctx, note.line, 'before', 'message');
-        });
-        props.bindEvent('sel-note-insert-after', 'click', function() {
-          _showInsertForm(ctx, note.line, 'after', 'message');
-        });
-        props.bindEvent('sel-note-delete', 'click', function() {
-          window.MA.history.pushHistory();
-          ctx.setMmdText(window.MA.textUpdater.deleteLine(ctx.getMmdText(), note.line));
-          window.MA.selection.clearSelection();
-          ctx.onUpdate();
+        props.bindActionBar('sel-note', {
+          insertBefore: function() { _showInsertForm(ctx, note.line, 'before', 'message'); },
+          insertAfter: function() { _showInsertForm(ctx, note.line, 'after', 'message'); },
+          'delete': function() {
+            window.MA.history.pushHistory();
+            ctx.setMmdText(window.MA.textUpdater.deleteLine(ctx.getMmdText(), note.line));
+            window.MA.selection.clearSelection();
+            ctx.onUpdate();
+          },
         });
         return;
       }
@@ -1265,8 +1255,11 @@ window.MA.modules.sequence = (function() {
         propsEl.innerHTML =
           props.panelHeaderHtml(grp.kind) +
           fieldHtml('ラベル', 'sel-grp-label', grp.label || '') +
-          (isAlt ? '<button id="sel-grp-add-else" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;margin-bottom:6px;">+ else 行を追加</button>' : '') +
-          props.dangerButtonHtml('sel-grp-delete', 'ブロック削除 (中身は保持)');
+          (isAlt ? '<button id="sel-grp-add-else" class="action-btn" style="width:100%;margin-bottom:6px;">+ else 行を追加</button>' : '') +
+          props.actionBarHtml('sel-grp', {
+            insertBefore: false, insertAfter: false, move: false, delete: true,
+            labels: { delete: 'ブロック削除 (中身は保持)' },
+          });
 
         props.bindEvent('sel-grp-label', 'change', function() {
           var text = ctx.getMmdText();
@@ -1294,16 +1287,18 @@ window.MA.modules.sequence = (function() {
             ctx.onUpdate();
           });
         }
-        props.bindEvent('sel-grp-delete', 'click', function() {
-          // Remove the opening and matching end lines, keep inner content.
-          var text = ctx.getMmdText();
-          var lines = text.split('\n');
-          window.MA.history.pushHistory();
-          if (grp.endLine && grp.endLine > grp.line) lines.splice(grp.endLine - 1, 1);
-          lines.splice(grp.line - 1, 1);
-          ctx.setMmdText(lines.join('\n'));
-          window.MA.selection.clearSelection();
-          ctx.onUpdate();
+        props.bindActionBar('sel-grp', {
+          'delete': function() {
+            // Remove the opening and matching end lines, keep inner content.
+            var text = ctx.getMmdText();
+            var lines = text.split('\n');
+            window.MA.history.pushHistory();
+            if (grp.endLine && grp.endLine > grp.line) lines.splice(grp.endLine - 1, 1);
+            lines.splice(grp.line - 1, 1);
+            ctx.setMmdText(lines.join('\n'));
+            window.MA.selection.clearSelection();
+            ctx.onUpdate();
+          },
         });
         return;
       }
