@@ -106,6 +106,35 @@ window.MA.modules.timeline = (function() {
     return lines.join('\n');
   }
 
+  function _isPeriodLine(trimmed) {
+    if (!trimmed) return false;
+    if (trimmed.indexOf('%%') === 0) return false;
+    if (/^(timeline|title\s|section\s)/i.test(trimmed)) return false;
+    return /:/.test(trimmed);
+  }
+
+  function _movePeriodStep(text, lineNum, direction) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    var target = idx + direction;
+    while (target >= 0 && target < lines.length) {
+      var t = lines[target].trim();
+      if (!t || t.indexOf('%%') === 0) { target += direction; continue; }
+      if (_isPeriodLine(t)) {
+        var tmp = lines[idx];
+        lines[idx] = lines[target];
+        lines[target] = tmp;
+        return lines.join('\n');
+      }
+      return text;
+    }
+    return text;
+  }
+
+  function movePeriodUp(text, lineNum) { return _movePeriodStep(text, lineNum, -1); }
+  function movePeriodDown(text, lineNum) { return _movePeriodStep(text, lineNum, 1); }
+
   function deleteElement(text, lineNum) {
     // For section: delete the section line + all its periods until next section
     var lines = text.split('\n');
@@ -298,7 +327,11 @@ window.MA.modules.timeline = (function() {
         propsEl.innerHTML =
           P.panelHeaderHtml(sec.label) +
           P.fieldHtml('Name', 'tl-edit-sec-name', sec.label) +
-          P.dangerButtonHtml('tl-edit-sec-delete', 'セクション削除');
+          P.actionBarHtml('tl-edit-sec', {
+            insertBefore: false, insertAfter: false,
+            move: false, delete: true,
+            labels: { delete: 'セクション削除' },
+          });
 
         var secLine = sec.line;
         document.getElementById('tl-edit-sec-name').addEventListener('change', function() {
@@ -306,11 +339,13 @@ window.MA.modules.timeline = (function() {
           ctx.setMmdText(updateSection(ctx.getMmdText(), secLine, this.value));
           ctx.onUpdate();
         });
-        P.bindEvent('tl-edit-sec-delete', 'click', function() {
-          window.MA.history.pushHistory();
-          ctx.setMmdText(deleteElement(ctx.getMmdText(), secLine));
-          window.MA.selection.clearSelection();
-          ctx.onUpdate();
+        P.bindActionBar('tl-edit-sec', {
+          'delete': function() {
+            window.MA.history.pushHistory();
+            ctx.setMmdText(deleteElement(ctx.getMmdText(), secLine));
+            window.MA.selection.clearSelection();
+            ctx.onUpdate();
+          },
         });
         return;
       }
@@ -336,7 +371,11 @@ window.MA.modules.timeline = (function() {
             '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">Events</label>' +
             eventsHtml +
           '</div>' +
-          P.dangerButtonHtml('tl-edit-p-delete', 'ピリオド削除');
+          P.actionBarHtml('tl-edit-p', {
+            insertBefore: false, insertAfter: false,
+            move: true, delete: true,
+            labels: { delete: 'ピリオド削除' },
+          });
 
         var perLine = per.line;
         document.getElementById('tl-edit-p-period').addEventListener('change', function() {
@@ -365,11 +404,29 @@ window.MA.modules.timeline = (function() {
             ctx.onUpdate();
           });
         }
-        P.bindEvent('tl-edit-p-delete', 'click', function() {
-          window.MA.history.pushHistory();
-          ctx.setMmdText(deleteElement(ctx.getMmdText(), perLine));
-          window.MA.selection.clearSelection();
-          ctx.onUpdate();
+        P.bindActionBar('tl-edit-p', {
+          up: function() {
+            var newText = movePeriodUp(ctx.getMmdText(), perLine);
+            if (newText === ctx.getMmdText()) return;
+            window.MA.history.pushHistory();
+            ctx.setMmdText(newText);
+            window.MA.selection.setSelected([{ type: 'period', id: per.id }]);
+            ctx.onUpdate();
+          },
+          down: function() {
+            var newText = movePeriodDown(ctx.getMmdText(), perLine);
+            if (newText === ctx.getMmdText()) return;
+            window.MA.history.pushHistory();
+            ctx.setMmdText(newText);
+            window.MA.selection.setSelected([{ type: 'period', id: per.id }]);
+            ctx.onUpdate();
+          },
+          'delete': function() {
+            window.MA.history.pushHistory();
+            ctx.setMmdText(deleteElement(ctx.getMmdText(), perLine));
+            window.MA.selection.clearSelection();
+            ctx.onUpdate();
+          },
         });
         return;
       }
@@ -435,5 +492,7 @@ window.MA.modules.timeline = (function() {
     },
     setTitle: setTitle, addSection: addSection, addPeriod: addPeriod, addEventToPeriod: addEventToPeriod,
     deleteElement: deleteElement, updateSection: updateSection, updatePeriod: updatePeriod, deleteEvent: deleteEvent,
+    movePeriodUp: movePeriodUp,
+    movePeriodDown: movePeriodDown,
   };
 })();
