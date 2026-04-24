@@ -444,6 +444,41 @@ window.MA.modules.sequence = (function() {
   function moveMessageUp(text, lineNum) { return _moveMessageStep(text, lineNum, -1); }
   function moveMessageDown(text, lineNum) { return _moveMessageStep(text, lineNum, 1); }
 
+  // _findMessageSwapTargetLine: mirror of _moveMessageStep's target-search so
+  // callers can compute where the message will end up (1-based) before the
+  // swap fires. Returns -1 if no swap would happen.
+  function _findMessageSwapTargetLine(text, lineNum, direction) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return -1;
+    var target = idx + direction;
+    while (target >= 0 && target < lines.length) {
+      var t = lines[target].trim();
+      if (!t || t.indexOf('%%') === 0) { target += direction; continue; }
+      if (_isMessageLine(t)) return target + 1;
+      return -1;
+    }
+    return -1;
+  }
+
+  // wrapWithBlock: wrap the inclusive line range [startLine, endLine] in
+  // a new alt/opt/loop/par block. Preserves the indent of startLine on the
+  // new opening and closing lines. No-op if the range is invalid.
+  // Cross-ref PlantUMLAssist wrapWith — observation checklist 観点 A
+  // (iterative modify flow, not just initial authoring).
+  function wrapWithBlock(text, startLine, endLine, kind, label) {
+    kind = kind || 'loop';
+    var lines = text.split('\n');
+    var startIdx = startLine - 1;
+    var endIdx = endLine - 1;
+    if (startIdx < 0 || endIdx >= lines.length || startIdx > endIdx) return text;
+    var indent = (lines[startIdx].match(/^(\s*)/) || ['', '    '])[1] || '    ';
+    // Splice `end` first so the start-splice index stays valid.
+    lines.splice(endIdx + 1, 0, indent + 'end');
+    lines.splice(startIdx, 0, indent + kind + (label ? ' ' + label : ''));
+    return lines.join('\n');
+  }
+
   function updateMessage(text, lineNum, field, value) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
@@ -994,11 +1029,15 @@ window.MA.modules.sequence = (function() {
           ctx.setMmdText(updateParticipant(ctx.getMmdText(), part.line, 'label', this.value));
           ctx.onUpdate();
         });
+        // Participant aliases are unique and stable across re-parse, so
+        // re-selecting by `part.id` (the alias) works without needing to
+        // track line movement.
         props.bindEvent('sel-part-left', 'click', function() {
           var newText = moveParticipantUp(ctx.getMmdText(), part.line);
           if (newText === ctx.getMmdText()) return;
           window.MA.history.pushHistory();
           ctx.setMmdText(newText);
+          window.MA.selection.setSelected([{ type: 'participant', id: part.id }]);
           ctx.onUpdate();
         });
         props.bindEvent('sel-part-right', 'click', function() {
@@ -1006,6 +1045,7 @@ window.MA.modules.sequence = (function() {
           if (newText === ctx.getMmdText()) return;
           window.MA.history.pushHistory();
           ctx.setMmdText(newText);
+          window.MA.selection.setSelected([{ type: 'participant', id: part.id }]);
           ctx.onUpdate();
         });
         props.bindEvent('sel-part-delete', 'click', function() {
@@ -1092,20 +1132,33 @@ window.MA.modules.sequence = (function() {
         props.bindEvent('sel-msg-insert-after', 'click', function() {
           _showInsertForm(ctx, msg.line, 'after', 'message');
         });
-        props.bindEvent('sel-msg-up', 'click', function() {
-          var newText = moveMessageUp(ctx.getMmdText(), msg.line);
-          if (newText === ctx.getMmdText()) return;
+        function moveAndReselect(direction) {
+          var oldText = ctx.getMmdText();
+          var newLine = _findMessageSwapTargetLine(oldText, msg.line, direction);
+          if (newLine < 0) return;
+          var newText = direction < 0
+            ? moveMessageUp(oldText, msg.line)
+            : moveMessageDown(oldText, msg.line);
+          if (newText === oldText) return;
           window.MA.history.pushHistory();
           ctx.setMmdText(newText);
+          // Selection IDs are regenerated per-parse (position-based), so the
+          // original msg.id now points at the *other* message that swapped
+          // places. Look up the message that currently occupies `newLine` in
+          // the fresh parse and re-select that one so the user keeps editing
+          // what they moved.
+          var newParsed = parseSequence(newText);
+          for (var ri = 0; ri < newParsed.relations.length; ri++) {
+            var r = newParsed.relations[ri];
+            if (r.kind === 'message' && r.line === newLine) {
+              window.MA.selection.setSelected([{ type: 'message', id: r.id }]);
+              break;
+            }
+          }
           ctx.onUpdate();
-        });
-        props.bindEvent('sel-msg-down', 'click', function() {
-          var newText = moveMessageDown(ctx.getMmdText(), msg.line);
-          if (newText === ctx.getMmdText()) return;
-          window.MA.history.pushHistory();
-          ctx.setMmdText(newText);
-          ctx.onUpdate();
-        });
+        }
+        props.bindEvent('sel-msg-up', 'click', function() { moveAndReselect(-1); });
+        props.bindEvent('sel-msg-down', 'click', function() { moveAndReselect(1); });
         props.bindEvent('sel-msg-delete', 'click', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(deleteMessage(ctx.getMmdText(), msg.line));
@@ -1253,6 +1306,58 @@ window.MA.modules.sequence = (function() {
       }
     }
 
+    // ── Multi-selection: range-wrap panel ──
+    // When the user Shift+clicks several messages (or notes), offer to wrap
+    // the enclosing line range in an alt / loop / opt / par block. Matches
+    // PlantUMLAssist's "選択範囲を囲む" action.
+    if (selData && selData.length > 1) {
+      var ranges = [];
+      for (var si = 0; si < selData.length; si++) {
+        var s = selData[si];
+        // Resolve each selection to a line via parsedData
+        var line = null;
+        if (s.type === 'message') {
+          for (var rii = 0; rii < parsedData.relations.length; rii++) {
+            if (parsedData.relations[rii].id === s.id) { line = parsedData.relations[rii].line; break; }
+          }
+        } else if (s.type === 'note') {
+          for (var ei = 0; ei < parsedData.elements.length; ei++) {
+            if (parsedData.elements[ei].kind === 'note' && parsedData.elements[ei].id === s.id) {
+              line = parsedData.elements[ei].line; break;
+            }
+          }
+        }
+        if (line) ranges.push(line);
+      }
+      if (ranges.length >= 2) {
+        ranges.sort(function(a, b) { return a - b; });
+        var startLine = ranges[0];
+        var endLine = ranges[ranges.length - 1];
+        propsEl.innerHTML =
+          props.panelHeaderHtml(selData.length + ' 個選択中') +
+          '<div style="margin-bottom:8px;font-size:11px;color:var(--text-secondary);">行 ' + startLine + ' 〜 ' + endLine + ' を囲みます</div>' +
+          props.selectFieldHtml('ブロック種別', 'sel-multi-kind', [
+            { value: 'alt', label: 'alt (分岐)' },
+            { value: 'opt', label: 'opt (任意)' },
+            { value: 'loop', label: 'loop (反復)' },
+            { value: 'par', label: 'par (並列)' },
+          ]) +
+          fieldHtml('条件 / ラベル', 'sel-multi-label', '', 'success') +
+          props.primaryButtonHtml('sel-multi-wrap', '選択範囲を囲む');
+        props.bindEvent('sel-multi-wrap', 'click', function() {
+          var kind = document.getElementById('sel-multi-kind').value;
+          var label = document.getElementById('sel-multi-label').value;
+          var newText = wrapWithBlock(ctx.getMmdText(), startLine, endLine, kind, label);
+          if (newText === ctx.getMmdText()) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
+          window.MA.selection.clearSelection();
+          ctx.onUpdate();
+        });
+        return;
+      }
+    }
+
     propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">未対応の選択状態</p>';
   }
 
@@ -1352,6 +1457,7 @@ window.MA.modules.sequence = (function() {
     moveMessageDown: moveMessageDown,
     updateMessage: updateMessage,
     addBlock: addBlock,
+    wrapWithBlock: wrapWithBlock,
     deleteBlock: deleteBlock,
     addNote: addNote,
     toggleAutonumber: toggleAutonumber,
