@@ -927,6 +927,14 @@ function renderProps() {
         editorEl.value = mmdText;
         suppressSync = false;
         syncLineNumbers();
+        // Re-parse synchronously so any subsequent renderProps call (e.g.
+        // triggered by setSelected right after) sees the updated structure.
+        // Without this, module-level `parsed` stayed stale until the async
+        // refresh tick and caused selection look-ups to hit wrong messages
+        // (visible as "上下を押すと選択が入れ替わる").
+        if (currentModule && currentModule.parse) {
+          try { parsed = currentModule.parse(mmdText); } catch (e) { /* leave stale */ }
+        }
       },
       onUpdate: function() { scheduleRefresh(); },
     });
