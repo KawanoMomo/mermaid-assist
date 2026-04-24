@@ -1008,11 +1008,12 @@ window.MA.modules.sequence = (function() {
           ]) +
           fieldHtml('ID', 'sel-part-id', part.id) +
           fieldHtml('ラベル', 'sel-part-label', part.label) +
-          '<div style="display:flex;gap:4px;margin:8px 0;">' +
-            '<button id="sel-part-left" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">← 左へ</button>' +
-            '<button id="sel-part-right" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;">右へ →</button>' +
-          '</div>' +
-          props.dangerButtonHtml('sel-part-delete', '参加者削除');
+          props.actionBarHtml('sel-part', {
+            insertBefore: false, insertAfter: false,
+            move: true,
+            delete: true,
+            labels: { up: '← 左へ', down: '右へ →', delete: '参加者削除' },
+          });
 
         props.bindEvent('sel-part-kind', 'change', function() {
           window.MA.history.pushHistory();
@@ -1032,27 +1033,29 @@ window.MA.modules.sequence = (function() {
         // Participant aliases are unique and stable across re-parse, so
         // re-selecting by `part.id` (the alias) works without needing to
         // track line movement.
-        props.bindEvent('sel-part-left', 'click', function() {
-          var newText = moveParticipantUp(ctx.getMmdText(), part.line);
-          if (newText === ctx.getMmdText()) return;
-          window.MA.history.pushHistory();
-          ctx.setMmdText(newText);
-          window.MA.selection.setSelected([{ type: 'participant', id: part.id }]);
-          ctx.onUpdate();
-        });
-        props.bindEvent('sel-part-right', 'click', function() {
-          var newText = moveParticipantDown(ctx.getMmdText(), part.line);
-          if (newText === ctx.getMmdText()) return;
-          window.MA.history.pushHistory();
-          ctx.setMmdText(newText);
-          window.MA.selection.setSelected([{ type: 'participant', id: part.id }]);
-          ctx.onUpdate();
-        });
-        props.bindEvent('sel-part-delete', 'click', function() {
-          window.MA.history.pushHistory();
-          ctx.setMmdText(deleteParticipant(ctx.getMmdText(), part.line));
-          window.MA.selection.clearSelection();
-          ctx.onUpdate();
+        props.bindActionBar('sel-part', {
+          up: function() {
+            var newText = moveParticipantUp(ctx.getMmdText(), part.line);
+            if (newText === ctx.getMmdText()) return;
+            window.MA.history.pushHistory();
+            ctx.setMmdText(newText);
+            window.MA.selection.setSelected([{ type: 'participant', id: part.id }]);
+            ctx.onUpdate();
+          },
+          down: function() {
+            var newText = moveParticipantDown(ctx.getMmdText(), part.line);
+            if (newText === ctx.getMmdText()) return;
+            window.MA.history.pushHistory();
+            ctx.setMmdText(newText);
+            window.MA.selection.setSelected([{ type: 'participant', id: part.id }]);
+            ctx.onUpdate();
+          },
+          'delete': function() {
+            window.MA.history.pushHistory();
+            ctx.setMmdText(deleteParticipant(ctx.getMmdText(), part.line));
+            window.MA.selection.clearSelection();
+            ctx.onUpdate();
+          },
         });
         return;
       }
