@@ -408,13 +408,41 @@ window.MA.modules.sequence = (function() {
     return window.MA.textUpdater.deleteLine(text, lineNum);
   }
 
-  function moveMessageUp(text, lineNum) {
-    return window.MA.textUpdater.swapLines(text, lineNum, lineNum - 1);
+  // Returns true when the trimmed line contains one of the ARROW_TYPES, i.e.
+  // it is a message line rather than a note / block keyword / participant.
+  function _isMessageLine(trimmed) {
+    for (var ai = 0; ai < ARROW_TYPES.length; ai++) {
+      var pos = trimmed.indexOf(ARROW_TYPES[ai]);
+      // Must have content before the arrow (the "from" participant) to be a real message.
+      if (pos > 0) return true;
+    }
+    return false;
   }
 
-  function moveMessageDown(text, lineNum) {
-    return window.MA.textUpdater.swapLines(text, lineNum, lineNum + 1);
+  // moveMessage(text, lineNum, direction):
+  // direction = -1 (up) / +1 (down). Moves the selected message past the
+  // nearest adjacent *message* while leaving intervening notes / block
+  // boundaries / participants in place. If no same-kind neighbour exists,
+  // the call is a no-op so unrelated elements never appear to move on their
+  // own (user report: "上へ/下へで選択していないメッセージが動く").
+  function _moveMessageStep(text, lineNum, direction) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    var target = idx + direction;
+    while (target >= 0 && target < lines.length) {
+      var t = lines[target].trim();
+      if (!t || t.indexOf('%%') === 0) { target += direction; continue; }
+      if (_isMessageLine(t)) {
+        return window.MA.textUpdater.swapLines(text, lineNum, target + 1);
+      }
+      return text;  // hit non-message (note / block kwd / participant): bail
+    }
+    return text;
   }
+
+  function moveMessageUp(text, lineNum) { return _moveMessageStep(text, lineNum, -1); }
+  function moveMessageDown(text, lineNum) { return _moveMessageStep(text, lineNum, 1); }
 
   function updateMessage(text, lineNum, field, value) {
     var lines = text.split('\n');

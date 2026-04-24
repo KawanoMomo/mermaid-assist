@@ -63,6 +63,9 @@ window.MA.richLabelEditor = (function() {
   }
 
   function mount(container, initialValue, onChange) {
+    // Display `<br/>` as a visible newline in the textarea so line breaks are
+    // obvious while editing. getValue() reverses this before returning to DSL.
+    var initialForEdit = String(initialValue || '').replace(/<br\s*\/?>(?=.|$)/g, '\n');
     container.innerHTML =
       '<div class="rle-toolbar" style="display:flex;gap:4px;padding:4px;background:var(--bg-primary);border:1px solid var(--border);border-bottom:none;border-radius:3px 3px 0 0;align-items:center;flex-wrap:wrap;">' +
         '<button type="button" class="rle-b" title="太字" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:24px;cursor:pointer;font-weight:700;border-radius:3px;">B</button>' +
@@ -70,7 +73,7 @@ window.MA.richLabelEditor = (function() {
         '<span style="border-left:1px solid var(--border);height:18px;margin:0 4px;"></span>' +
         '<button type="button" class="rle-newline" title="改行 <br/>" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:24px;cursor:pointer;border-radius:3px;">↵</button>' +
       '</div>' +
-      '<textarea class="rle-textarea" style="width:100%;min-height:60px;background:var(--bg-tertiary);border:1px solid var(--border);border-top:none;color:var(--text-primary);padding:6px;border-radius:0 0 3px 3px;font-family:var(--font-mono);font-size:12px;resize:vertical;box-sizing:border-box;">' + escHtml(initialValue || '') + '</textarea>' +
+      '<textarea class="rle-textarea" style="width:100%;min-height:60px;background:var(--bg-tertiary);border:1px solid var(--border);border-top:none;color:var(--text-primary);padding:6px;border-radius:0 0 3px 3px;font-family:var(--font-mono);font-size:12px;resize:vertical;box-sizing:border-box;">' + escHtml(initialForEdit) + '</textarea>' +
       '<div class="rle-preview" style="margin-top:6px;padding:6px 8px;background:#fff;color:#000;border-radius:3px;font-size:12px;font-family:-apple-system,Segoe UI,sans-serif;min-height:24px;">' + mermaidToHtml(initialValue || '') + '</div>';
 
     var ta = container.querySelector('.rle-textarea');
@@ -86,7 +89,9 @@ window.MA.richLabelEditor = (function() {
       refreshPreview();
     });
     ta.addEventListener('change', function() {
-      if (onChange) onChange(ta.value);
+      // Normalise real newlines → <br/> before handing off to the DSL so the
+      // label round-trips cleanly. Keep in sync with getValue() below.
+      if (onChange) onChange(ta.value.replace(/\n/g, '<br/>'));
     });
     ta.addEventListener('keydown', function(e) {
       if (e.key === 'Escape') {
@@ -97,11 +102,23 @@ window.MA.richLabelEditor = (function() {
 
     container.querySelector('.rle-b').addEventListener('click', function() { insertWrapAtSelection(ta, '<b>', '</b>'); fireChange(ta); });
     container.querySelector('.rle-i').addEventListener('click', function() { insertWrapAtSelection(ta, '<i>', '</i>'); fireChange(ta); });
-    container.querySelector('.rle-newline').addEventListener('click', function() { insertAtCursor(ta, '<br/>'); fireChange(ta); });
+    // Insert a real newline into the textarea; getValue() converts it to
+    // <br/> before handing off to the DSL so Mermaid renders the line break.
+    container.querySelector('.rle-newline').addEventListener('click', function() { insertAtCursor(ta, '\n'); fireChange(ta); });
 
     return {
-      getValue: function() { return ta.value; },
-      setValue: function(v) { ta.value = v || ''; refreshPreview(); },
+      getValue: function() {
+        // Real newlines in the textarea (user pressed Enter) would collide with
+        // the DSL's line separator and break the sequence line. Normalise to
+        // Mermaid's literal <br/> so the label survives the round-trip.
+        return ta.value.replace(/\n/g, '<br/>');
+      },
+      setValue: function(v) {
+        // Reverse: display <br/> as real newlines in the textarea for easy
+        // editing. Round-trip keeps the DSL stable.
+        ta.value = (v || '').replace(/<br\s*\/?>(?=.|$)/g, '\n');
+        refreshPreview();
+      },
       element: ta,
     };
   }
