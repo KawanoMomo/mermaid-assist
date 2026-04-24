@@ -126,6 +126,93 @@ window.MA.properties = (function() {
     return '<button id="' + id + '" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">' + escHtml(label) + '</button>';
   }
 
+  // ── Action bar (selected-element UX) ─────────────────────────────────────
+  // Emits the standard 5-button row (↑前に挿入 / ↓後に挿入 / ↑上へ / ↓下へ /
+  // 削除) used by every module's selected-element panel. The matching event
+  // hookup is provided by bindActionBar below.
+  //
+  // opts (all optional, default true for booleans):
+  //   insertBefore : boolean
+  //   insertAfter  : boolean
+  //   move         : boolean | { up: boolean, down: boolean }
+  //   delete       : boolean
+  //   labels       : { insertBefore?, insertAfter?, up?, down?, delete? }
+  //
+  // The <prefix>-extra div is ALWAYS emitted so modules can append module-
+  // specific buttons at a stable DOM location. See ADR-020 / ADR-022.
+  function actionBarHtml(idPrefix, opts) {
+    opts = opts || {};
+    var labels = opts.labels || {};
+    var moveUp = true, moveDown = true;
+    if (opts.move === false) { moveUp = false; moveDown = false; }
+    else if (opts.move && typeof opts.move === 'object') {
+      moveUp = opts.move.up !== false;
+      moveDown = opts.move.down !== false;
+    }
+    var insertBefore = opts.insertBefore !== false;
+    var insertAfter = opts.insertAfter !== false;
+    var includeDelete = opts.delete !== false;
+
+    var html = '';
+    if (insertBefore || insertAfter) {
+      html += '<div class="action-bar-row" data-action-bar-row="insert">';
+      if (insertBefore) {
+        html += '<button id="' + idPrefix + '-insert-before" class="action-btn">' +
+                escHtml(labels.insertBefore || '↑ この前に挿入') + '</button>';
+      }
+      if (insertAfter) {
+        html += '<button id="' + idPrefix + '-insert-after" class="action-btn">' +
+                escHtml(labels.insertAfter || '↓ この後に挿入') + '</button>';
+      }
+      html += '</div>';
+    }
+    if (moveUp || moveDown) {
+      html += '<div class="action-bar-row" data-action-bar-row="move">';
+      if (moveUp) {
+        html += '<button id="' + idPrefix + '-up" class="action-btn">' +
+                escHtml(labels.up || '↑ 上へ') + '</button>';
+      }
+      if (moveDown) {
+        html += '<button id="' + idPrefix + '-down" class="action-btn">' +
+                escHtml(labels.down || '↓ 下へ') + '</button>';
+      }
+      html += '</div>';
+    }
+    html += '<div id="' + idPrefix + '-extra" class="action-bar-extra"></div>';
+    if (includeDelete) {
+      html += '<button id="' + idPrefix + '-delete" class="action-btn-danger">' +
+              escHtml(labels.delete || '削除') + '</button>';
+    }
+    return html;
+  }
+
+  // bindActionBar: connect click handlers to the buttons that actionBarHtml
+  // emitted for the same idPrefix. Handlers are optional — missing keys simply
+  // skip the bind (no error). Unknown keys are ignored for forward-compat.
+  //
+  // Recognised keys → id suffix:
+  //   insertBefore → -insert-before
+  //   insertAfter  → -insert-after
+  //   up           → -up
+  //   down         → -down
+  //   delete       → -delete
+  function bindActionBar(idPrefix, handlers) {
+    handlers = handlers || {};
+    var map = {
+      insertBefore: '-insert-before',
+      insertAfter: '-insert-after',
+      up: '-up',
+      down: '-down',
+      'delete': '-delete',
+    };
+    for (var key in map) {
+      if (!Object.prototype.hasOwnProperty.call(map, key)) continue;
+      var fn = handlers[key];
+      if (typeof fn !== 'function') continue;
+      bindEvent(idPrefix + map[key], 'click', fn);
+    }
+  }
+
   // ── Event binding helpers ────────────────────────────────────────────────
 
   // bindEvent: simple event binding by element ID
@@ -146,9 +233,16 @@ window.MA.properties = (function() {
 
   // bindSelectButtons: standardized select-button bindings.
   // For elements with class `selectClass` and attribute `data-element-id`, sets selection on click.
+  //
+  // Uses toggle semantics (selection.selectItem) instead of unconditional setSelected:
+  // clicking the currently-sole-selected item deselects it. Matches the "click again
+  // to deselect" UX applied in PlantUMLAssist and aligns with the selection.js
+  // single-select toggle contract already used by Gantt overlay clicks.
+  // Cross-ref: 06_PlantUMLAssist/docs/direct-manipulation-ux-checklist.md 観点 B.
   function bindSelectButtons(propsEl, selectClass, selectionType) {
     bindAllByClass(propsEl, selectClass, function(btn) {
-      window.MA.selection.setSelected([{ type: selectionType, id: btn.getAttribute('data-element-id') }]);
+      var id = btn.getAttribute('data-element-id');
+      window.MA.selection.selectItem(selectionType, id, false);
     });
   }
 
@@ -197,8 +291,10 @@ window.MA.properties = (function() {
     emptyListHtml: emptyListHtml,
     primaryButtonHtml: primaryButtonHtml,
     dangerButtonHtml: dangerButtonHtml,
+    actionBarHtml: actionBarHtml,
     // Event helpers
     bindEvent: bindEvent,
+    bindActionBar: bindActionBar,
     bindAllByClass: bindAllByClass,
     bindSelectButtons: bindSelectButtons,
     bindDeleteButtons: bindDeleteButtons,

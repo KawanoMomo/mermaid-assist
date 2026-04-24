@@ -19,6 +19,21 @@ const sourceFiles = [
   'src/modules/state.js',
   'src/modules/class.js',
   'src/modules/er.js',
+  'src/modules/requirement.js',
+  'src/modules/block.js',
+  'src/modules/timeline.js',
+  'src/modules/mindmap.js',
+  'src/modules/gitgraph.js',
+  'src/modules/pie.js',
+  'src/modules/journey.js',
+  'src/modules/quadrant.js',
+  'src/modules/xychart.js',
+  'src/modules/sankey.js',
+  'src/modules/c4.js',
+  'src/modules/packet.js',
+  'src/modules/architecture.js',
+  'src/modules/kanban.js',
+  'src/modules/radar.js',
   'src/app.js',
 ];
 
@@ -67,16 +82,28 @@ global.window = sandbox.window;
 
 // ── Minimal test framework ──
 let passed = 0, failed = 0, currentDescribe = '';
+let beforeEachHooks = [];
 
 global.describe = function(name, fn) {
   currentDescribe = name;
   console.log(`\n  ${name}`);
-  fn();
+  const parentHooks = beforeEachHooks;
+  beforeEachHooks = parentHooks.slice();
+  try {
+    fn();
+  } finally {
+    beforeEachHooks = parentHooks;
+  }
   currentDescribe = '';
+};
+
+global.beforeEach = function(fn) {
+  beforeEachHooks.push(fn);
 };
 
 global.test = function(name, fn) {
   try {
+    for (const hook of beforeEachHooks) hook();
     fn();
     passed++;
     console.log(`    ✓ ${name}`);
@@ -116,12 +143,22 @@ global.expect = function(actual) {
         if (!actual.includes(item)) throw new Error(`String does not contain "${item}"`);
       }
     },
+    toThrow() {
+      if (typeof actual !== 'function') throw new Error('toThrow expects a function');
+      let threw = false;
+      try { actual(); } catch (e) { threw = true; }
+      if (!threw) throw new Error('Expected function to throw');
+    },
     not: {
       toBe(expected) { if (actual === expected) throw new Error(`Expected not ${JSON.stringify(expected)}`); },
       toBeNull() { if (actual === null) throw new Error('Expected not null'); },
       toContain(item) {
         if (typeof actual === 'string' && actual.includes(item)) throw new Error(`String should not contain "${item}"`);
         if (Array.isArray(actual) && actual.includes(item)) throw new Error(`Array should not contain ${JSON.stringify(item)}`);
+      },
+      toThrow() {
+        if (typeof actual !== 'function') throw new Error('toThrow expects a function');
+        try { actual(); } catch (e) { throw new Error('Expected function not to throw, but threw: ' + e.message); }
       },
     },
   };

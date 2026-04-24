@@ -1,0 +1,19 @@
+{
+  "editor": "mindmap\n  root((組み込み設計))\n\n    ハードウェア\n      MCU\n      Sensor\n        温度\n        圧力\n    ソフトウェア\n      FreeRTOS\n      Communication\n        CAN\n        UART\n    テスト\n      ::icon(fa fa-flask)\n      単体テスト\n      結合テスト",
+  "svgTexts": [
+    "組み込み設計",
+    "ハードウェア",
+    "MCU",
+    "Sensor",
+    "温度",
+    "圧力",
+    "ソフトウェア",
+    "FreeRTOS",
+    "Communication",
+    "CAN",
+    "UART",
+    "テスト",
+    "単体テスト",
+    "結合テスト"
+  ]
+}

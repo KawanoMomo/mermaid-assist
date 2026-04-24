@@ -49,6 +49,15 @@ function rebuildOverlay() {
 
 // ── Drag State ────────────────────────────────────────────────────────────
 var dragState = null;
+// Sequence-specific drag state (participant reorder via gap drop).
+// Kept separate from the Gantt date-drag state above since the two handlers
+// run on the same overlay element but track fundamentally different motion.
+var seqDragState = null;
+// Timestamp of the last drag-end, used to suppress the synthetic click that
+// follows a real drag. See PlantUMLAssist: direct-manipulation-ux-checklist
+// 観点 C ("click が drag の残響で発火して popup が暴発する" の対策).
+var seqJustDraggedAt = 0;
+var SEQ_DRAG_CLICK_SUPPRESS_MS = 300;
 
 // ── Application State ──────────────────────────────────────────────────────
 var mmdText = '';
@@ -74,7 +83,16 @@ function _registerWindowModules() {
   for (var _i = 0; _i < keys.length; _i++) {
     var _mod = mm[keys[_i]];
     var _key = (_mod && _mod.type) ? _mod.type : keys[_i];
-    if (!modules[_key]) modules[_key] = _mod;
+    if (!modules[_key]) {
+      modules[_key] = _mod;
+    } else {
+      // Fill in any methods missing on the inline definition from the external module
+      for (var _prop in _mod) {
+        if (Object.prototype.hasOwnProperty.call(_mod, _prop) && !(_prop in modules[_key])) {
+          modules[_key][_prop] = _mod[_prop];
+        }
+      }
+    }
   }
 }
 
@@ -909,6 +927,14 @@ function renderProps() {
         editorEl.value = mmdText;
         suppressSync = false;
         syncLineNumbers();
+        // Re-parse synchronously so any subsequent renderProps call (e.g.
+        // triggered by setSelected right after) sees the updated structure.
+        // Without this, module-level `parsed` stayed stale until the async
+        // refresh tick and caused selection look-ups to hit wrong messages
+        // (visible as "上下を押すと選択が入れ替わる").
+        if (currentModule && currentModule.parse) {
+          try { parsed = currentModule.parse(mmdText); } catch (e) { /* leave stale */ }
+        }
       },
       onUpdate: function() { scheduleRefresh(); },
     });
@@ -1109,6 +1135,26 @@ function init() {
     syncLineNumbers();
   });
 
+  // Tab / Shift+Tab: indent / outdent with 2 spaces (see workspace ADR-011)
+  editorEl.addEventListener('keydown', function(e) {
+    if (e.key !== 'Tab' || e.isComposing) return;
+    e.preventDefault();
+    var start = this.selectionStart;
+    var end = this.selectionEnd;
+    if (e.shiftKey) {
+      var before = this.value.substring(0, start);
+      var lineStart = before.lastIndexOf('\n') + 1;
+      if (this.value.substring(lineStart, lineStart + 2) === '  ') {
+        this.value = this.value.substring(0, lineStart) + this.value.substring(lineStart + 2);
+        this.selectionStart = this.selectionEnd = Math.max(lineStart, start - 2);
+      }
+    } else {
+      this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
+      this.selectionStart = this.selectionEnd = start + 2;
+    }
+    this.dispatchEvent(new Event('input'));
+  });
+
   // ── Toolbar buttons ──────────────────────────────────────────────────────
   document.getElementById('btn-open').addEventListener('click', openFile);
   document.getElementById('btn-save').addEventListener('click', saveFile);
@@ -1178,8 +1224,131 @@ function init() {
     exportClipboard();
   });
 
+  // ── Hover-insert guide for Sequence diagram ─────────────────────────────
+  // Uses #hover-layer (separate SVG above overlay-layer) so mermaid re-renders
+  // do not clear the guide. Active only for sequenceDiagram; other modules
+  // ignore the handlers because resolveInsertLine is undefined for them.
+  //
+  // Suppress rules (cross-apply from PlantUMLAssist direct-manipulation
+  // checklist):
+  //   - 観点 C: hide guide whenever something is selected (selection =
+  //     edit mode, insert would be contradictory)
+  //   - 観点 B/C: swallow the synthetic click that follows a drag end
+  //     (SEQ_DRAG_CLICK_SUPPRESS_MS window)
+  var hoverLayerEl = document.getElementById('hover-layer');
+
+  function _clearHoverGuide() {
+    if (!hoverLayerEl) return;
+    var guides = hoverLayerEl.querySelectorAll('.hover-guide, .hover-label');
+    Array.prototype.forEach.call(guides, function(g) { g.parentNode.removeChild(g); });
+  }
+
+  function _syncHoverLayerDims() {
+    if (!hoverLayerEl || !overlayEl) return;
+    var w = overlayEl.getAttribute('width');
+    var h = overlayEl.getAttribute('height');
+    var vb = overlayEl.getAttribute('viewBox');
+    if (w) hoverLayerEl.setAttribute('width', w);
+    if (h) hoverLayerEl.setAttribute('height', h);
+    if (vb) hoverLayerEl.setAttribute('viewBox', vb);
+    hoverLayerEl.style.transform = overlayEl.style.transform;
+  }
+
+  function _drawHoverGuide(svgY) {
+    _clearHoverGuide();
+    if (!hoverLayerEl || !overlayEl) return;
+    _syncHoverLayerDims();
+    var NS = 'http://www.w3.org/2000/svg';
+    var w = parseFloat(overlayEl.getAttribute('width'))
+      || (overlayEl.viewBox && overlayEl.viewBox.baseVal && overlayEl.viewBox.baseVal.width)
+      || 800;
+    var line = document.createElementNS(NS, 'line');
+    line.setAttribute('x1', 0);
+    line.setAttribute('y1', svgY);
+    line.setAttribute('x2', w);
+    line.setAttribute('y2', svgY);
+    line.setAttribute('class', 'hover-guide');
+    hoverLayerEl.appendChild(line);
+    var text = document.createElementNS(NS, 'text');
+    text.setAttribute('x', 10);
+    text.setAttribute('y', svgY - 3);
+    text.setAttribute('class', 'hover-label');
+    text.textContent = '+ ここに挿入';
+    hoverLayerEl.appendChild(text);
+  }
+
+  function _hasAnySelection() {
+    var s = window.MA.selection && window.MA.selection.getSelected && window.MA.selection.getSelected();
+    return !!(s && s.length > 0);
+  }
+
+  function _isSequenceDiagram() {
+    return currentModule && currentModule.type === 'sequenceDiagram';
+  }
+
   // ── Ctrl+wheel zoom / Shift+wheel horizontal scroll on preview ───────────
   var previewContainer = document.getElementById('preview-container');
+  previewContainer.addEventListener('mousemove', function(e) {
+    if (!_isSequenceDiagram()) { _clearHoverGuide(); return; }
+    if (_hasAnySelection()) { _clearHoverGuide(); return; }
+    if (seqDragState) { _clearHoverGuide(); return; }
+    var target = e.target;
+    // Over a participant drag handle or other overlay actor — skip guide
+    if (target && target.getAttribute && target.getAttribute('data-element-kind')) {
+      _clearHoverGuide();
+      return;
+    }
+    if (!overlayEl) return;
+    var rect = overlayEl.getBoundingClientRect();
+    if (e.clientX < rect.left || e.clientX > rect.right
+        || e.clientY < rect.top || e.clientY > rect.bottom) {
+      _clearHoverGuide();
+      return;
+    }
+    // Convert client y to SVG y (account for zoom via CTM)
+    var pt = overlayEl.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    var ctm = overlayEl.getScreenCTM();
+    if (!ctm) return;
+    var svgPt = pt.matrixTransform(ctm.inverse());
+    _drawHoverGuide(svgPt.y);
+  });
+
+  previewContainer.addEventListener('mouseleave', _clearHoverGuide);
+
+  previewContainer.addEventListener('click', function(e) {
+    if (!_isSequenceDiagram()) return;
+    if (Date.now() - seqJustDraggedAt < SEQ_DRAG_CLICK_SUPPRESS_MS) return;
+    if (_hasAnySelection()) return;
+    var target = e.target;
+    // Let overlay click handlers (participant selection etc.) fire first.
+    if (target && target.getAttribute && target.getAttribute('data-element-kind')) return;
+    var seqMod = window.MA.modules && window.MA.modules.sequence;
+    if (!seqMod || !seqMod.resolveInsertLine) return;
+    if (!overlayEl) return;
+    var rect = overlayEl.getBoundingClientRect();
+    if (e.clientX < rect.left || e.clientX > rect.right
+        || e.clientY < rect.top || e.clientY > rect.bottom) return;
+    var pt = overlayEl.createSVGPoint();
+    pt.x = e.clientX; pt.y = e.clientY;
+    var ctm = overlayEl.getScreenCTM();
+    if (!ctm) return;
+    var svgPt = pt.matrixTransform(ctm.inverse());
+    var svg = document.querySelector('#preview-svg svg');
+    var parsedForSeq = seqMod.parseSequence(mmdText);
+    var res = seqMod.resolveInsertLine(svg, parsedForSeq, svgPt.y);
+    if (!res) return;
+    // Open the modal insert form (ported from PlantUMLAssist). The form
+    // handles history push, setMmdText, and onUpdate itself via ctx.
+    _clearHoverGuide();
+    if (!seqMod.showInsertForm) return;
+    seqMod.showInsertForm({
+      getMmdText: function() { return mmdText; },
+      setMmdText: function(s) { mmdText = s; suppressSync = true; editorEl.value = s; suppressSync = false; syncLineNumbers(); },
+      onUpdate: function() { scheduleRefresh(); },
+    }, res.line, res.position, 'message');
+  });
+
   previewContainer.addEventListener('wheel', function(e) {
     if (e.ctrlKey) {
       e.preventDefault();
@@ -1199,6 +1368,31 @@ function init() {
     var handle = target.getAttribute('data-handle');
     var lineNum = target.getAttribute('data-line');
     var index = target.getAttribute('data-index');
+
+    // Sequence participant drag path: elements have data-element-kind="participant"
+    // rather than data-task-id. Handled by a separate code path below.
+    var seqKind = target.getAttribute('data-element-kind');
+    var seqId = target.getAttribute('data-element-id');
+    if (seqKind === 'participant' && seqId) {
+      seqDragState = {
+        id: seqId,
+        startX: e.clientX,
+        startY: e.clientY,
+        dragging: false,
+        ghostEl: null,
+      };
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    // Non-draggable sequence elements (message / note / group) — commit
+    // selection synchronously. selectItem handles toggle-off on re-click.
+    if (seqKind && seqId && (seqKind === 'message' || seqKind === 'note' || seqKind === 'group')) {
+      window.MA.selection.selectItem(seqKind, seqId, e.shiftKey);
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
 
     // Click on empty overlay area (no task): clear selection
     if (!taskId && !e.shiftKey) {
@@ -1270,8 +1464,132 @@ function init() {
     }
   });
 
+  // ── Sequence participant drag: geometry helpers ─────────────────────────
+  function _seqParticipantCenters(overlay) {
+    // Dedup by data-element-id. Feature: buildOverlay emits actor-top AND
+    // actor-bottom rects, so each participant has 2 rects at the same x.
+    // Dedup by id (not by x coordinate) to avoid the PlantUMLAssist bug where
+    // near-duplicate x values inflated the gap count.
+    var byId = {};
+    var rects = overlay.querySelectorAll('rect[data-element-kind="participant"]');
+    Array.prototype.forEach.call(rects, function(r) {
+      var id = r.getAttribute('data-element-id');
+      if (!id || id in byId) return;
+      var x = parseFloat(r.getAttribute('x'));
+      var w = parseFloat(r.getAttribute('width'));
+      if (isNaN(x) || isNaN(w)) return;
+      byId[id] = { id: id, cx: x + w / 2 };
+    });
+    var arr = [];
+    for (var k in byId) if (Object.prototype.hasOwnProperty.call(byId, k)) arr.push(byId[k]);
+    arr.sort(function(a, b) { return a.cx - b.cx; });
+    return arr;
+  }
+
+  function _seqGaps(overlay, centers) {
+    if (!centers || centers.length === 0) return [];
+    var overlayW = parseFloat(overlay.getAttribute('width'))
+      || (overlay.viewBox && overlay.viewBox.baseVal && overlay.viewBox.baseVal.width)
+      || 800;
+    var left = Math.max(5, centers[0].cx - 40);
+    var right = Math.min(overlayW - 5, centers[centers.length - 1].cx + 40);
+    var gaps = [left];
+    for (var i = 0; i < centers.length - 1; i++) {
+      gaps.push((centers[i].cx + centers[i + 1].cx) / 2);
+    }
+    gaps.push(right);
+    return gaps;
+  }
+
+  function _seqScreenToOverlayX(overlay, clientX) {
+    if (!overlay || !overlay.createSVGPoint) return null;
+    var pt = overlay.createSVGPoint();
+    pt.x = clientX; pt.y = 0;
+    var ctm = overlay.getScreenCTM();
+    if (!ctm) return null;
+    return pt.matrixTransform(ctm.inverse()).x;
+  }
+
+  function _seqDrawDropIndicator(overlay, clientX) {
+    // Draw into #hover-layer so mermaid re-renders of overlay-layer (which
+    // happen during/after drag) don't clobber the indicator mid-gesture.
+    var hoverL = document.getElementById('hover-layer');
+    if (!hoverL) return;
+    var old = hoverL.querySelectorAll('.seq-drop-indicator');
+    Array.prototype.forEach.call(old, function(el) { el.parentNode.removeChild(el); });
+    var centers = _seqParticipantCenters(overlay);
+    if (centers.length === 0) return;
+    var gaps = _seqGaps(overlay, centers);
+    var localX = _seqScreenToOverlayX(overlay, clientX);
+    if (localX == null) return;
+    var bestX = gaps[0], bestDist = Infinity;
+    for (var i = 0; i < gaps.length; i++) {
+      var d = Math.abs(localX - gaps[i]);
+      if (d < bestDist) { bestDist = d; bestX = gaps[i]; }
+    }
+    var h = parseFloat(overlay.getAttribute('height'))
+      || (overlay.viewBox && overlay.viewBox.baseVal && overlay.viewBox.baseVal.height)
+      || 400;
+    // Keep hover-layer dimensions synced to overlay so viewBox clipping doesn't
+    // hide the indicator.
+    if (overlay.getAttribute('width')) hoverL.setAttribute('width', overlay.getAttribute('width'));
+    if (overlay.getAttribute('height')) hoverL.setAttribute('height', overlay.getAttribute('height'));
+    if (overlay.getAttribute('viewBox')) hoverL.setAttribute('viewBox', overlay.getAttribute('viewBox'));
+    hoverL.style.transform = overlay.style.transform;
+    var NS = 'http://www.w3.org/2000/svg';
+    var line = document.createElementNS(NS, 'line');
+    line.setAttribute('x1', bestX);
+    line.setAttribute('y1', 0);
+    line.setAttribute('x2', bestX);
+    line.setAttribute('y2', h);
+    line.setAttribute('class', 'seq-drop-indicator');
+    hoverL.appendChild(line);
+  }
+
+  function _seqClearDropIndicator(overlay) {
+    var hoverL = document.getElementById('hover-layer');
+    if (!hoverL) return;
+    var old = hoverL.querySelectorAll('.seq-drop-indicator');
+    Array.prototype.forEach.call(old, function(el) { el.parentNode.removeChild(el); });
+  }
+
+  function _seqComputeDropIndex(overlay, clientX) {
+    var centers = _seqParticipantCenters(overlay);
+    if (centers.length === 0) return null;
+    var gaps = _seqGaps(overlay, centers);
+    var localX = _seqScreenToOverlayX(overlay, clientX);
+    if (localX == null) return null;
+    var bestIdx = 0, bestDist = Infinity;
+    for (var i = 0; i < gaps.length; i++) {
+      var d = Math.abs(localX - gaps[i]);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    return bestIdx;
+  }
+
   // ── Document mousemove (drag) ───────────────────────────────────────────
   document.addEventListener('mousemove', function(e) {
+    // Sequence participant drag path
+    if (seqDragState) {
+      var dx = e.clientX - seqDragState.startX;
+      var dy = e.clientY - seqDragState.startY;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      if (!seqDragState.dragging && dist > 4) {
+        seqDragState.dragging = true;
+        var g = document.createElement('div');
+        g.className = 'seq-drag-ghost';
+        g.textContent = seqDragState.id;
+        g.style.cssText = 'position:fixed;pointer-events:none;background:rgba(124,140,248,0.9);color:#fff;padding:4px 8px;border-radius:4px;font-size:11px;z-index:9999;left:' + e.clientX + 'px;top:' + e.clientY + 'px;';
+        document.body.appendChild(g);
+        seqDragState.ghostEl = g;
+      }
+      if (seqDragState.dragging) {
+        seqDragState.ghostEl.style.left = e.clientX + 'px';
+        seqDragState.ghostEl.style.top = e.clientY + 'px';
+        if (overlayEl) _seqDrawDropIndicator(overlayEl, e.clientX);
+      }
+      return;
+    }
     if (!dragState) return;
 
     if (!overlayEl || !overlayEl.createSVGPoint) return;
@@ -1386,7 +1704,38 @@ function init() {
   });
 
   // ── Document mouseup (end drag) ─────────────────────────────────────────
-  document.addEventListener('mouseup', function() {
+  document.addEventListener('mouseup', function(e) {
+    // Sequence participant drag path
+    if (seqDragState) {
+      if (seqDragState.dragging) {
+        var gapIdx = _seqComputeDropIndex(overlayEl, e.clientX);
+        var seqMod = window.MA.modules && window.MA.modules.sequence;
+        if (gapIdx !== null && seqMod && seqMod.moveParticipant) {
+          var newText = seqMod.moveParticipant(mmdText, seqDragState.id, gapIdx);
+          if (newText !== mmdText) {
+            window.MA.history.pushHistory();
+            mmdText = newText;
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            syncLineNumbers();
+            scheduleRefresh();
+          }
+        }
+        if (seqDragState.ghostEl && seqDragState.ghostEl.parentNode) {
+          seqDragState.ghostEl.parentNode.removeChild(seqDragState.ghostEl);
+        }
+        if (overlayEl) _seqClearDropIndicator(overlayEl);
+        seqJustDraggedAt = Date.now();
+      } else {
+        // Plain click (no drag motion) → commit selection via selectItem so
+        // toggle-off-on-reclick works consistently. Without this the
+        // seqDragState was discarded and the participant was never selected.
+        window.MA.selection.selectItem('participant', seqDragState.id, false);
+      }
+      seqDragState = null;
+      return;
+    }
     if (dragState) {
       dragState = null;
       clearTimeout(dragRenderTimer);
@@ -1412,6 +1761,14 @@ function init() {
     var inInput = (tag === 'INPUT' || tag === 'SELECT');
     var inEditor = (e.target === editorEl);
 
+    if (e.key === 'Escape' && seqDragState && seqDragState.dragging) {
+      if (seqDragState.ghostEl && seqDragState.ghostEl.parentNode) {
+        seqDragState.ghostEl.parentNode.removeChild(seqDragState.ghostEl);
+      }
+      if (overlayEl) _seqClearDropIndicator(overlayEl);
+      seqDragState = null;
+      return;
+    }
     if (e.ctrlKey && e.key === 'z') {
       if (inEditor) return;
       e.preventDefault(); window.MA.history.undo();

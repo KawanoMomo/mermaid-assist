@@ -205,6 +205,36 @@ window.MA.modules.classDiagram = (function() {
     return lines.join('\n');
   }
 
+  function _isClassLine(trimmed) {
+    if (!trimmed) return false;
+    if (trimmed.indexOf('%%') === 0) return false;
+    if (/<\|--|--\|>|<--|-->|--\*|\*--|--o|o--|\.\./.test(trimmed)) return false; // relation
+    if (/^(classDiagram|class\s+".*"|direction|note\s|}\s*$)/i.test(trimmed)) return false;
+    return /^(class\s+\w|\w+\s*:)/i.test(trimmed);
+  }
+
+  function _moveClassStep(text, lineNum, direction) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    var target = idx + direction;
+    while (target >= 0 && target < lines.length) {
+      var t = lines[target].trim();
+      if (!t || t.indexOf('%%') === 0) { target += direction; continue; }
+      if (_isClassLine(t)) {
+        var tmp = lines[idx];
+        lines[idx] = lines[target];
+        lines[target] = tmp;
+        return lines.join('\n');
+      }
+      return text;
+    }
+    return text;
+  }
+
+  function moveClassUp(text, lineNum) { return _moveClassStep(text, lineNum, -1); }
+  function moveClassDown(text, lineNum) { return _moveClassStep(text, lineNum, 1); }
+
   function deleteClass(text, lineNum) {
     return window.MA.textUpdater.deleteLine(text, lineNum);
   }
@@ -457,13 +487,35 @@ window.MA.modules.classDiagram = (function() {
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">メンバ一覧</label>' +
           '<div>' + membersList + '</div>' +
         '</div>' +
-        props.dangerButtonHtml('sel-class-delete', 'クラス削除');
+        props.actionBarHtml('sel-class', {
+          insertBefore: false, insertAfter: false,
+          move: true, delete: true,
+          labels: { delete: 'クラス削除' },
+        });
 
-      bindEvent('sel-class-delete', 'click', function() {
-        window.MA.history.pushHistory();
-        ctx.setMmdText(deleteClass(ctx.getMmdText(), cls.line));
-        window.MA.selection.clearSelection();
-        ctx.onUpdate();
+      props.bindActionBar('sel-class', {
+        up: function() {
+          var newText = moveClassUp(ctx.getMmdText(), cls.line);
+          if (newText === ctx.getMmdText()) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
+          window.MA.selection.setSelected([{ type: 'class', id: cls.id }]);
+          ctx.onUpdate();
+        },
+        down: function() {
+          var newText = moveClassDown(ctx.getMmdText(), cls.line);
+          if (newText === ctx.getMmdText()) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
+          window.MA.selection.setSelected([{ type: 'class', id: cls.id }]);
+          ctx.onUpdate();
+        },
+        'delete': function() {
+          window.MA.history.pushHistory();
+          ctx.setMmdText(deleteClass(ctx.getMmdText(), cls.line));
+          window.MA.selection.clearSelection();
+          ctx.onUpdate();
+        },
       });
       props.bindDeleteButtons(propsEl, 'cl-delete-mem', ctx, window.MA.textUpdater.deleteLine);
       return;
@@ -494,13 +546,24 @@ window.MA.modules.classDiagram = (function() {
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">Arrow</label><select id="sel-rel-arrow" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;font-family:var(--font-mono);">' + arrowOpts3 + '</select></div>' +
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">To</label><select id="sel-rel-to" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + toOpts + '</select></div>' +
         fieldHtml('ラベル', 'sel-rel-label', rel.label) +
-        props.dangerButtonHtml('sel-rel-delete', '関連削除');
+        props.actionBarHtml('sel-rel', {
+          insertBefore: false, insertAfter: false,
+          move: false, delete: true,
+          labels: { delete: '関連削除' },
+        });
 
       document.getElementById('sel-rel-from').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateRelation(ctx.getMmdText(), rel.line, 'from', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-rel-arrow').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateRelation(ctx.getMmdText(), rel.line, 'arrow', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-rel-to').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateRelation(ctx.getMmdText(), rel.line, 'to', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-rel-label').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateRelation(ctx.getMmdText(), rel.line, 'label', this.value)); ctx.onUpdate(); });
-      bindEvent('sel-rel-delete', 'click', function() { window.MA.history.pushHistory(); ctx.setMmdText(deleteRelation(ctx.getMmdText(), rel.line)); window.MA.selection.clearSelection(); ctx.onUpdate(); });
+      props.bindActionBar('sel-rel', {
+        'delete': function() {
+          window.MA.history.pushHistory();
+          ctx.setMmdText(deleteRelation(ctx.getMmdText(), rel.line));
+          window.MA.selection.clearSelection();
+          ctx.onUpdate();
+        },
+      });
       return;
     }
 
@@ -561,6 +624,8 @@ window.MA.modules.classDiagram = (function() {
     parseClass: parseClass,
     addClass: addClass,
     deleteClass: deleteClass,
+    moveClassUp: moveClassUp,
+    moveClassDown: moveClassDown,
     addMember: addMember,
     addRelation: addRelation,
     deleteRelation: deleteRelation,
