@@ -112,6 +112,36 @@ window.MA.modules.erDiagram = (function() {
     return lines.join('\n');
   }
 
+  function _isEntityLine(trimmed) {
+    if (!trimmed) return false;
+    if (trimmed.indexOf('%%') === 0) return false;
+    if (/\|\||}o|o{|\|\{|}\||\.\./.test(trimmed)) return false; // relationship cardinality
+    if (/^(erDiagram|}\s*$|{)/i.test(trimmed)) return false;
+    return /^\w/.test(trimmed);
+  }
+
+  function _moveEntityStep(text, lineNum, direction) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    var target = idx + direction;
+    while (target >= 0 && target < lines.length) {
+      var t = lines[target].trim();
+      if (!t || t.indexOf('%%') === 0) { target += direction; continue; }
+      if (_isEntityLine(t)) {
+        var tmp = lines[idx];
+        lines[idx] = lines[target];
+        lines[target] = tmp;
+        return lines.join('\n');
+      }
+      return text;
+    }
+    return text;
+  }
+
+  function moveEntityUp(text, lineNum) { return _moveEntityStep(text, lineNum, -1); }
+  function moveEntityDown(text, lineNum) { return _moveEntityStep(text, lineNum, 1); }
+
   function deleteEntity(text, lineNum) {
     // Find the entity block boundary (close brace) and remove block
     var lines = text.split('\n');
@@ -338,13 +368,35 @@ window.MA.modules.erDiagram = (function() {
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">属性一覧</label>' +
           '<div>' + attrsList + '</div>' +
         '</div>' +
-        P.dangerButtonHtml('sel-ent-delete', 'エンティティ削除');
+        P.actionBarHtml('sel-ent', {
+          insertBefore: false, insertAfter: false,
+          move: true, delete: true,
+          labels: { delete: 'エンティティ削除' },
+        });
 
-      P.bindEvent('sel-ent-delete', 'click', function() {
-        window.MA.history.pushHistory();
-        ctx.setMmdText(deleteEntity(ctx.getMmdText(), ent.line));
-        window.MA.selection.clearSelection();
-        ctx.onUpdate();
+      P.bindActionBar('sel-ent', {
+        up: function() {
+          var newText = moveEntityUp(ctx.getMmdText(), ent.line);
+          if (newText === ctx.getMmdText()) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
+          window.MA.selection.setSelected([{ type: 'entity', id: ent.id }]);
+          ctx.onUpdate();
+        },
+        down: function() {
+          var newText = moveEntityDown(ctx.getMmdText(), ent.line);
+          if (newText === ctx.getMmdText()) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
+          window.MA.selection.setSelected([{ type: 'entity', id: ent.id }]);
+          ctx.onUpdate();
+        },
+        'delete': function() {
+          window.MA.history.pushHistory();
+          ctx.setMmdText(deleteEntity(ctx.getMmdText(), ent.line));
+          window.MA.selection.clearSelection();
+          ctx.onUpdate();
+        },
       });
       P.bindDeleteButtons(propsEl, 'er-delete-attr', ctx, deleteAttribute);
       return;
@@ -380,7 +432,11 @@ window.MA.modules.erDiagram = (function() {
         '</div>' +
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">To</label><select id="sel-rel-to" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + toOpts + '</select></div>' +
         P.fieldHtml('ラベル', 'sel-rel-label', rel2.label) +
-        P.dangerButtonHtml('sel-rel-delete', 'リレーションシップ削除');
+        P.actionBarHtml('sel-rel', {
+          insertBefore: false, insertAfter: false,
+          move: false, delete: true,
+          labels: { delete: 'リレーションシップ削除' },
+        });
 
       document.getElementById('sel-rel-from').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateRelationship(ctx.getMmdText(), rel2.line, 'from', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-rel-lc').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateRelationship(ctx.getMmdText(), rel2.line, 'leftCard', this.value)); ctx.onUpdate(); });
@@ -388,7 +444,14 @@ window.MA.modules.erDiagram = (function() {
       document.getElementById('sel-rel-to').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateRelationship(ctx.getMmdText(), rel2.line, 'to', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-rel-label').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateRelationship(ctx.getMmdText(), rel2.line, 'label', this.value)); ctx.onUpdate(); });
       P.bindDeleteButtons(propsEl, 'er-delete-rel', ctx, deleteRelationship);
-      P.bindEvent('sel-rel-delete', 'click', function() { window.MA.history.pushHistory(); ctx.setMmdText(deleteRelationship(ctx.getMmdText(), rel2.line)); window.MA.selection.clearSelection(); ctx.onUpdate(); });
+      P.bindActionBar('sel-rel', {
+        'delete': function() {
+          window.MA.history.pushHistory();
+          ctx.setMmdText(deleteRelationship(ctx.getMmdText(), rel2.line));
+          window.MA.selection.clearSelection();
+          ctx.onUpdate();
+        },
+      });
       return;
     }
 
@@ -446,6 +509,8 @@ window.MA.modules.erDiagram = (function() {
     parseER: parseER,
     addEntity: addEntity,
     deleteEntity: deleteEntity,
+    moveEntityUp: moveEntityUp,
+    moveEntityDown: moveEntityDown,
     addAttribute: addAttribute,
     deleteAttribute: deleteAttribute,
     addRelationship: addRelationship,
