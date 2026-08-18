@@ -26,12 +26,33 @@ window.MA.modules.c4 = (function() {
     return args;
   }
 
+  // Map each block-opening line (index) to the index of its matching '}'.
+  // Counts braces textually rather than by element kind: Container_Boundary and
+  // other hand-written boundary kinds are not in ELEMENT_KINDS, and a kind-based
+  // count would mis-pair across them and delete the wrong range.
+  function matchBraces(lines) {
+    var pairs = {};
+    var stack = [];
+    for (var i = 0; i < lines.length; i++) {
+      var t = lines[i].trim();
+      if (!t || t.indexOf('%%') === 0) continue;
+      if (t === '}') {
+        var open = stack.pop();
+        if (open !== undefined) pairs[open] = i;
+      } else if (t.charAt(t.length - 1) === '{') {
+        stack.push(i);
+      }
+    }
+    return pairs;
+  }
+
   function parseC4(text) {
     var result = { meta: { title: '', variant: 'Context' }, elements: [], relations: [] };
     if (!text || !text.trim()) return result;
 
     var lines = text.split('\n');
     var relCounter = 0;
+    var bracePairs = matchBraces(lines);
 
     for (var i = 0; i < lines.length; i++) {
       var lineNum = i + 1;
@@ -60,6 +81,12 @@ window.MA.modules.c4 = (function() {
             el.descr = args[3] || '';
           } else {
             el.descr = args[2] || '';
+          }
+          // Block form: 'Kind(...) {' … '}'. Record it so updateElement can keep
+          // the brace and deleteBoundary can remove the whole range.
+          if (trimmed.charAt(trimmed.length - 1) === '{') {
+            el.isBoundary = true;
+            el.endLine = bracePairs[i] !== undefined ? bracePairs[i] + 1 : lineNum;
           }
           result.elements.push(el);
           break;
@@ -121,7 +148,7 @@ window.MA.modules.c4 = (function() {
     return text;
   }
 
-  function formatArgs(kind, id, label, descr, tech) {
+  function formatArgs(kind, id, label, descr, tech, isBoundary) {
     var parts = [id, '"' + (label || '') + '"'];
     if (kind === 'Container' || kind === 'ContainerDb' || kind === 'Component' || kind === 'ComponentDb' || kind === 'ContainerQueue') {
       parts.push('"' + (tech || '') + '"');
@@ -129,14 +156,28 @@ window.MA.modules.c4 = (function() {
     } else {
       if (descr) parts.push('"' + descr + '"');
     }
-    return kind + '(' + parts.join(', ') + ')';
+    return kind + '(' + parts.join(', ') + ')' + (isBoundary ? ' {' : '');
+  }
+
+  function isBoundaryKind(kind) {
+    return kind === 'System_Boundary';
   }
 
   function addElement(text, kind, id, label, descr, tech) {
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
-    lines.splice(insertAt, 0, '    ' + formatArgs(kind, id, label, descr, tech));
+    if (isBoundaryKind(kind)) {
+      // mermaid v11 rejects an empty boundary ('Parse error … Expecting PERSON,
+      // SYSTEM, …'), so a boundary is always created with one placeholder child
+      // that the user then renames or replaces.
+      lines.splice(insertAt, 0,
+        '    ' + formatArgs(kind, id, label, descr, tech, true),
+        '        ' + formatArgs('System', id + '_sys', '新規要素'),
+        '    }');
+    } else {
+      lines.splice(insertAt, 0, '    ' + formatArgs(kind, id, label, descr, tech));
+    }
     return lines.join('\n');
   }
 
@@ -152,12 +193,28 @@ window.MA.modules.c4 = (function() {
 
   function deleteLine(text, lineNum) { return window.MA.textUpdater.deleteLine(text, lineNum); }
 
+  // Delete a boundary together with everything it encloses. Matches the delete
+  // semantics of requirement/ER (container delete removes its contents) rather
+  // than unwrapping, which would silently change what the diagram means.
+  function deleteBoundary(text, startLine, endLine) {
+    var lines = text.split('\n');
+    var from = startLine - 1;
+    var to = (endLine || startLine) - 1;
+    if (from < 0 || from >= lines.length) return text;
+    if (to < from || to >= lines.length) to = from;
+    lines.splice(from, to - from + 1);
+    return lines.join('\n');
+  }
+
   function updateElement(text, lineNum, field, value) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var indent = lines[idx].match(/^(\s*)/)[1];
     var trimmed = lines[idx].trim();
+    // A trailing '{' means this line opens a block; it has to survive the rewrite
+    // or the matching '}' below is orphaned and mermaid fails to parse.
+    var hadBrace = trimmed.charAt(trimmed.length - 1) === '{';
     var kindRe = null, matchedKind = null, km = null;
     for (var k = 0; k < ELEMENT_KINDS.length; k++) {
       var ki = ELEMENT_KINDS[k];
@@ -178,7 +235,7 @@ window.MA.modules.c4 = (function() {
     else if (field === 'descr') descr = value;
     else if (field === 'kind') matchedKind = value;
 
-    lines[idx] = indent + formatArgs(matchedKind, id, label, descr, tech);
+    lines[idx] = indent + formatArgs(matchedKind, id, label, descr, tech, hadBrace);
     return lines.join('\n');
   }
 
@@ -227,11 +284,22 @@ window.MA.modules.c4 = (function() {
       var elList = '';
       for (var i = 0; i < els.length; i++) {
         var e = els[i];
+        var sub = e.tech ? '[tech: ' + e.tech + ']' : '';
+        if (e.isBoundary) {
+          // Deleting a boundary takes its contents with it, so show how many
+          // elements are inside before the user presses ✕.
+          var inner = 0;
+          for (var ci = 0; ci < els.length; ci++) {
+            if (els[ci].line > e.line && els[ci].line < e.endLine) inner++;
+          }
+          sub = '(' + inner + ' 要素を含む)';
+        }
         elList += P.listItemHtml({
           label: e.kind + '(' + e.id + ', "' + e.label + '")',
-          sublabel: e.tech ? '[tech: ' + e.tech + ']' : '',
-          selectClass: 'c4-select-element', deleteClass: 'c4-delete-element',
-          dataElementId: e.id, dataLine: e.line, mono: true,
+          sublabel: sub,
+          selectClass: 'c4-select-element',
+          deleteClass: e.isBoundary ? 'c4-delete-boundary' : 'c4-delete-element',
+          dataElementId: e.id, dataLine: e.line, dataEndLine: e.endLine, mono: true,
         });
       }
       if (!elList) elList = P.emptyListHtml('（要素なし）');
@@ -320,6 +388,7 @@ window.MA.modules.c4 = (function() {
       P.bindSelectButtons(propsEl, 'c4-select-element', 'element');
       P.bindSelectButtons(propsEl, 'c4-select-rel', 'rel');
       P.bindDeleteButtons(propsEl, 'c4-delete-element', ctx, deleteLine);
+      P.bindDeleteButtons(propsEl, 'c4-delete-boundary', ctx, deleteBoundary, true);
       P.bindDeleteButtons(propsEl, 'c4-delete-rel', ctx, deleteLine);
       return;
     }
@@ -330,7 +399,13 @@ window.MA.modules.c4 = (function() {
         var el = null;
         for (var i = 0; i < els.length; i++) if (els[i].id === sel.id) { el = els[i]; break; }
         if (!el) { propsEl.innerHTML = '<p>要素が見つかりません</p>'; return; }
-        var kOpts = ELEMENT_KINDS.map(function(k) { return { value: k, label: k, selected: k === el.kind }; });
+        // Converting between a boundary and a plain element would need braces
+        // added or removed on two separate lines, so the kind list is filtered:
+        // a boundary can only stay a boundary, and a plain element cannot become
+        // one. Boundaries are created from the add form instead.
+        var kOpts = ELEMENT_KINDS
+          .filter(function(k) { return isBoundaryKind(k) === !!el.isBoundary; })
+          .map(function(k) { return { value: k, label: k, selected: k === el.kind }; });
         propsEl.innerHTML =
           P.panelHeaderHtml(el.id) +
           P.selectFieldHtml('Kind', 'c4-edit-kind', kOpts) +
@@ -338,8 +413,10 @@ window.MA.modules.c4 = (function() {
           P.fieldHtml('Label', 'c4-edit-label', el.label) +
           P.fieldHtml('Tech', 'c4-edit-tech', el.tech || '') +
           P.fieldHtml('Description', 'c4-edit-descr', el.descr || '') +
-          P.dangerButtonHtml('c4-edit-delete', '削除');
+          P.dangerButtonHtml('c4-edit-delete', el.isBoundary ? '削除（中の要素ごと）' : '削除');
         var ln = el.line;
+        var endLn = el.endLine;
+        var isB = !!el.isBoundary;
         ['kind', 'id', 'label', 'tech', 'descr'].forEach(function(f) {
           var input = document.getElementById('c4-edit-' + f);
           if (input) input.addEventListener('change', function() {
@@ -350,7 +427,8 @@ window.MA.modules.c4 = (function() {
         });
         P.bindEvent('c4-edit-delete', 'click', function() {
           window.MA.history.pushHistory();
-          ctx.setMmdText(deleteLine(ctx.getMmdText(), ln));
+          ctx.setMmdText(isB ? deleteBoundary(ctx.getMmdText(), ln, endLn)
+                             : deleteLine(ctx.getMmdText(), ln));
           window.MA.selection.clearSelection();
           ctx.onUpdate();
         });
@@ -452,6 +530,7 @@ window.MA.modules.c4 = (function() {
     setTitle: setTitle, setVariant: setVariant,
     addElement: addElement, addRel: addRel,
     updateElement: updateElement, updateRel: updateRel, deleteLine: deleteLine,
+    deleteBoundary: deleteBoundary, isBoundaryKind: isBoundaryKind,
     parseArgs: parseArgs,
   };
 })();
