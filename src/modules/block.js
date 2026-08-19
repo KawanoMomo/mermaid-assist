@@ -66,19 +66,36 @@ window.MA.modules.blockBeta = (function() {
     return lines.join('\n');
   }
 
+  // Index of the 'end' that closes the group opened at startIdx. Counts nesting
+  // depth: the first 'end' after a group start belongs to the innermost group,
+  // not necessarily to this one. Returns -1 when the group is left unclosed.
+  function findMatchingEnd(lines, startIdx) {
+    var depth = 0;
+    for (var j = startIdx; j < lines.length; j++) {
+      var t = lines[j].trim();
+      if (GROUP_START_RE.test(t)) {
+        depth++;
+      } else if (t === 'end') {
+        depth--;
+        if (depth === 0) return j;
+      }
+    }
+    return -1;
+  }
+
+  function isGroupStart(trimmed, id) {
+    return trimmed === 'block:' + id || trimmed.indexOf('block:' + id) === 0;
+  }
+
   function addNestedBlock(text, parentId, id, label) {
     var token = label && label !== id ? id + '["' + label + '"]' : id;
     var lines = text.split('\n');
     for (var i = 0; i < lines.length; i++) {
-      var t = lines[i].trim();
-      if (t === 'block:' + parentId || t.indexOf('block:' + parentId) === 0) {
-        // Find matching end
-        for (var j = i + 1; j < lines.length; j++) {
-          if (lines[j].trim() === 'end') {
-            lines.splice(j, 0, '    ' + token);
-            return lines.join('\n');
-          }
-        }
+      if (isGroupStart(lines[i].trim(), parentId)) {
+        var endIdx = findMatchingEnd(lines, i);
+        if (endIdx === -1) return text;
+        lines.splice(endIdx, 0, '    ' + token);
+        return lines.join('\n');
       }
     }
     return text;
@@ -99,11 +116,25 @@ window.MA.modules.blockBeta = (function() {
     if (idx < 0 || idx >= lines.length) return text;
     var trimmed = lines[idx].trim();
 
+    // Every id that disappears with this delete. Links pointing at any of them
+    // would dangle and make mermaid fail, so they are removed too.
+    var removedIds = [blockId];
+
     // Group block:ID ... end
-    if (trimmed === 'block:' + blockId || trimmed.indexOf('block:' + blockId) === 0) {
-      var endIdx = idx;
-      for (var j = idx + 1; j < lines.length; j++) {
-        if (lines[j].trim() === 'end') { endIdx = j; break; }
+    if (isGroupStart(trimmed, blockId)) {
+      var endIdx = findMatchingEnd(lines, idx);
+      if (endIdx === -1) endIdx = lines.length - 1;
+      for (var j = idx + 1; j < endIdx; j++) {
+        var inner = lines[j].trim();
+        if (!inner || inner === 'end' || inner.indexOf('%%') === 0) continue;
+        var gm = inner.match(GROUP_START_RE);
+        if (gm) { removedIds.push(gm[1]); continue; }
+        if (LINK_RE.test(inner) || COLUMNS_RE.test(inner)) continue;
+        BLOCK_TOKEN_RE.lastIndex = 0;
+        var tm;
+        while ((tm = BLOCK_TOKEN_RE.exec(inner)) !== null) {
+          if (tm[1]) removedIds.push(tm[1]);
+        }
       }
       lines.splice(idx, endIdx - idx + 1);
     } else {
@@ -120,12 +151,12 @@ window.MA.modules.blockBeta = (function() {
         lines[idx] = indent + kept.join(' ');
       }
     }
-    // Cascade: remove links referencing this blockId
+    // Cascade: remove links referencing anything that was deleted
     var linkRe = /^(\s*)([A-Za-z_][A-Za-z0-9_-]*)\s*(?:--\s*"?[^"]*?"?\s*)?-->\s*([A-Za-z_][A-Za-z0-9_-]*)\s*$/;
     lines = lines.filter(function(ln) {
       var m = ln.match(linkRe);
       if (!m) return true;
-      return m[2] !== blockId && m[3] !== blockId;
+      return removedIds.indexOf(m[2]) === -1 && removedIds.indexOf(m[3]) === -1;
     });
     return lines.join('\n');
   }

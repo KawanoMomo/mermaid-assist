@@ -128,3 +128,116 @@ describe('operations.moveUp/moveDown/connect', function() {
     expect(out).toContain('a --> b');
   });
 });
+
+// ── 入れ子 group ──────────────────────────────────────────────────────────
+describe('deleteBlock: 入れ子 group', function() {
+  var NESTED = [
+    'block-beta',        // 1
+    '  block:outer',     // 2
+    '    block:inner',   // 3
+    '      a',           // 4
+    '    end',           // 5
+    '    b',             // 6
+    '  end',             // 7
+    '  c',               // 8
+    ''
+  ].join('\n');
+
+  test('B1: 外側 group 削除で内側 group・子 block・end 2つがすべて消える', function() {
+    var p = block.parseBlock(NESTED);
+    var outer = p.elements.filter(function(e) { return e.id === 'outer'; })[0];
+    var out = block.deleteBlock(NESTED, outer.line, 'outer');
+    expect(out).not.toContain('block:outer');
+    expect(out).not.toContain('block:inner');
+    expect(out.split('\n').filter(function(l) { return l.trim() === 'end'; }).length).toBe(0);
+    expect(out).toContain('c');
+  });
+
+  test('B2: 内側 group のみ削除で外側 group と end は保持される', function() {
+    var p = block.parseBlock(NESTED);
+    var inner = p.elements.filter(function(e) { return e.id === 'inner'; })[0];
+    var out = block.deleteBlock(NESTED, inner.line, 'inner');
+    expect(out).toContain('block:outer');
+    expect(out).not.toContain('block:inner');
+    expect(out.split('\n').filter(function(l) { return l.trim() === 'end'; }).length).toBe(1);
+    expect(out).toContain('b');
+  });
+
+  test('B6: ネストなし group の削除は従来どおり (regression)', function() {
+    var t = 'block-beta\n  block:g1\n    inner\n  end\n  z\n';
+    var p = block.parseBlock(t);
+    var g = p.elements.filter(function(e) { return e.id === 'g1'; })[0];
+    var out = block.deleteBlock(t, g.line, 'g1');
+    expect(out).not.toContain('block:g1');
+    expect(out).not.toContain('inner');
+    expect(out.split('\n').filter(function(l) { return l.trim() === 'end'; }).length).toBe(0);
+    expect(out).toContain('z');
+  });
+});
+
+describe('deleteBlock: 削除範囲内を参照するリンクのカスケード', function() {
+  test('B4: 範囲内の子 block を参照するリンクも削除される', function() {
+    var t = [
+      'block-beta',
+      '  block:outer',
+      '    block:inner',
+      '      a',
+      '    end',
+      '  end',
+      '  c',
+      '  a --> c',
+      '  c --> c',
+      ''
+    ].join('\n');
+    var p = block.parseBlock(t);
+    var outer = p.elements.filter(function(e) { return e.id === 'outer'; })[0];
+    var out = block.deleteBlock(t, outer.line, 'outer');
+    expect(out).not.toContain('a --> c');
+    expect(out).toContain('c --> c');
+  });
+
+  test('B5: 範囲内の group id を参照するリンクも削除される', function() {
+    var t = [
+      'block-beta',
+      '  block:outer',
+      '    block:inner',
+      '      a',
+      '    end',
+      '  end',
+      '  c',
+      '  inner --> c',
+      ''
+    ].join('\n');
+    var p = block.parseBlock(t);
+    var outer = p.elements.filter(function(e) { return e.id === 'outer'; })[0];
+    var out = block.deleteBlock(t, outer.line, 'outer');
+    expect(out).not.toContain('inner --> c');
+    expect(out).toContain('c');
+  });
+});
+
+describe('addNestedBlock: 入れ子 group がある親への追加', function() {
+  test('B3: 親自身の end の直前 (入れ子の外) に挿入される', function() {
+    var t = [
+      'block-beta',        // 1
+      '  block:outer',     // 2
+      '    block:inner',   // 3
+      '      a',           // 4
+      '    end',           // 5
+      '  end',             // 6
+      ''
+    ].join('\n');
+    var out = block.addNestedBlock(t, 'outer', 'newb', 'New');
+    var lines = out.split('\n');
+    var innerEndIdx = -1, outerEndIdx = -1, newIdx = -1;
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].indexOf('newb') >= 0) newIdx = i;
+    }
+    // 最後の end が outer の end
+    for (var j = lines.length - 1; j >= 0; j--) {
+      if (lines[j].trim() === 'end') { if (outerEndIdx === -1) outerEndIdx = j; else { innerEndIdx = j; break; } }
+    }
+    expect(newIdx).toBeGreaterThan(innerEndIdx); // 内側 end より後
+    expect(newIdx).toBeLessThan(outerEndIdx);    // 外側 end より前
+  });
+});
