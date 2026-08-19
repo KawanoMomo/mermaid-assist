@@ -4,9 +4,17 @@ window.MA.modules = window.MA.modules || {};
 
 window.MA.modules.blockBeta = (function() {
   var COLUMNS_RE = /^columns\s+(\d+)\s*$/;
-  var GROUP_START_RE = /^block:([A-Za-z_][A-Za-z0-9_-]*)\s*(?:columns\s+\d+)?\s*$/;
+  // `block:id`, `block:id columns N`, and the column-span form `block:id:N`.
+  // Every place that asks "is this a group start?" must use this one regex —
+  // a depth counter and an identity check that disagree will pair the wrong
+  // braces and delete the wrong range.
+  var GROUP_START_RE = /^block:([A-Za-z_][A-Za-z0-9_-]*)(?::\d+)?\s*(?:columns\s+\d+)?\s*$/;
   var BLOCK_TOKEN_RE = /([A-Za-z_][A-Za-z0-9_-]*)(?:\["([^"]*)"\]|\(\("([^"]*)"\)\)|\("([^"]*)"\))?/g;
   var LINK_RE = /^([A-Za-z_][A-Za-z0-9_-]*)\s*(?:--\s*"?([^"]*?)"?\s*)?-->\s*([A-Za-z_][A-Za-z0-9_-]*)\s*$/;
+
+  // 追加フォームの親グループ選択。renderProps は毎回パネルを作り直すので、
+  // 保持しないと同じ group へ続けて入れるたびに選び直しになる。
+  var lastAddParent = '';
 
   function parseBlock(text) {
     var result = { meta: { columns: null }, elements: [], relations: [] };
@@ -66,19 +74,47 @@ window.MA.modules.blockBeta = (function() {
     return lines.join('\n');
   }
 
+  // Index of the 'end' that closes the group opened at startIdx. Counts nesting
+  // depth: the first 'end' after a group start belongs to the innermost group,
+  // not necessarily to this one. Returns -1 when the group is left unclosed.
+  function findMatchingEnd(lines, startIdx) {
+    var depth = 0;
+    for (var j = startIdx; j < lines.length; j++) {
+      var t = lines[j].trim();
+      if (GROUP_START_RE.test(t)) {
+        depth++;
+      } else if (t === 'end') {
+        depth--;
+        if (depth === 0) return j;
+      }
+    }
+    return -1;
+  }
+
+  // Exact id match, not a prefix one: 'block:g10' must not answer to 'g1', or
+  // adding a block to g1 lands inside g10 whenever g10 appears first.
+  function isGroupStart(trimmed, id) {
+    var m = trimmed.match(GROUP_START_RE);
+    return !!m && m[1] === id;
+  }
+
   function addNestedBlock(text, parentId, id, label) {
     var token = label && label !== id ? id + '["' + label + '"]' : id;
     var lines = text.split('\n');
     for (var i = 0; i < lines.length; i++) {
-      var t = lines[i].trim();
-      if (t === 'block:' + parentId || t.indexOf('block:' + parentId) === 0) {
-        // Find matching end
-        for (var j = i + 1; j < lines.length; j++) {
-          if (lines[j].trim() === 'end') {
-            lines.splice(j, 0, '    ' + token);
-            return lines.join('\n');
-          }
-        }
+      if (isGroupStart(lines[i].trim(), parentId)) {
+        var endIdx = findMatchingEnd(lines, i);
+        if (endIdx === -1) return text;
+        // Indent one step past the parent rather than a fixed four spaces. The text
+        // is the source of truth here, so a child sitting at its parent's depth
+        // reads as a sibling — the diagram is right but the diff lies about it.
+        // Follow the parent's indent character too: mixing a tab-indented file with
+        // spaces makes the new line look shallower than its siblings.
+        var parentIndent = lines[i].match(/^(\s*)/)[1] || '';
+        var step = parentIndent.indexOf('\t') !== -1 ? '\t' : '  ';
+        var indent = parentIndent + step;
+        lines.splice(endIdx, 0, indent + token);
+        return lines.join('\n');
       }
     }
     return text;
@@ -93,18 +129,50 @@ window.MA.modules.blockBeta = (function() {
     return lines.join('\n');
   }
 
+  // Ids the parser itself recognises in `text`. Reusing parseBlock rather than
+  // re-scanning tokens keeps this in step with the shapes the module supports,
+  // including its keyword guards for `block` / `end` / `columns`.
+  // How much a delete would actually remove, counted by running it and diffing the
+  // parse. A group takes its contents and every link into them, so the row label
+  // alone cannot tell the user what a single ✕ is about to cost.
+  function deletionImpact(text, el) {
+    var before = parseBlock(text);
+    var after = parseBlock(deleteBlock(text, el.line, el.id));
+    return {
+      elements: before.elements.length - after.elements.length,
+      relations: before.relations.length - after.relations.length,
+    };
+  }
+
+  function collectIds(text) {
+    var ids = [];
+    var parsed = parseBlock(text);
+    for (var i = 0; i < parsed.elements.length; i++) {
+      var id = parsed.elements[i].id;
+      if (id && ids.indexOf(id) === -1) ids.push(id);
+    }
+    return ids;
+  }
+
   function deleteBlock(text, lineNum, blockId) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var trimmed = lines[idx].trim();
 
+    // Ids present before the delete, so the cascade below can work out which
+    // ones actually disappeared rather than guessing from the raw text. Scanning
+    // tokens by hand mis-reads label words as ids for any shape the token regex
+    // does not cover (e.g. `d{"Decision Node"}`), which silently killed links
+    // between blocks that were never deleted.
+    var idsBefore = collectIds(text);
+
     // Group block:ID ... end
-    if (trimmed === 'block:' + blockId || trimmed.indexOf('block:' + blockId) === 0) {
-      var endIdx = idx;
-      for (var j = idx + 1; j < lines.length; j++) {
-        if (lines[j].trim() === 'end') { endIdx = j; break; }
-      }
+    if (isGroupStart(trimmed, blockId)) {
+      var endIdx = findMatchingEnd(lines, idx);
+      // An unclosed group (the user deleted its `end` mid-edit) must not swallow
+      // the rest of the file; drop the header line alone and leave the body.
+      if (endIdx === -1) endIdx = idx;
       lines.splice(idx, endIdx - idx + 1);
     } else {
       // Remove just this block token from the line, or whole line if only this token
@@ -120,12 +188,20 @@ window.MA.modules.blockBeta = (function() {
         lines[idx] = indent + kept.join(' ');
       }
     }
-    // Cascade: remove links referencing this blockId
+    // Cascade: drop links whose endpoint no longer exists. Comparing the id sets
+    // before and after keeps two cases honest — an id that also lives outside the
+    // deleted range survives, so its links stay; and a link that was already
+    // dangling before this edit is left exactly as the user wrote it.
+    var result = lines.join('\n');
+    var idsAfter = collectIds(result);
+    var removedIds = idsBefore.filter(function(id) { return idsAfter.indexOf(id) === -1; });
+    if (removedIds.length === 0) return result;
+
     var linkRe = /^(\s*)([A-Za-z_][A-Za-z0-9_-]*)\s*(?:--\s*"?[^"]*?"?\s*)?-->\s*([A-Za-z_][A-Za-z0-9_-]*)\s*$/;
-    lines = lines.filter(function(ln) {
+    lines = result.split('\n').filter(function(ln) {
       var m = ln.match(linkRe);
       if (!m) return true;
-      return m[2] !== blockId && m[3] !== blockId;
+      return removedIds.indexOf(m[2]) === -1 && removedIds.indexOf(m[3]) === -1;
     });
     return lines.join('\n');
   }
@@ -219,17 +295,33 @@ window.MA.modules.blockBeta = (function() {
           .concat(groups.map(function(g) { return { value: g.id, label: 'block:' + g.id }; }));
         if (allBlockOpts.length === 0) allBlockOpts = [{ value: '', label: '（ブロック／グループを先に追加）' }];
 
-        var groupOpts = [{ value: '', label: '（なし・トップレベル）' }].concat(
-          groups.map(function(g) { return { value: g.id, label: g.id }; })
+        // 親グループの選択は再描画をまたいで保持する。同じ group に続けて入れる
+        // ケースが普通なので、毎回「なし」に戻ると選び直しが要る。
+        var groupOpts = [{ value: '', label: '（なし・トップレベル）', selected: !lastAddParent }].concat(
+          groups.map(function(g) {
+            var depth = 0, cur = g;
+            while (cur && cur.parentId) {
+              depth++;
+              cur = groups.filter(function(x) { return x.id === cur.parentId; })[0];
+            }
+            var indent = new Array(depth + 1).join('　');
+            return { value: g.id, label: indent + g.id, selected: g.id === lastAddParent };
+          })
         );
 
         var blocksList = '';
         for (var i = 0; i < blocks.length; i++) {
           var b = blocks[i];
+          var bImpact = deletionImpact(ctx.getMmdText(), b);
+          var bExtra = bImpact.elements + bImpact.relations;
           blocksList += P.listItemHtml({
             label: b.label !== b.id ? b.id + ' ("' + b.label + '")' : b.id,
             sublabel: b.parentId ? '(in ' + b.parentId + ')' : '',
             selectClass: 'block-select-block', deleteClass: 'block-delete-block',
+            deleteLabel: bExtra > 1 ? '✕' + bExtra : '✕',
+            deleteTitle: bExtra > 1
+              ? ('削除すると ' + bImpact.elements + ' 要素 / ' + bImpact.relations + ' リンクが消えます')
+              : '削除',
             dataElementId: b.id, dataLine: b.line,
           });
         }
@@ -238,9 +330,18 @@ window.MA.modules.blockBeta = (function() {
         var groupsList = '';
         for (var gi = 0; gi < groups.length; gi++) {
           var g = groups[gi];
+          // 1クリックで group 配下がまとめて消えるので、実際に消える数をボタンに出す。
+          // 行のラベルはパネル幅で切れるため、警告はボタン側に置く。
+          var gImpact = deletionImpact(ctx.getMmdText(), g);
+          var gExtra = gImpact.elements + gImpact.relations;
           groupsList += P.listItemHtml({
             label: 'block:' + g.id,
+            sublabel: g.parentId ? '(in ' + g.parentId + ')' : '',
             selectClass: 'block-select-group', deleteClass: 'block-delete-group',
+            deleteLabel: gExtra > 1 ? '✕' + gExtra : '✕',
+            deleteTitle: gExtra > 1
+              ? ('削除すると ' + gImpact.elements + ' 要素 / ' + gImpact.relations + ' リンクが消えます')
+              : '削除',
             dataElementId: g.id, dataLine: g.line,
           });
         }
@@ -309,6 +410,7 @@ window.MA.modules.blockBeta = (function() {
           var id = document.getElementById('block-add-id').value.trim();
           var label = document.getElementById('block-add-label').value.trim();
           var parent = document.getElementById('block-add-parent').value;
+          lastAddParent = parent;
           if (!id) { alert('ID は必須です'); return; }
           window.MA.history.pushHistory();
           if (parent) {
@@ -470,7 +572,7 @@ window.MA.modules.blockBeta = (function() {
       },
     },
     addBlock: addBlock, addNestedBlock: addNestedBlock, addLink: addLink,
-    deleteBlock: deleteBlock, deleteLink: deleteLink,
+    deleteBlock: deleteBlock, deleteLink: deleteLink, deletionImpact: deletionImpact,
     updateBlockLabel: updateBlockLabel, updateLink: updateLink, setColumns: setColumns,
   };
 })();

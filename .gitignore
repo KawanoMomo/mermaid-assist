@@ -3,3 +3,7 @@ node_modules/
 *.log
 test-results/
 playwright-report/
+
+# 検証証跡 (visual sweep スクリーンショット / evaluator レポート)
+# ローカル保持のみ。リポジトリにはコミットしない (2026-08-18 方針変更)
+.eval/
