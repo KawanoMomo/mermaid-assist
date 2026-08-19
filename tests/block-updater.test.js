@@ -401,3 +401,74 @@ describe('未閉じ group', function() {
     expect(out).toContain('aa --> dd');
   });
 });
+
+// ── ユーザーレビュー指摘 (B1/B2) ──────────────────────────────────────────
+describe('B1: 入れ子への挿入インデント', function() {
+  var T = [
+    'block-beta',            // 1
+    '  block:ecu',           // 2
+    '    block:periph',      // 3
+    '      uart["UART"]',    // 4
+    '    end',               // 5
+    '  end',                 // 6
+    ''
+  ].join('\n');
+
+  test('B1a: 深さ2の group へ追加すると親より1段深いインデントになる', function() {
+    var out = block.addNestedBlock(T, 'periph', 'can', 'CAN');
+    var lines = out.split('\n');
+    var canLine = lines.filter(function(l) { return l.indexOf('can') >= 0; })[0];
+    var periphLine = lines.filter(function(l) { return l.trim() === 'block:periph'; })[0];
+    var canIndent = canLine.match(/^(\s*)/)[1].length;
+    var periphIndent = periphLine.match(/^(\s*)/)[1].length;
+    expect(canIndent).toBe(periphIndent + 2);
+  });
+
+  test('B1b: 深さ1の group でも同じ規則', function() {
+    var out = block.addNestedBlock(T, 'ecu', 'pwr', 'PWR');
+    var lines = out.split('\n');
+    var pwrLine = lines.filter(function(l) { return l.indexOf('pwr') >= 0; })[0];
+    var ecuLine = lines.filter(function(l) { return l.trim() === 'block:ecu'; })[0];
+    expect(pwrLine.match(/^(\s*)/)[1].length).toBe(ecuLine.match(/^(\s*)/)[1].length + 2);
+  });
+
+  test('B1c: 既存の子要素と同じインデントに揃う', function() {
+    var out = block.addNestedBlock(T, 'periph', 'can', 'CAN');
+    var lines = out.split('\n');
+    var uart = lines.filter(function(l) { return l.indexOf('uart') >= 0; })[0];
+    var can = lines.filter(function(l) { return l.indexOf('can') >= 0; })[0];
+    expect(can.match(/^(\s*)/)[1].length).toBe(uart.match(/^(\s*)/)[1].length);
+  });
+});
+
+describe('B2: 削除の影響件数', function() {
+  test('B2a: deletionImpact が group 配下の要素とリンクを数える', function() {
+    var t = [
+      'block-beta',
+      '  block:ecu',
+      '    block:periph',
+      '      uart["UART"]',
+      '    end',
+      '    cpu["CPU"]',
+      '  end',
+      '  ext["EXT"]',
+      '  uart --> ext',
+      ''
+    ].join('\n');
+    var p = block.parseBlock(t);
+    var ecu = p.elements.filter(function(e) { return e.id === 'ecu'; })[0];
+    var impact = block.deletionImpact(t, ecu);
+    // ecu + periph + uart + cpu = 4 要素、uart --> ext = 1 リンク
+    expect(impact.elements).toBe(4);
+    expect(impact.relations).toBe(1);
+  });
+
+  test('B2b: 単独ブロックなら影響は自分だけ', function() {
+    var t = 'block-beta\n  a["A"]\n  b["B"]\n';
+    var p = block.parseBlock(t);
+    var a = p.elements.filter(function(e) { return e.id === 'a'; })[0];
+    var impact = block.deletionImpact(t, a);
+    expect(impact.elements).toBe(1);
+    expect(impact.relations).toBe(0);
+  });
+});

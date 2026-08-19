@@ -12,6 +12,10 @@ window.MA.modules.blockBeta = (function() {
   var BLOCK_TOKEN_RE = /([A-Za-z_][A-Za-z0-9_-]*)(?:\["([^"]*)"\]|\(\("([^"]*)"\)\)|\("([^"]*)"\))?/g;
   var LINK_RE = /^([A-Za-z_][A-Za-z0-9_-]*)\s*(?:--\s*"?([^"]*?)"?\s*)?-->\s*([A-Za-z_][A-Za-z0-9_-]*)\s*$/;
 
+  // 追加フォームの親グループ選択。renderProps は毎回パネルを作り直すので、
+  // 保持しないと同じ group へ続けて入れるたびに選び直しになる。
+  var lastAddParent = '';
+
   function parseBlock(text) {
     var result = { meta: { columns: null }, elements: [], relations: [] };
     if (!text || !text.trim()) return result;
@@ -101,7 +105,11 @@ window.MA.modules.blockBeta = (function() {
       if (isGroupStart(lines[i].trim(), parentId)) {
         var endIdx = findMatchingEnd(lines, i);
         if (endIdx === -1) return text;
-        lines.splice(endIdx, 0, '    ' + token);
+        // Indent one step past the parent rather than a fixed four spaces. The text
+        // is the source of truth here, so a child sitting at its parent's depth
+        // reads as a sibling — the diagram is right but the diff lies about it.
+        var indent = (lines[i].match(/^(\s*)/)[1] || '') + '  ';
+        lines.splice(endIdx, 0, indent + token);
         return lines.join('\n');
       }
     }
@@ -120,6 +128,18 @@ window.MA.modules.blockBeta = (function() {
   // Ids the parser itself recognises in `text`. Reusing parseBlock rather than
   // re-scanning tokens keeps this in step with the shapes the module supports,
   // including its keyword guards for `block` / `end` / `columns`.
+  // How much a delete would actually remove, counted by running it and diffing the
+  // parse. A group takes its contents and every link into them, so the row label
+  // alone cannot tell the user what a single ✕ is about to cost.
+  function deletionImpact(text, el) {
+    var before = parseBlock(text);
+    var after = parseBlock(deleteBlock(text, el.line, el.id));
+    return {
+      elements: before.elements.length - after.elements.length,
+      relations: before.relations.length - after.relations.length,
+    };
+  }
+
   function collectIds(text) {
     var ids = [];
     var parsed = parseBlock(text);
@@ -271,17 +291,33 @@ window.MA.modules.blockBeta = (function() {
           .concat(groups.map(function(g) { return { value: g.id, label: 'block:' + g.id }; }));
         if (allBlockOpts.length === 0) allBlockOpts = [{ value: '', label: '（ブロック／グループを先に追加）' }];
 
-        var groupOpts = [{ value: '', label: '（なし・トップレベル）' }].concat(
-          groups.map(function(g) { return { value: g.id, label: g.id }; })
+        // 親グループの選択は再描画をまたいで保持する。同じ group に続けて入れる
+        // ケースが普通なので、毎回「なし」に戻ると選び直しが要る。
+        var groupOpts = [{ value: '', label: '（なし・トップレベル）', selected: !lastAddParent }].concat(
+          groups.map(function(g) {
+            var depth = 0, cur = g;
+            while (cur && cur.parentId) {
+              depth++;
+              cur = groups.filter(function(x) { return x.id === cur.parentId; })[0];
+            }
+            var indent = new Array(depth + 1).join('　');
+            return { value: g.id, label: indent + g.id, selected: g.id === lastAddParent };
+          })
         );
 
         var blocksList = '';
         for (var i = 0; i < blocks.length; i++) {
           var b = blocks[i];
+          var bImpact = deletionImpact(ctx.getMmdText(), b);
+          var bExtra = bImpact.elements + bImpact.relations;
           blocksList += P.listItemHtml({
             label: b.label !== b.id ? b.id + ' ("' + b.label + '")' : b.id,
             sublabel: b.parentId ? '(in ' + b.parentId + ')' : '',
             selectClass: 'block-select-block', deleteClass: 'block-delete-block',
+            deleteLabel: bExtra > 1 ? '✕' + bExtra : '✕',
+            deleteTitle: bExtra > 1
+              ? ('削除すると ' + bImpact.elements + ' 要素 / ' + bImpact.relations + ' リンクが消えます')
+              : '削除',
             dataElementId: b.id, dataLine: b.line,
           });
         }
@@ -290,9 +326,18 @@ window.MA.modules.blockBeta = (function() {
         var groupsList = '';
         for (var gi = 0; gi < groups.length; gi++) {
           var g = groups[gi];
+          // 1クリックで group 配下がまとめて消えるので、実際に消える数をボタンに出す。
+          // 行のラベルはパネル幅で切れるため、警告はボタン側に置く。
+          var gImpact = deletionImpact(ctx.getMmdText(), g);
+          var gExtra = gImpact.elements + gImpact.relations;
           groupsList += P.listItemHtml({
             label: 'block:' + g.id,
+            sublabel: g.parentId ? '(in ' + g.parentId + ')' : '',
             selectClass: 'block-select-group', deleteClass: 'block-delete-group',
+            deleteLabel: gExtra > 1 ? '✕' + gExtra : '✕',
+            deleteTitle: gExtra > 1
+              ? ('削除すると ' + gImpact.elements + ' 要素 / ' + gImpact.relations + ' リンクが消えます')
+              : '削除',
             dataElementId: g.id, dataLine: g.line,
           });
         }
@@ -361,6 +406,7 @@ window.MA.modules.blockBeta = (function() {
           var id = document.getElementById('block-add-id').value.trim();
           var label = document.getElementById('block-add-label').value.trim();
           var parent = document.getElementById('block-add-parent').value;
+          lastAddParent = parent;
           if (!id) { alert('ID は必須です'); return; }
           window.MA.history.pushHistory();
           if (parent) {
@@ -522,7 +568,7 @@ window.MA.modules.blockBeta = (function() {
       },
     },
     addBlock: addBlock, addNestedBlock: addNestedBlock, addLink: addLink,
-    deleteBlock: deleteBlock, deleteLink: deleteLink,
+    deleteBlock: deleteBlock, deleteLink: deleteLink, deletionImpact: deletionImpact,
     updateBlockLabel: updateBlockLabel, updateLink: updateLink, setColumns: setColumns,
   };
 })();

@@ -103,8 +103,13 @@ window.MA.properties = (function() {
     if (opts.dataEndLine !== undefined) dataAttrs += ' data-end-line="' + opts.dataEndLine + '"';
     var selectBtn = opts.selectClass ?
       '<button class="' + opts.selectClass + '"' + dataAttrs + ' style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' : '';
+    // deleteLabel / deleteTitle let a module warn about a cascading delete on the
+    // button itself. The row's text is ellipsised at the panel width, so a warning
+    // placed in the label is frequently invisible.
+    var delLabel = opts.deleteLabel ? escHtml(opts.deleteLabel) : '✕';
+    var delTitle = opts.deleteTitle ? ' title="' + escHtml(opts.deleteTitle) + '"' : '';
     var deleteBtn = opts.deleteClass ?
-      '<button class="' + opts.deleteClass + '"' + dataAttrs + ' style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' : '';
+      '<button class="' + opts.deleteClass + '"' + dataAttrs + delTitle + ' style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">' + delLabel + '</button>' : '';
     return '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
       '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + fontStyle + '">' + escHtml(opts.label) + sub + '</div>' +
       selectBtn + deleteBtn +
