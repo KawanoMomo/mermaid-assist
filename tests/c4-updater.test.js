@@ -115,13 +115,14 @@ describe('deleteBoundary: 範囲削除', function() {
     expect(out).toContain('Person(u, "User")');
   });
 
-  test('U7: 内側の境界だけ削除すると外側は保持される', function() {
+  test('U7: 内側の境界だけ削除しても外側に兄弟が残っていれば外側は保持される', function() {
     var t = [
       'C4Context',
       '    System_Boundary(outer, "外") {',
       '        System_Boundary(inner, "内") {',
       '            System(s1, "S")',
       '        }',
+      '        System(sib, "兄弟")',
       '    }',
       ''
     ].join('\n');
@@ -129,8 +130,29 @@ describe('deleteBoundary: 範囲削除', function() {
     var i = p.elements.filter(function(e) { return e.id === 'inner'; })[0];
     var out = c4.deleteBoundary(t, i.line, i.endLine);
     expect(out).toContain('System_Boundary(outer, "外") {');
+    expect(out).toContain('System(sib, "兄弟")');
     expect(out).not.toContain('inner');
     expect(out.split('\n').filter(function(l) { return l.trim() === '}'; }).length).toBe(1);
+  });
+
+  test('U8: 内側の境界が外側の唯一の中身なら外側も畳まれる', function() {
+    // 空の境界は mermaid が描画できないため、外側を残すと不正な図になる
+    var t = [
+      'C4Context',
+      '    System_Boundary(outer, "外") {',
+      '        System_Boundary(inner, "内") {',
+      '            System(s1, "S")',
+      '        }',
+      '    }',
+      '    Person(u, "U")',
+      ''
+    ].join('\n');
+    var p = c4.parseC4(t);
+    var i = p.elements.filter(function(e) { return e.id === 'inner'; })[0];
+    var out = c4.deleteBoundary(t, i.line, i.endLine);
+    expect(out).not.toContain('System_Boundary');
+    expect(out.split('\n').filter(function(l) { return l.trim() === '}'; }).length).toBe(0);
+    expect(out).toContain('Person(u, "U")');
   });
 });
 
@@ -291,5 +313,122 @@ describe('リレーションのカスケード', function() {
     var s = p.elements.filter(function(e) { return e.id === 's1'; })[0];
     var out = c4.deleteElementLine(t, s.line);
     expect(out).toContain('Rel(u, s2, "keeps")');
+  });
+});
+
+describe('%% の引用符内外', function() {
+  test('N1: ラベル中の %% を行末コメントと誤認しない', function() {
+    var t = [
+      'C4Context',
+      '    System_Boundary(b1, "進捗 50%% 済") {',
+      '        System(s1, "S")',
+      '    }',
+      '    Person(u, "U")',
+      ''
+    ].join('\n');
+    var p = c4.parseC4(t);
+    var b = p.elements.filter(function(e) { return e.id === 'b1'; })[0];
+    expect(b.endLine).toBe(4);
+    var out = c4.deleteBoundary(t, b.line, b.endLine);
+    expect(out).not.toContain('}');
+    expect(out).toContain('Person(u, "U")');
+  });
+});
+
+describe('{ を次行に書く形式', function() {
+  var T = [
+    'C4Context',                        // 1
+    '    System_Boundary(b1, "X")',     // 2
+    '    {',                            // 3
+    '        System(s1, "S")',          // 4
+    '    }',                            // 5
+    '    Person(u, "U")',               // 6
+    ''
+  ].join('\n');
+
+  test('C3a: 境界として認識され endLine が対応する } を指す', function() {
+    var p = c4.parseC4(T);
+    var b = p.elements.filter(function(e) { return e.id === 'b1'; })[0];
+    expect(b.isBoundary).toBe(true);
+    expect(b.endLine).toBe(5);
+  });
+
+  test('C3b: 削除で { } が孤児化しない', function() {
+    var p = c4.parseC4(T);
+    var b = p.elements.filter(function(e) { return e.id === 'b1'; })[0];
+    var out = c4.deleteBoundary(T, b.line, b.endLine);
+    expect(out).not.toContain('{');
+    expect(out).not.toContain('}');
+    expect(out).toContain('Person(u, "U")');
+  });
+});
+
+describe('プレースホルダ id の衝突', function() {
+  test('M1: 既存 id と衝突しない子要素 id を生成する', function() {
+    var t1 = c4.addElement('C4Context\n', 'System_Boundary', 'b1', '境界1');
+    var t2 = c4.addElement(t1, 'System_Boundary', 'b1_sys', '境界2');
+    var p = c4.parseC4(t2);
+    var ids = p.elements.map(function(e) { return e.id; });
+    var seen = {}, dup = [];
+    ids.forEach(function(id) { if (seen[id]) dup.push(id); seen[id] = true; });
+    expect(dup.length).toBe(0);
+  });
+});
+
+describe('行末コメント付き要素と (n 要素を含む)', function() {
+  test('M2a: 行末コメント付きの要素行も parse される', function() {
+    var t = 'C4Context\n    System(a, "A") %% メモ\n    Person(u, "U")\n';
+    var p = c4.parseC4(t);
+    var ids = p.elements.map(function(e) { return e.id; });
+    expect(ids).toContain('a');
+  });
+
+  test('M2b: 行末コメント付きのリレーション行も parse される', function() {
+    var t = 'C4Context\n    System(a, "A")\n    Person(u, "U")\n    Rel(u, a, "uses") %% メモ\n';
+    var p = c4.parseC4(t);
+    expect(p.relations.length).toBe(1);
+  });
+});
+
+describe('Kind セレクタのフォールバック', function() {
+  test('m1: 候補に無い kind でも先頭が誤選択されない', function() {
+    // ELEMENT_KINDS を境界/非境界で絞ったとき、選択中の kind が候補から漏れても
+    // 表示が Person に化けないこと。kindOptionsFor が選択中の kind を必ず含む。
+    var opts = c4.kindOptionsFor('Person', false);
+    var selected = opts.filter(function(o) { return o.selected; });
+    expect(selected.length).toBe(1);
+    expect(selected[0].value).toBe('Person');
+    var optsB = c4.kindOptionsFor('System_Boundary', true);
+    var selB = optsB.filter(function(o) { return o.selected; });
+    expect(selB[0].value).toBe('System_Boundary');
+  });
+});
+
+describe('operations API の境界対応', function() {
+  var T = [
+    'C4Context',
+    '    System_Boundary(b1, "X") {',
+    '        System(s1, "S")',
+    '    }',
+    '    Person(u, "U")',
+    ''
+  ].join('\n');
+
+  test('M3a: operations.delete が境界行なら範囲削除する', function() {
+    var out = c4.operations.delete(T, 2);
+    expect(out).not.toContain('System_Boundary');
+    expect(out).not.toContain('}');
+    expect(out).toContain('Person(u, "U")');
+  });
+
+  test('M3b: operations.moveUp/moveDown は境界行では何もしない', function() {
+    expect(c4.operations.moveUp(T, 2)).toBe(T);
+    expect(c4.operations.moveDown(T, 2)).toBe(T);
+  });
+
+  test('M3c: operations.delete が非境界要素でも空境界を残さない', function() {
+    var out = c4.operations.delete(T, 3);
+    expect(out).not.toContain('System_Boundary');
+    expect(out).toContain('Person(u, "U")');
   });
 });

@@ -33,6 +33,7 @@ window.MA.modules.c4 = (function() {
   function matchBraces(lines) {
     var pairs = {};
     var stack = [];
+    var lastMeaningful = -1;
     for (var i = 0; i < lines.length; i++) {
       // mermaid accepts a trailing comment after the closing brace ('} %% close'),
       // so strip it before testing — otherwise the brace goes uncounted and the
@@ -42,18 +43,31 @@ window.MA.modules.c4 = (function() {
       if (t === '}') {
         var open = stack.pop();
         if (open !== undefined) pairs[open] = i;
+      } else if (t === '{') {
+        // `Kind(...)` on one line and `{` on the next is valid mermaid. Attribute
+        // the opening brace to the element line above so callers can look the
+        // boundary up by the line the user actually selected.
+        stack.push(lastMeaningful === -1 ? i : lastMeaningful);
       } else if (t.charAt(t.length - 1) === '{') {
         stack.push(i);
       }
+      lastMeaningful = i;
     }
     return pairs;
   }
 
+  // Drop a trailing `%%` comment, but only when the marker is outside quotes —
+  // a label may legitimately contain one (`"進捗 50%% 済"` parses fine in mermaid),
+  // and cutting there would truncate the line mid-string.
   function stripComment(line) {
     var t = line.trim();
-    if (t.indexOf('%%') === 0) return '';
-    var at = t.indexOf('%%');
-    return at === -1 ? t : t.substring(0, at).trim();
+    var inQ = false;
+    for (var i = 0; i < t.length; i++) {
+      var ch = t.charAt(i);
+      if (ch === '"') { inQ = !inQ; continue; }
+      if (!inQ && ch === '%' && t.charAt(i + 1) === '%') return t.substring(0, i).trim();
+    }
+    return t;
   }
 
   function parseC4(text) {
@@ -66,8 +80,11 @@ window.MA.modules.c4 = (function() {
 
     for (var i = 0; i < lines.length; i++) {
       var lineNum = i + 1;
-      var trimmed = lines[i].trim();
-      if (!trimmed || trimmed.indexOf('%%') === 0) continue;
+      // Strip a trailing comment first: `System(a, "A") %% note` is valid mermaid,
+      // and matching against the raw line would leave that element out of the
+      // model entirely — invisible in the list, yet deleted by a range delete.
+      var trimmed = stripComment(lines[i]);
+      if (!trimmed) continue;
 
       var hm = trimmed.match(/^C4(Context|Container|Component|Dynamic|Deployment)/);
       if (hm) { result.meta.variant = hm[1]; continue; }
@@ -92,11 +109,16 @@ window.MA.modules.c4 = (function() {
           } else {
             el.descr = args[2] || '';
           }
-          // Block form: 'Kind(...) {' … '}'. Record it so updateElement can keep
-          // the brace and deleteBoundary can remove the whole range.
-          if (trimmed.charAt(trimmed.length - 1) === '{') {
+          // Block form: 'Kind(...) {' … '}', or the brace on the following line.
+          // Both are recorded by matchBraces against this element's index, so the
+          // depth counter and the boundary check read the same source and cannot
+          // disagree about where the block ends.
+          if (bracePairs[i] !== undefined) {
             el.isBoundary = true;
-            el.endLine = bracePairs[i] !== undefined ? bracePairs[i] + 1 : lineNum;
+            el.endLine = bracePairs[i] + 1;
+          } else if (trimmed.charAt(trimmed.length - 1) === '{') {
+            el.isBoundary = true;
+            el.endLine = lineNum; // unclosed block
           }
           result.elements.push(el);
           break;
@@ -173,17 +195,51 @@ window.MA.modules.c4 = (function() {
     return kind === 'System_Boundary';
   }
 
+  // The boundary element occupying `lineNum`, or null when that line is not one.
+  function boundaryAt(text, lineNum) {
+    var parsed = parseC4(text);
+    for (var i = 0; i < parsed.elements.length; i++) {
+      var el = parsed.elements[i];
+      if (el.line === lineNum && el.isBoundary) return el;
+    }
+    return null;
+  }
+
+  function uniqueId(text, wanted) {
+    var taken = collectIds(text);
+    if (taken.indexOf(wanted) === -1) return wanted;
+    for (var n = 2; ; n++) {
+      if (taken.indexOf(wanted + n) === -1) return wanted + n;
+    }
+  }
+
+  // Kind options for the detail panel. A boundary may only stay a boundary and a
+  // plain element may not become one, because converting needs braces added or
+  // removed on two separate lines. The element's own kind is always included so
+  // an unlisted kind never silently displays as the first option instead.
+  function kindOptionsFor(kind, isBoundary) {
+    var list = ELEMENT_KINDS.filter(function(k) { return isBoundaryKind(k) === !!isBoundary; });
+    if (kind && list.indexOf(kind) === -1) list = [kind].concat(list);
+    return list.map(function(k) { return { value: k, label: k, selected: k === kind }; });
+  }
+
   function addElement(text, kind, id, label, descr, tech) {
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
+    // mermaid accepts a duplicate alias without complaint, but the property panel
+    // resolves a selection by first id match — so a duplicate silently hands the
+    // user a different element to edit or delete. Suffix rather than collide.
+    id = uniqueId(text, id);
     if (isBoundaryKind(kind)) {
       // mermaid v11 rejects an empty boundary ('Parse error … Expecting PERSON,
       // SYSTEM, …'), so a boundary is always created with one placeholder child
-      // that the user then renames or replaces.
+      // that the user then renames or replaces. mermaid accepts duplicate aliases
+      // silently, and renderProps resolves a selection by first id match, so a
+      // collision would hand the user someone else's element — pick a free name.
       lines.splice(insertAt, 0,
         '    ' + formatArgs(kind, id, label, descr, tech, true),
-        '        ' + formatArgs('System', id + '_sys', '新規要素'),
+        '        ' + formatArgs('System', uniqueId(text, id + '_sys'), '新規要素'),
         '    }');
     } else {
       lines.splice(insertAt, 0, '    ' + formatArgs(kind, id, label, descr, tech));
@@ -234,16 +290,11 @@ window.MA.modules.c4 = (function() {
     return after.split('\n').filter(function(_, idx) { return !dropLines[idx + 1]; }).join('\n');
   }
 
-  // Delete one element line, then collapse any boundary the delete would have
-  // left empty. mermaid rejects `Kind(...) { }` with nothing inside, so removing
-  // the last child of a boundary has to take the boundary with it — and that can
-  // cascade outwards when the boundary was itself an only child.
-  function deleteElementLine(text, lineNum) {
-    var lines = text.split('\n');
-    var idx = lineNum - 1;
-    if (idx < 0 || idx >= lines.length) return text;
-    lines.splice(idx, 1);
-
+  // Remove every boundary left with nothing inside, repeating outwards: taking
+  // the last child out of a boundary makes it empty, and mermaid will not render
+  // an empty one. Applies to both kinds of delete — removing a nested boundary
+  // empties its parent just as removing a plain element does.
+  function collapseEmptyBoundaries(lines) {
     for (;;) {
       var pairs = matchBraces(lines);
       var collapsed = false;
@@ -263,7 +314,16 @@ window.MA.modules.c4 = (function() {
       }
       if (!collapsed) break;
     }
-    return pruneDanglingRels(text, lines.join('\n'));
+    return lines;
+  }
+
+  // Delete one element line, then tidy up what that leaves behind.
+  function deleteElementLine(text, lineNum) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    lines.splice(idx, 1);
+    return pruneDanglingRels(text, collapseEmptyBoundaries(lines).join('\n'));
   }
 
   function deleteBoundary(text, startLine, endLine) {
@@ -273,7 +333,7 @@ window.MA.modules.c4 = (function() {
     if (from < 0 || from >= lines.length) return text;
     if (to < from || to >= lines.length) to = from;
     lines.splice(from, to - from + 1);
-    return pruneDanglingRels(text, lines.join('\n'));
+    return pruneDanglingRels(text, collapseEmptyBoundaries(lines).join('\n'));
   }
 
   function updateElement(text, lineNum, field, value) {
@@ -473,9 +533,7 @@ window.MA.modules.c4 = (function() {
         // added or removed on two separate lines, so the kind list is filtered:
         // a boundary can only stay a boundary, and a plain element cannot become
         // one. Boundaries are created from the add form instead.
-        var kOpts = ELEMENT_KINDS
-          .filter(function(k) { return isBoundaryKind(k) === !!el.isBoundary; })
-          .map(function(k) { return { value: k, label: k, selected: k === el.kind }; });
+        var kOpts = kindOptionsFor(el.kind, el.isBoundary);
         propsEl.innerHTML =
           P.panelHeaderHtml(el.id) +
           P.selectFieldHtml('Kind', 'c4-edit-kind', kOpts) +
@@ -575,7 +633,14 @@ window.MA.modules.c4 = (function() {
         if (ELEMENT_KINDS.indexOf(kind) >= 0) return addElement(text, kind, props.id, props.label, props.descr, props.tech);
         return text;
       },
-      delete: function(text, lineNum) { return deleteLine(text, lineNum); },
+      // Boundary-aware, like the property panel. These entry points are not wired
+      // up yet, but leaving them on the naive deleteLine/swapLines would bring the
+      // orphaned-brace bug straight back the day the registry starts calling them.
+      delete: function(text, lineNum) {
+        var b = boundaryAt(text, lineNum);
+        if (b) return deleteBoundary(text, b.line, b.endLine);
+        return deleteElementLine(text, lineNum);
+      },
       update: function(text, lineNum, field, value, opts) {
         opts = opts || {};
         if (opts.kind === 'rel') return updateRel(text, lineNum, field, value);
@@ -584,12 +649,15 @@ window.MA.modules.c4 = (function() {
         return updateElement(text, lineNum, field, value);
       },
       moveUp: function(text, lineNum) {
-        if (lineNum <= 1) return text;
+        // Swapping a boundary header with the line above tears the '{' away from
+        // the block it opens. Moving a whole block is a separate feature; refuse
+        // rather than corrupt.
+        if (lineNum <= 1 || boundaryAt(text, lineNum)) return text;
         return window.MA.textUpdater.swapLines(text, lineNum, lineNum - 1);
       },
       moveDown: function(text, lineNum) {
         var total = text.split('\n').length;
-        if (lineNum >= total) return text;
+        if (lineNum >= total || boundaryAt(text, lineNum)) return text;
         return window.MA.textUpdater.swapLines(text, lineNum, lineNum + 1);
       },
       connect: function(text, fromId, toId, props) {
@@ -601,7 +669,8 @@ window.MA.modules.c4 = (function() {
     addElement: addElement, addRel: addRel,
     updateElement: updateElement, updateRel: updateRel, deleteLine: deleteLine,
     deleteBoundary: deleteBoundary, isBoundaryKind: isBoundaryKind,
-    deleteElementLine: deleteElementLine,
+    deleteElementLine: deleteElementLine, kindOptionsFor: kindOptionsFor,
+    uniqueId: uniqueId, stripComment: stripComment,
     parseArgs: parseArgs,
   };
 })();
