@@ -34,8 +34,11 @@ window.MA.modules.c4 = (function() {
     var pairs = {};
     var stack = [];
     for (var i = 0; i < lines.length; i++) {
-      var t = lines[i].trim();
-      if (!t || t.indexOf('%%') === 0) continue;
+      // mermaid accepts a trailing comment after the closing brace ('} %% close'),
+      // so strip it before testing — otherwise the brace goes uncounted and the
+      // boundary looks unclosed.
+      var t = stripComment(lines[i]);
+      if (!t) continue;
       if (t === '}') {
         var open = stack.pop();
         if (open !== undefined) pairs[open] = i;
@@ -44,6 +47,13 @@ window.MA.modules.c4 = (function() {
       }
     }
     return pairs;
+  }
+
+  function stripComment(line) {
+    var t = line.trim();
+    if (t.indexOf('%%') === 0) return '';
+    var at = t.indexOf('%%');
+    return at === -1 ? t : t.substring(0, at).trim();
   }
 
   function parseC4(text) {
@@ -196,6 +206,66 @@ window.MA.modules.c4 = (function() {
   // Delete a boundary together with everything it encloses. Matches the delete
   // semantics of requirement/ER (container delete removes its contents) rather
   // than unwrapping, which would silently change what the diagram means.
+  // Element ids the parser recognises in `text`.
+  function collectIds(text) {
+    var ids = [];
+    var parsed = parseC4(text);
+    for (var i = 0; i < parsed.elements.length; i++) {
+      var id = parsed.elements[i].id;
+      if (id && ids.indexOf(id) === -1) ids.push(id);
+    }
+    return ids;
+  }
+
+  // Drop relations whose endpoint disappeared between `before` and `after`.
+  // Comparing the two id sets — rather than matching against the deleted line —
+  // leaves relations that were already dangling before this edit untouched.
+  function pruneDanglingRels(before, after) {
+    var idsBefore = collectIds(before);
+    var idsAfter = collectIds(after);
+    var removed = idsBefore.filter(function(id) { return idsAfter.indexOf(id) === -1; });
+    if (removed.length === 0) return after;
+    var parsed = parseC4(after);
+    var dropLines = {};
+    for (var i = 0; i < parsed.relations.length; i++) {
+      var r = parsed.relations[i];
+      if (removed.indexOf(r.from) !== -1 || removed.indexOf(r.to) !== -1) dropLines[r.line] = true;
+    }
+    return after.split('\n').filter(function(_, idx) { return !dropLines[idx + 1]; }).join('\n');
+  }
+
+  // Delete one element line, then collapse any boundary the delete would have
+  // left empty. mermaid rejects `Kind(...) { }` with nothing inside, so removing
+  // the last child of a boundary has to take the boundary with it — and that can
+  // cascade outwards when the boundary was itself an only child.
+  function deleteElementLine(text, lineNum) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    lines.splice(idx, 1);
+
+    for (;;) {
+      var pairs = matchBraces(lines);
+      var collapsed = false;
+      for (var openIdx in pairs) {
+        if (!Object.prototype.hasOwnProperty.call(pairs, openIdx)) continue;
+        var o = parseInt(openIdx, 10);
+        var closeIdx = pairs[o];
+        var empty = true;
+        for (var j = o + 1; j < closeIdx; j++) {
+          if (stripComment(lines[j])) { empty = false; break; }
+        }
+        if (empty) {
+          lines.splice(o, closeIdx - o + 1);
+          collapsed = true;
+          break; // indices shifted; recompute
+        }
+      }
+      if (!collapsed) break;
+    }
+    return pruneDanglingRels(text, lines.join('\n'));
+  }
+
   function deleteBoundary(text, startLine, endLine) {
     var lines = text.split('\n');
     var from = startLine - 1;
@@ -203,7 +273,7 @@ window.MA.modules.c4 = (function() {
     if (from < 0 || from >= lines.length) return text;
     if (to < from || to >= lines.length) to = from;
     lines.splice(from, to - from + 1);
-    return lines.join('\n');
+    return pruneDanglingRels(text, lines.join('\n'));
   }
 
   function updateElement(text, lineNum, field, value) {
@@ -387,7 +457,7 @@ window.MA.modules.c4 = (function() {
 
       P.bindSelectButtons(propsEl, 'c4-select-element', 'element');
       P.bindSelectButtons(propsEl, 'c4-select-rel', 'rel');
-      P.bindDeleteButtons(propsEl, 'c4-delete-element', ctx, deleteLine);
+      P.bindDeleteButtons(propsEl, 'c4-delete-element', ctx, deleteElementLine);
       P.bindDeleteButtons(propsEl, 'c4-delete-boundary', ctx, deleteBoundary, true);
       P.bindDeleteButtons(propsEl, 'c4-delete-rel', ctx, deleteLine);
       return;
@@ -428,7 +498,7 @@ window.MA.modules.c4 = (function() {
         P.bindEvent('c4-edit-delete', 'click', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(isB ? deleteBoundary(ctx.getMmdText(), ln, endLn)
-                             : deleteLine(ctx.getMmdText(), ln));
+                             : deleteElementLine(ctx.getMmdText(), ln));
           window.MA.selection.clearSelection();
           ctx.onUpdate();
         });
@@ -531,6 +601,7 @@ window.MA.modules.c4 = (function() {
     addElement: addElement, addRel: addRel,
     updateElement: updateElement, updateRel: updateRel, deleteLine: deleteLine,
     deleteBoundary: deleteBoundary, isBoundaryKind: isBoundaryKind,
+    deleteElementLine: deleteElementLine,
     parseArgs: parseArgs,
   };
 })();
