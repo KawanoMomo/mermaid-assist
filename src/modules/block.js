@@ -83,8 +83,11 @@ window.MA.modules.blockBeta = (function() {
     return -1;
   }
 
+  // Exact id match, not a prefix one: 'block:g10' must not answer to 'g1', or
+  // adding a block to g1 lands inside g10 whenever g10 appears first.
   function isGroupStart(trimmed, id) {
-    return trimmed === 'block:' + id || trimmed.indexOf('block:' + id) === 0;
+    var m = trimmed.match(GROUP_START_RE);
+    return !!m && m[1] === id;
   }
 
   function addNestedBlock(text, parentId, id, label) {

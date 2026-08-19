@@ -241,3 +241,49 @@ describe('addNestedBlock: 入れ子 group がある親への追加', function() 
     expect(newIdx).toBeLessThan(outerEndIdx);    // 外側 end より前
   });
 });
+
+describe('group id の前方一致衝突', function() {
+  var TWO = [
+    'block-beta',       // 1
+    '  block:g10',      // 2
+    '    x',            // 3
+    '  end',            // 4
+    '  block:g1',       // 5
+    '    y',            // 6
+    '  end',            // 7
+    ''
+  ].join('\n');
+
+  test('B7: addNestedBlock は g1 を指定したとき g10 に入れない', function() {
+    var out = block.addNestedBlock(TWO, 'g1', 'newb', 'New');
+    var lines = out.split('\n');
+    var newIdx = -1, g1Idx = -1, g10Idx = -1;
+    for (var i = 0; i < lines.length; i++) {
+      var t = lines[i].trim();
+      if (t === 'block:g10') g10Idx = i;
+      if (t === 'block:g1') g1Idx = i;
+      if (lines[i].indexOf('newb') >= 0) newIdx = i;
+    }
+    expect(newIdx).toBeGreaterThan(g1Idx); // g1 の中に入っていること
+    expect(g1Idx).toBeGreaterThan(g10Idx); // 前提: g10 が先にある
+  });
+
+  test('B8: deleteBlock は行番号と id が食い違っても前方一致で誤爆しない', function() {
+    // 2行目は block:g10。blockId に g1 を渡しても group 扱いしてはいけない
+    var out = block.deleteBlock(TWO, 2, 'g1');
+    expect(out).toContain('block:g10');
+    expect(out).toContain('x');
+  });
+
+  test('B9: columns 付き group でも id を完全一致で判定する', function() {
+    var t = 'block-beta\n  block:g10 columns 2\n    x\n  end\n  block:g1\n    y\n  end\n';
+    var out = block.addNestedBlock(t, 'g1', 'nb', 'NB');
+    var lines = out.split('\n');
+    var nbIdx = -1, g1Idx = -1;
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].trim() === 'block:g1') g1Idx = i;
+      if (lines[i].indexOf('nb') >= 0) nbIdx = i;
+    }
+    expect(nbIdx).toBeGreaterThan(g1Idx);
+  });
+});
