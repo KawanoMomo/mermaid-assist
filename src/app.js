@@ -817,6 +817,12 @@ async function refresh(skipRender) {
     return;
   }
 
+  // Rebuild the whole mermaid config before every render. In detail mode the
+  // gantt width follows the project span, so it changes with each edit — and
+  // because initialize() replaces rather than merges, this has to be the single
+  // place that calls it.
+  applyMermaidConfig(parsed);
+
   // Render via mermaid.js
   var svgId = 'mermaid-svg-' + thisRender;
   try {
@@ -956,7 +962,81 @@ function setZoom(z) {
   }
 }
 
+// ── Gantt overview / detail mode ───────────────────────────────────────────
+// Gantt is the one diagram type mermaid lays out on a fixed-width canvas
+// (gantt.useWidth, default 1600) while keeping the font at 11px. Scaling that
+// down with CSS to make it fit shrinks the text too, so "fits on screen" and
+// "readable" were mutually exclusive. Controlling useWidth instead keeps the
+// font fixed and only changes how many pixels a day gets.
+var DETAIL_PX_PER_DAY = 24;
+var ganttViewMode = 'detail'; // 'detail' | 'overview'
+
+// The available width for a chart, minus padding and the vertical scrollbar. A
+// tall chart makes the scrollbar appear, which would otherwise push the chart
+// 6px past the edge and produce a horizontal scrollbar in "overview".
+function previewContentWidth() {
+  var c = document.getElementById('preview-container');
+  if (!c) return 800;
+  var scrollbar = c.offsetWidth - c.clientWidth;
+  return Math.max(200, c.clientWidth - 32 - scrollbar);
+}
+
+// Axis granularity has to move with the width: mermaid draws 10-12 ticks
+// regardless of how wide the canvas is, so a ten-year chart at 24px/day spaces
+// them ~8700px apart and prints every one of them as "01/01".
+function ganttAxisFor(days) {
+  if (days <= 92) return { tickInterval: '1week', axisFormat: '%m/%d' };
+  if (days <= 730) return { tickInterval: '1month', axisFormat: '%Y/%m' };
+  return { tickInterval: '3month', axisFormat: '%Y/%m' };
+}
+
+function ganttSpanDays(parsedData) {
+  if (!parsedData || !parsedData.tasks || !parsedData.tasks.length) return 0;
+  var min = null, max = null;
+  for (var i = 0; i < parsedData.tasks.length; i++) {
+    var t = parsedData.tasks[i];
+    if (t.startDate && (!min || t.startDate < min)) min = t.startDate;
+    if (t.endDate && (!max || t.endDate > max)) max = t.endDate;
+  }
+  if (!min || !max) return 0;
+  return Math.max(1, window.MA.dateUtils.daysBetween(min, max) || 0);
+}
+
+// mermaid.initialize replaces the config rather than merging into it: passing
+// only {gantt:{...}} silently resets theme to default and securityLevel to
+// strict. Every call goes through here so the full object is always supplied,
+// and the mode lives in ganttViewMode rather than in mermaid's config — config
+// is derived state, so another initialize() elsewhere cannot lose it.
+function applyMermaidConfig(parsedData) {
+  var cfg = { startOnLoad: false, theme: 'dark', securityLevel: 'loose' };
+  if (currentModule && currentModule.type === 'gantt') {
+    var fitW = previewContentWidth();
+    var days = ganttSpanDays(parsedData);
+    var width = fitW;
+    if (ganttViewMode === 'detail' && days > 0) {
+      width = Math.max(fitW, Math.round(days * DETAIL_PX_PER_DAY));
+    }
+    var axis = ganttAxisFor(days || 1);
+    cfg.gantt = { useWidth: width, tickInterval: axis.tickInterval };
+  }
+  mermaid.initialize(cfg);
+}
+
+function setGanttViewMode(mode) {
+  ganttViewMode = mode;
+  if (zoomDisplayEl) zoomDisplayEl.textContent = mode === 'overview' ? '概観' : Math.round(zoom * 100) + '%';
+}
+
 function zoomToFit() {
+  // For gantt, "fit" means redraw at the container width so the labels stay
+  // 11px, not scale the drawing (and its text) down to 54%.
+  if (currentModule && currentModule.type === 'gantt') {
+    setGanttViewMode('overview');
+    setZoom(1.0);
+    setGanttViewMode('overview'); // setZoom rewrites the label
+    scheduleRefresh();
+    return;
+  }
   var svgEl = previewSvgEl ? previewSvgEl.querySelector('svg') : null;
   var previewContainer = document.getElementById('preview-container');
   if (!svgEl || !previewContainer) return;
@@ -1047,11 +1127,7 @@ function init() {
   zoomDisplayEl = document.getElementById('zoom-display');
 
   // Init mermaid.js
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: 'dark',
-    securityLevel: 'loose',
-  });
+  applyMermaidConfig(null);
 
   // Default content
   mmdText = [
@@ -1162,9 +1238,12 @@ function init() {
   document.getElementById('btn-redo').addEventListener('click', function() { window.MA.history.redo(); });
 
   document.getElementById('btn-zoom-in').addEventListener('click', function() {
+    // Touching the zoom means the user wants to inspect, not overview.
+    if (ganttViewMode === 'overview') { setGanttViewMode('detail'); setZoom(1.0); scheduleRefresh(); return; }
     setZoom(zoom + 0.1);
   });
   document.getElementById('btn-zoom-out').addEventListener('click', function() {
+    if (ganttViewMode === 'overview') { setGanttViewMode('detail'); setZoom(1.0); scheduleRefresh(); return; }
     setZoom(zoom - 0.1);
   });
   document.getElementById('btn-zoom-fit').addEventListener('click', function() {
@@ -1878,6 +1957,10 @@ function init() {
       var targetType = this.value;
       var mod = modules[targetType];
       if (!mod) return;
+      // Leaving gantt must not strand overview mode on another diagram type,
+      // and coming back to gantt should start from the normal detail view.
+      setGanttViewMode('detail');
+      setZoom(1.0);
       window.MA.history.pushHistory();
       mmdText = mod.template();
       suppressSync = true;
@@ -1907,5 +1990,8 @@ if (typeof __exportForTest === 'function') {
     deleteTask: deleteTask,
     daysBetween: window.MA.dateUtils.daysBetween,
     addDays: window.MA.dateUtils.addDays,
+    ganttAxisFor: ganttAxisFor,
+    ganttSpanDays: ganttSpanDays,
+    DETAIL_PX_PER_DAY: DETAIL_PX_PER_DAY,
   });
 }
