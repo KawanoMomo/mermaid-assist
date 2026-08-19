@@ -1008,9 +1008,14 @@ window.MA.modules.sequence = (function() {
           ]) +
           fieldHtml('ID', 'sel-part-id', part.id) +
           fieldHtml('ラベル', 'sel-part-label', part.label) +
+          // move は無効。moveParticipantUp/Down は行番号で単純 swap するだけで
+          // `box … end` の境界を見ない。実測では box 内の participant を上へ動かすと
+          // その participant が box の外へ出て、選択していない別の participant が
+          // box の中に入る。mermaid は box を解釈するので parse も render も通り、
+          // 無言で図の意味だけが変わる (敵対レビュー指摘)。
           props.actionBarHtml('sel-part', {
             insertBefore: false, insertAfter: false,
-            move: true,
+            move: false,
             delete: true,
             labels: { up: '← 左へ', down: '右へ →', delete: '参加者削除' },
           });
@@ -1091,8 +1096,11 @@ window.MA.modules.sequence = (function() {
           props.selectFieldHtml('Arrow', 'sel-msg-arrow', arrowOptsArr, true) +
           props.selectFieldHtml('To', 'sel-msg-to', toOptsArr) +
           '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label><div id="sel-msg-label-rle"></div></div>' +
+          // move は無効。_isMessageLine が「行内に矢印がある」だけで判定するため、
+          // `alt B->>C が失敗した場合` のようなブロック開始行をメッセージと誤判定し、
+          // メッセージが alt ブロックの中へ入り込む (敵対レビュー指摘)。
           props.actionBarHtml('sel-msg', {
-            insertBefore: true, insertAfter: true, move: true, delete: true,
+            insertBefore: true, insertAfter: true, move: false, delete: true,
             labels: { delete: 'メッセージ削除' },
           });
 

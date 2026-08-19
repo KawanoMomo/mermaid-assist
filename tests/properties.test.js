@@ -126,3 +126,35 @@ describe('テストフレームワーク自身の健全性', function() {
     expect(function() { expect(undefined).toContain('x'); }).toThrow('toContain expects');
   });
 });
+
+// ── move を無効化した状態を固定する ────────────────────────────────────────
+// これが無いと、誰かが move: true に戻しても CI が気づかない。
+// 実際に敵対レビューのミューテーション検査で「8箇所すべて true に戻しても
+// 385 passed」だったため、縮退が担保されていなかった。
+describe('move が有効なのは flowchart のノードだけ', function() {
+  var fsMod = require('fs');
+  var pathMod = require('path');
+  var srcDir = pathMod.resolve(__dirname, '..', 'src', 'modules');
+
+  function moveFlags(file) {
+    var text = fsMod.readFileSync(pathMod.join(srcDir, file), 'utf-8');
+    var re = /move:\s*(true|false)/g, m, out = [];
+    while ((m = re.exec(text)) !== null) out.push(m[1] === 'true');
+    return out;
+  }
+
+  // 述語がブロック構造 (box / alt / subgraph / ブロック形式クラス / コンポジット
+  // 状態 / 継続行) を見ていないため、これらのモジュールでは move が図を無言で壊す。
+  ['er.js', 'class.js', 'state.js', 'timeline.js', 'sequence.js'].forEach(function(f) {
+    test(f + ' は move を一切出さない', function() {
+      var flags = moveFlags(f);
+      expect(flags.length).toBeGreaterThan(0);
+      expect(flags.filter(function(v) { return v; }).length).toBe(0);
+    });
+  });
+
+  test('flowchart はノードパネルでのみ move を出す', function() {
+    var flags = moveFlags('flowchart.js');
+    expect(flags.filter(function(v) { return v; }).length).toBe(1);
+  });
+});
