@@ -432,3 +432,56 @@ describe('operations API の境界対応', function() {
     expect(out).toContain('Person(u, "U")');
   });
 });
+
+describe('ラベル中の丸括弧・行末コメントの保存', function() {
+  test('P1: 要素の descr 編集でラベル中の ) が切り詰められない', function() {
+    var t = 'C4Context\n    System(s1, "決済 (Core)")\n';
+    var p = c4.parseC4(t);
+    var out = c4.updateElement(t, p.elements[0].line, 'descr', '説明');
+    expect(out).toContain('System(s1, "決済 (Core)", "説明")');
+  });
+
+  test('P2: リレーションの tech 編集でラベル中の ) が切り詰められない', function() {
+    var t = 'C4Context\n    Rel(a, b, "呼出 (同期)")\n';
+    var p = c4.parseC4(t);
+    var out = c4.updateRel(t, p.relations[0].line, 'tech', 'HTTP');
+    expect(out).toContain('Rel(a, b, "呼出 (同期)", "HTTP")');
+  });
+
+  test('P3: 行末コメント付きの要素を編集してもコメントが残る', function() {
+    var t = 'C4Context\n    System(s1, "A") %% メモ\n';
+    var p = c4.parseC4(t);
+    var out = c4.updateElement(t, p.elements[0].line, 'label', 'B');
+    expect(out).toContain('System(s1, "B")');
+    expect(out).toContain('%% メモ');
+  });
+
+  // mermaid は開き { の後のコメントを受理しない (実機確認済み) ので、境界行に
+  // コメントを付ける入力はそもそも不正。閉じ } の後のコメントは受理される。
+  test('P4: 境界の label 編集で閉じ } の行末コメントが無傷', function() {
+    var t = 'C4Context\n    System_Boundary(b1, "X") {\n        System(s1, "S")\n    } %% 終了\n';
+    var p = c4.parseC4(t);
+    var b = p.elements.filter(function(e) { return e.id === 'b1'; })[0];
+    var out = c4.updateElement(t, b.line, 'label', 'Y');
+    expect(out).toContain('System_Boundary(b1, "Y") {');
+    expect(out).toContain('} %% 終了');
+  });
+
+  test('P6: 境界の中の行末コメント付き要素を編集しても構造が壊れない', function() {
+    var t = 'C4Context\n    System_Boundary(b1, "X") {\n        System(s1, "A") %% メモ\n    }\n';
+    var p = c4.parseC4(t);
+    var s = p.elements.filter(function(e) { return e.id === 's1'; })[0];
+    var out = c4.updateElement(t, s.line, 'label', 'B');
+    expect(out).toContain('System(s1, "B") %% メモ');
+    expect(out).toContain('System_Boundary(b1, "X") {');
+    expect(out.split('\n').filter(function(l) { return l.trim() === '}'; }).length).toBe(1);
+  });
+
+  test('P5: 行末コメント付きのリレーションを編集してもコメントが残る', function() {
+    var t = 'C4Context\n    Rel(a, b, "old") %% 備考\n';
+    var p = c4.parseC4(t);
+    var out = c4.updateRel(t, p.relations[0].line, 'label', 'new');
+    expect(out).toContain('Rel(a, b, "new")');
+    expect(out).toContain('%% 備考');
+  });
+});

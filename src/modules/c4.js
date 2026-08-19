@@ -60,14 +60,27 @@ window.MA.modules.c4 = (function() {
   // a label may legitimately contain one (`"進捗 50%% 済"` parses fine in mermaid),
   // and cutting there would truncate the line mid-string.
   function stripComment(line) {
+    var at = commentIndex(line);
+    var t = line.trim();
+    return at === -1 ? t : t.substring(0, at).trim();
+  }
+
+  // The ' %% …' tail of a line, or '' when there is none. Rewrites re-append it so
+  // editing a commented line does not silently drop the user's note.
+  function commentSuffix(line) {
+    var at = commentIndex(line);
+    return at === -1 ? '' : ' ' + line.trim().substring(at).trim();
+  }
+
+  function commentIndex(line) {
     var t = line.trim();
     var inQ = false;
     for (var i = 0; i < t.length; i++) {
       var ch = t.charAt(i);
       if (ch === '"') { inQ = !inQ; continue; }
-      if (!inQ && ch === '%' && t.charAt(i + 1) === '%') return t.substring(0, i).trim();
+      if (!inQ && ch === '%' && t.charAt(i + 1) === '%') return i;
     }
-    return t;
+    return -1;
   }
 
   function parseC4(text) {
@@ -341,16 +354,19 @@ window.MA.modules.c4 = (function() {
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var indent = lines[idx].match(/^(\s*)/)[1];
-    var trimmed = lines[idx].trim();
+    var comment = commentSuffix(lines[idx]);
+    var trimmed = stripComment(lines[idx]);
     // A trailing '{' means this line opens a block; it has to survive the rewrite
     // or the matching '}' below is orphaned and mermaid fails to parse.
     var hadBrace = trimmed.charAt(trimmed.length - 1) === '{';
-    var kindRe = null, matchedKind = null, km = null;
+    var matchedKind = null, km = null;
     for (var k = 0; k < ELEMENT_KINDS.length; k++) {
       var ki = ELEMENT_KINDS[k];
-      var rr = new RegExp('^' + ki + '\\s*\\(\\s*(.+?)\\s*\\)');
+      // Anchored and greedy, matching parseC4: a non-greedy unanchored `\)` stops
+      // at the first ')' and silently truncates labels like "決済 (Core)".
+      var rr = new RegExp('^' + ki + '\\s*\\(\\s*(.+)\\s*\\)\\s*(?:\\{)?\\s*$');
       var m = trimmed.match(rr);
-      if (m) { kindRe = rr; matchedKind = ki; km = m; break; }
+      if (m) { matchedKind = ki; km = m; break; }
     }
     if (!matchedKind) return text;
     var args = parseArgs(km[1]);
@@ -365,7 +381,7 @@ window.MA.modules.c4 = (function() {
     else if (field === 'descr') descr = value;
     else if (field === 'kind') matchedKind = value;
 
-    lines[idx] = indent + formatArgs(matchedKind, id, label, descr, tech, hadBrace);
+    lines[idx] = indent + formatArgs(matchedKind, id, label, descr, tech, hadBrace) + comment;
     return lines.join('\n');
   }
 
@@ -374,10 +390,12 @@ window.MA.modules.c4 = (function() {
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var indent = lines[idx].match(/^(\s*)/)[1];
-    var trimmed = lines[idx].trim();
+    var comment = commentSuffix(lines[idx]);
+    var trimmed = stripComment(lines[idx]);
     var matchedKind = null, km = null;
     for (var k = 0; k < REL_KINDS.length; k++) {
-      var rr = new RegExp('^' + REL_KINDS[k] + '\\s*\\(\\s*(.+?)\\s*\\)');
+      // Anchored and greedy, matching parseC4 (see updateElement).
+      var rr = new RegExp('^' + REL_KINDS[k] + '\\s*\\(\\s*(.+)\\s*\\)\\s*$');
       var m = trimmed.match(rr);
       if (m) { matchedKind = REL_KINDS[k]; km = m; break; }
     }
@@ -391,7 +409,7 @@ window.MA.modules.c4 = (function() {
     else if (field === 'kind') matchedKind = value;
     var parts = [from, to, '"' + label + '"'];
     if (tech) parts.push('"' + tech + '"');
-    lines[idx] = indent + matchedKind + '(' + parts.join(', ') + ')';
+    lines[idx] = indent + matchedKind + '(' + parts.join(', ') + ')' + comment;
     return lines.join('\n');
   }
 
