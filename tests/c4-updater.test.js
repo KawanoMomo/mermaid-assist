@@ -635,3 +635,65 @@ describe('ラベル中の二重引用符', function() {
     expect(p.relations[0].label).toBe('"同期" 呼出');
   });
 });
+
+describe('Q6: エンコードの往復健全性', function() {
+  test('Q6a: 文字どおり #quot; と打っても往復で化けない', function() {
+    var out = c4.addElement('C4Context\n', 'System', 'x', 'literal #quot; text');
+    var back = c4.parseC4(out).elements[0].label;
+    expect(back).toBe('literal #quot; text');
+  });
+
+  test('Q6b: # を含むラベルが往復する', function() {
+    var out = c4.addElement('C4Context\n', 'System', 'x', 'C#で実装 #1');
+    var back = c4.parseC4(out).elements[0].label;
+    expect(back).toBe('C#で実装 #1');
+  });
+
+  test('Q6c: # と " が混在しても往復する', function() {
+    var s = 'a#b "c" d#quot;e';
+    var out = c4.addElement('C4Context\n', 'System', 'x', s);
+    expect(c4.parseC4(out).elements[0].label).toBe(s);
+  });
+
+  test('Q6d: 既存ファイルの #quot; は " として読む (後方互換)', function() {
+    var t = 'C4Context\n    System(y, "a #quot;b#quot; c")\n';
+    expect(c4.parseC4(t).elements[0].label).toBe('a "b" c');
+  });
+});
+
+describe('Q7: deletionImpactFrom は exact と一致する', function() {
+  var t = [
+    'C4Context',
+    '    Person(u, "User")',
+    '    System_Boundary(b1, "B") {',
+    '        System(s1, "S1")',
+    '        System(s2, "S2")',
+    '    }',
+    '    System_Boundary(b2, "単独") {',
+    '        System(only, "唯一")',
+    '    }',
+    '    Rel(u, s1, "a")',
+    '    Rel(u, only, "b")',
+    ''
+  ].join('\n');
+
+  test('Q7a: 全要素で exact と fast が一致する', function() {
+    var p = c4.parseC4(t);
+    for (var i = 0; i < p.elements.length; i++) {
+      var e = p.elements[i];
+      var exact = c4.deletionImpact(t, e);
+      var fast = c4.deletionImpactFrom(p, e, t);
+      expect(fast.elements).toBe(exact.elements);
+      expect(fast.relations).toBe(exact.relations);
+    }
+  });
+
+  test('Q7b: 唯一の子は連鎖を含めて正しく数える', function() {
+    var p = c4.parseC4(t);
+    var only = p.elements.filter(function(e) { return e.id === 'only'; })[0];
+    var fast = c4.deletionImpactFrom(p, only, t);
+    // only + 空になる b2 = 2 要素、Rel(u, only) = 1
+    expect(fast.elements).toBe(2);
+    expect(fast.relations).toBe(1);
+  });
+});

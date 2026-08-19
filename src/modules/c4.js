@@ -21,12 +21,19 @@ window.MA.modules.c4 = (function() {
   // as a double quote. Without this, typing a quote into a label produced a line
   // mermaid could not parse, and the quote was then silently dropped on the next
   // edit when parseArgs re-read the mangled text.
+  // '#' is escaped first so a label the user actually typed as "#quot;" survives
+  // the round trip instead of coming back as a bare quote. Decoding undoes the two
+  // steps in reverse for the same reason.
   function encodeArg(s) {
-    return String(s === undefined || s === null ? '' : s).replace(/"/g, '#quot;');
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/#/g, '#35;')
+      .replace(/"/g, '#quot;');
   }
 
   function decodeArg(s) {
-    return String(s === undefined || s === null ? '' : s).replace(/#quot;/g, '"');
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/#quot;/g, '"')
+      .replace(/#35;/g, '#');
   }
 
   function parseArgs(str) {
@@ -242,6 +249,48 @@ window.MA.modules.c4 = (function() {
       elements: before.elements.length - after.elements.length,
       relations: before.relations.length - after.relations.length,
     };
+  }
+
+  // Same answer as deletionImpact, but derived from a parse the caller already has
+  // whenever the cheap analysis is conclusive. renderProps needs this for every row
+  // and runs on each keystroke; measuring 105 elements the exact form cost 280ms
+  // per render because it reparses the document twice per row.
+  function deletionImpactFrom(parsed, el, text) {
+    if (!el.isBoundary) {
+      var enclosing = null;
+      for (var bi = 0; bi < parsed.elements.length; bi++) {
+        var b = parsed.elements[bi];
+        if (!b.isBoundary || b.id === el.id) continue;
+        if (el.line > b.line && el.line < b.endLine) {
+          if (!enclosing || b.line > enclosing.line) enclosing = b;
+        }
+      }
+      // A boundary left empty collapses, and that can cascade outwards — too
+      // fiddly to shortcut, so fall back to the exact computation. Rare: it needs
+      // this element to be the only thing inside its boundary.
+      if (enclosing && contentCount(parsed, enclosing) <= 1) return deletionImpact(text, el);
+
+      var relHits = 0;
+      for (var ri = 0; ri < parsed.relations.length; ri++) {
+        var r = parsed.relations[ri];
+        if (r.from === el.id || r.to === el.id) relHits++;
+      }
+      return { elements: 1, relations: relHits };
+    }
+    return deletionImpact(text, el); // boundaries are few; keep the exact answer
+  }
+
+  function contentCount(parsed, boundary) {
+    var n = 0, i;
+    for (i = 0; i < parsed.elements.length; i++) {
+      var e = parsed.elements[i];
+      if (e.line > boundary.line && e.line < boundary.endLine) n++;
+    }
+    for (i = 0; i < parsed.relations.length; i++) {
+      var r = parsed.relations[i];
+      if (r.line > boundary.line && r.line < boundary.endLine) n++;
+    }
+    return n;
   }
 
   // The boundary element occupying `lineNum`, or null when that line is not one.
@@ -515,7 +564,7 @@ window.MA.modules.c4 = (function() {
         // parent collapses, and relations into the removed range go with it. Put the
         // real total on the button itself: the row's text is ellipsised at the panel
         // width, so a warning inside the label is never actually read.
-        var impact = deletionImpact(ctx.getMmdText(), e);
+        var impact = deletionImpactFrom(parsedData, e, ctx.getMmdText());
         var extra = impact.elements + impact.relations;
         elList += P.listItemHtml({
           label: e.kind + '(' + e.id + ', "' + e.label + '")',
@@ -777,7 +826,8 @@ window.MA.modules.c4 = (function() {
     updateElement: updateElement, updateRel: updateRel, deleteLine: deleteLine,
     deleteBoundary: deleteBoundary, isBoundaryKind: isBoundaryKind,
     deleteElementLine: deleteElementLine, kindOptionsFor: kindOptionsFor,
-    deletionImpact: deletionImpact, BOUNDARY_KINDS: BOUNDARY_KINDS,
+    deletionImpact: deletionImpact, deletionImpactFrom: deletionImpactFrom,
+    BOUNDARY_KINDS: BOUNDARY_KINDS,
     uniqueId: uniqueId, stripComment: stripComment,
     parseArgs: parseArgs,
   };
