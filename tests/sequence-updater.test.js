@@ -25,6 +25,62 @@ describe('deleteParticipant', function() {
   });
 });
 
+describe('moveParticipant', function() {
+  // gap semantics: 0 = head, k = between (k-1) and k, N = tail.
+
+  test('gap 0 moves C (last) to the head', function() {
+    var t = 'sequenceDiagram\n    participant A\n    participant B\n    participant C\n';
+    var out = seq.moveParticipant(t, 'C', 0);
+    var lines = out.split('\n').filter(function(l) { return l.trim().indexOf('participant') === 0; });
+    expect(lines[0]).toContain('participant C');
+    expect(lines[1]).toContain('participant A');
+    expect(lines[2]).toContain('participant B');
+  });
+
+  test('gap 2 moves A two positions forward to the B-C boundary', function() {
+    // Regression guard from PlantUMLAssist: dropping on the visible dotted line
+    // between B and C must land the dragged participant exactly there.
+    var t = 'sequenceDiagram\n    participant A\n    participant B\n    participant C\n';
+    var out = seq.moveParticipant(t, 'A', 2);
+    var lines = out.split('\n').filter(function(l) { return l.trim().indexOf('participant') === 0; });
+    expect(lines[0]).toContain('participant B');
+    expect(lines[1]).toContain('participant A');
+    expect(lines[2]).toContain('participant C');
+  });
+
+  test('gap N (= length) drops at the end', function() {
+    var t = 'sequenceDiagram\n    participant A\n    participant B\n    participant C\n';
+    var out = seq.moveParticipant(t, 'A', 3);
+    var lines = out.split('\n').filter(function(l) { return l.trim().indexOf('participant') === 0; });
+    expect(lines[0]).toContain('participant B');
+    expect(lines[1]).toContain('participant C');
+    expect(lines[2]).toContain('participant A');
+  });
+
+  test('gap adjacent to self is a no-op', function() {
+    var t = 'sequenceDiagram\n    participant A\n    participant B\n    participant C\n';
+    // A is at from=0 → gaps 0 and 1 are both "A's own slot"
+    expect(seq.moveParticipant(t, 'A', 0)).toBe(t);
+    expect(seq.moveParticipant(t, 'A', 1)).toBe(t);
+  });
+
+  test('preserves message lines in order', function() {
+    var t = 'sequenceDiagram\n    participant A\n    participant B\n    A->>B: msg\n';
+    var out = seq.moveParticipant(t, 'B', 0);
+    expect(out).toContain('participant B');
+    expect(out).toContain('A->>B: msg');
+  });
+
+  test('mixed actor+participant kinds', function() {
+    var t = 'sequenceDiagram\n    actor U\n    participant S\n    participant D\n';
+    var out = seq.moveParticipant(t, 'U', 3);
+    var partLines = out.split('\n').filter(function(l) { return /^(actor|participant)\s/.test(l.trim()); });
+    expect(partLines[0]).toContain('participant S');
+    expect(partLines[1]).toContain('participant D');
+    expect(partLines[2]).toContain('actor U');
+  });
+});
+
 describe('addMessage', function() {
   test('adds message at end', function() {
     var t = 'sequenceDiagram\n    participant A\n    participant B\n';
