@@ -82,16 +82,28 @@ global.window = sandbox.window;
 
 // ── Minimal test framework ──
 let passed = 0, failed = 0, currentDescribe = '';
+let beforeEachHooks = [];
 
 global.describe = function(name, fn) {
   currentDescribe = name;
   console.log(`\n  ${name}`);
-  fn();
+  const parentHooks = beforeEachHooks;
+  beforeEachHooks = parentHooks.slice();
+  try {
+    fn();
+  } finally {
+    beforeEachHooks = parentHooks;
+  }
   currentDescribe = '';
+};
+
+global.beforeEach = function(fn) {
+  beforeEachHooks.push(fn);
 };
 
 global.test = function(name, fn) {
   try {
+    for (const hook of beforeEachHooks) hook();
     fn();
     passed++;
     console.log(`    ✓ ${name}`);
@@ -129,14 +141,46 @@ global.expect = function(actual) {
         if (!actual.includes(item)) throw new Error(`Array does not contain ${JSON.stringify(item)}`);
       } else if (typeof actual === 'string') {
         if (!actual.includes(item)) throw new Error(`String does not contain "${item}"`);
+      } else {
+        // Silently passing here turns a typo'd subject into a green test.
+        throw new Error(`toContain expects a string or array, got ${typeof actual}`);
+      }
+    },
+    // `expected` may be a constructor, a substring, or a RegExp. Accepting the
+    // argument and ignoring it would let `toThrow(TypeError)` pass on any error at
+    // all — the assertion would read stricter than it is.
+    toThrow(expected) {
+      if (typeof actual !== 'function') throw new Error('toThrow expects a function');
+      let err = null, threw = false;
+      try { actual(); } catch (e) { threw = true; err = e; }
+      if (!threw) throw new Error('Expected function to throw');
+      if (expected === undefined) return;
+      const msg = err && err.message !== undefined ? String(err.message) : String(err);
+      if (typeof expected === 'function') {
+        if (!(err instanceof expected)) {
+          throw new Error(`Expected ${expected.name}, got ${err && err.constructor ? err.constructor.name : typeof err}`);
+        }
+      } else if (expected instanceof RegExp) {
+        if (!expected.test(msg)) throw new Error(`Expected message to match ${expected}, got "${msg}"`);
+      } else if (typeof expected === 'string') {
+        if (!msg.includes(expected)) throw new Error(`Expected message to contain "${expected}", got "${msg}"`);
+      } else {
+        throw new Error('toThrow expects a constructor, string or RegExp');
       }
     },
     not: {
       toBe(expected) { if (actual === expected) throw new Error(`Expected not ${JSON.stringify(expected)}`); },
       toBeNull() { if (actual === null) throw new Error('Expected not null'); },
       toContain(item) {
+        if (typeof actual !== 'string' && !Array.isArray(actual)) {
+          throw new Error(`not.toContain expects a string or array, got ${typeof actual}`);
+        }
         if (typeof actual === 'string' && actual.includes(item)) throw new Error(`String should not contain "${item}"`);
         if (Array.isArray(actual) && actual.includes(item)) throw new Error(`Array should not contain ${JSON.stringify(item)}`);
+      },
+      toThrow() {
+        if (typeof actual !== 'function') throw new Error('toThrow expects a function');
+        try { actual(); } catch (e) { throw new Error('Expected function not to throw, but threw: ' + e.message); }
       },
     },
   };
@@ -153,8 +197,13 @@ const files = testFiles.length > 0
 
 for (const f of files) {
   console.log(`\n── ${path.basename(f)} ──`);
+  // Test files share one process, so a beforeEach written at the top level of one
+  // file would otherwise keep running for every test in every later file. The
+  // describe-scoped save/restore does not cover that case.
+  beforeEachHooks = [];
   require(f);
 }
+beforeEachHooks = [];
 
 console.log(`\n  ${passed} passed, ${failed} failed\n`);
 process.exit(failed > 0 ? 1 : 0);

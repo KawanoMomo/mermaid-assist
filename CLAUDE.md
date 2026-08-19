@@ -35,3 +35,15 @@ MermaidAssist — Mermaid記法のGUI編集ツール。Mermaidテキストをソ
 - Phase 0 実装計画: `docs/superpowers/plans/2026-04-14-tier1-phase-0-refactor.md`
 - 初版設計仕様書: `docs/superpowers/specs/2026-03-30-mermaid-assist-design.md`
 - ADR: `docs/adr/` (ADR-011〜ADR-014 を含む)
+
+## 検証証跡 (.eval) の取り扱い
+
+visual sweep のスクリーンショットや evaluator のレポートは `.eval/` に出力するが、
+**リポジトリにはコミットしない**(2026-08-18 方針変更、`.gitignore` で除外済み)。
+
+- 実機スクリーンショット検証そのものは従来どおり必須(ワークスペース CLAUDE.md の禁止事項)。
+  変わったのは「証跡をgit管理するかどうか」だけで、検証ゲートは緩めていない
+- plan / ECN に検証結果を書く場合は、スクショを添付するのではなく
+  **判定(PASS/FAIL)・console error 件数・確認した観点**をテキストで残す
+- 新しい plan を書くときに `git add .eval/...` の手順を入れないこと
+- 2026-08-18 以前のコミット履歴には `.eval/v1.1.0`〜`v1.17.0` の証跡が残っている(履歴書き換えはしない)

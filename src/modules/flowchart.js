@@ -249,6 +249,40 @@ window.MA.modules.flowchart = (function() {
     return lines.join('\n');
   }
 
+  // moveNodeUp / moveNodeDown: swap with the previous / next line that is
+  // also a node definition. Non-node lines (edges, subgraph boundaries,
+  // blanks, comments) are skipped over only if they're blank/comment; a
+  // structural line causes a no-op so block shape stays intact.
+  function _isNodeLine(trimmed) {
+    if (!trimmed) return false;
+    if (trimmed.indexOf('%%') === 0) return false;
+    if (/-->|---|-\.->|-\.-|==>|===|--x|--o/.test(trimmed)) return false; // edge
+    if (/^(subgraph|end|flowchart|graph|direction|classDef|class\s|style\s|linkStyle|click\s)/i.test(trimmed)) return false;
+    return /^\w/.test(trimmed);
+  }
+
+  function _moveNodeStep(text, lineNum, direction) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    var target = idx + direction;
+    while (target >= 0 && target < lines.length) {
+      var t = lines[target].trim();
+      if (!t || t.indexOf('%%') === 0) { target += direction; continue; }
+      if (_isNodeLine(t)) {
+        var tmp = lines[idx];
+        lines[idx] = lines[target];
+        lines[target] = tmp;
+        return lines.join('\n');
+      }
+      return text;
+    }
+    return text;
+  }
+
+  function moveNodeUp(text, lineNum) { return _moveNodeStep(text, lineNum, -1); }
+  function moveNodeDown(text, lineNum) { return _moveNodeStep(text, lineNum, 1); }
+
   function deleteNode(text, lineNum) {
     return window.MA.textUpdater.deleteLine(text, lineNum);
   }
@@ -610,7 +644,11 @@ window.MA.modules.flowchart = (function() {
         fieldHtml('ID', 'sel-node-id', node.id) +
         fieldHtml('ラベル', 'sel-node-label', node.label) +
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">形状</label><select id="sel-node-shape" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + shapeOpts + '</select></div>' +
-        window.MA.properties.dangerButtonHtml('sel-node-delete', 'ノード削除');
+        window.MA.properties.actionBarHtml('sel-node', {
+          insertBefore: false, insertAfter: false,
+          move: true, delete: true,
+          labels: { delete: 'ノード削除' },
+        });
 
       document.getElementById('sel-node-id').addEventListener('change', function() {
         window.MA.history.pushHistory();
@@ -627,11 +665,29 @@ window.MA.modules.flowchart = (function() {
         ctx.setMmdText(updateNode(ctx.getMmdText(), node.line, 'shape', this.value));
         ctx.onUpdate();
       });
-      document.getElementById('sel-node-delete').addEventListener('click', function() {
-        window.MA.history.pushHistory();
-        ctx.setMmdText(deleteNode(ctx.getMmdText(), node.line));
-        window.MA.selection.clearSelection();
-        ctx.onUpdate();
+      window.MA.properties.bindActionBar('sel-node', {
+        up: function() {
+          var newText = moveNodeUp(ctx.getMmdText(), node.line);
+          if (newText === ctx.getMmdText()) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
+          window.MA.selection.setSelected([{ type: 'node', id: node.id }]);
+          ctx.onUpdate();
+        },
+        down: function() {
+          var newText = moveNodeDown(ctx.getMmdText(), node.line);
+          if (newText === ctx.getMmdText()) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
+          window.MA.selection.setSelected([{ type: 'node', id: node.id }]);
+          ctx.onUpdate();
+        },
+        'delete': function() {
+          window.MA.history.pushHistory();
+          ctx.setMmdText(deleteNode(ctx.getMmdText(), node.line));
+          window.MA.selection.clearSelection();
+          ctx.onUpdate();
+        },
       });
       return;
     }
@@ -661,13 +717,24 @@ window.MA.modules.flowchart = (function() {
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">Arrow</label><select id="sel-edge-arrow" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;font-family:var(--font-mono);">' + arrowOpts + '</select></div>' +
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">To</label><select id="sel-edge-to" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + toOpts + '</select></div>' +
         fieldHtml('ラベル', 'sel-edge-label', edge.label) +
-        window.MA.properties.dangerButtonHtml('sel-edge-delete', 'エッジ削除');
+        window.MA.properties.actionBarHtml('sel-edge', {
+          insertBefore: false, insertAfter: false,
+          move: false, delete: true,
+          labels: { delete: 'エッジ削除' },
+        });
 
       document.getElementById('sel-edge-from').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateEdge(ctx.getMmdText(), edge.line, 'from', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-edge-arrow').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateEdge(ctx.getMmdText(), edge.line, 'arrow', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-edge-to').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateEdge(ctx.getMmdText(), edge.line, 'to', this.value)); ctx.onUpdate(); });
       document.getElementById('sel-edge-label').addEventListener('change', function() { window.MA.history.pushHistory(); ctx.setMmdText(updateEdge(ctx.getMmdText(), edge.line, 'label', this.value)); ctx.onUpdate(); });
-      document.getElementById('sel-edge-delete').addEventListener('click', function() { window.MA.history.pushHistory(); ctx.setMmdText(deleteEdge(ctx.getMmdText(), edge.line)); window.MA.selection.clearSelection(); ctx.onUpdate(); });
+      window.MA.properties.bindActionBar('sel-edge', {
+        'delete': function() {
+          window.MA.history.pushHistory();
+          ctx.setMmdText(deleteEdge(ctx.getMmdText(), edge.line));
+          window.MA.selection.clearSelection();
+          ctx.onUpdate();
+        },
+      });
       return;
     }
 
@@ -733,6 +800,8 @@ window.MA.modules.flowchart = (function() {
     buildShape: buildShape,
     addNode: addNode,
     deleteNode: deleteNode,
+    moveNodeUp: moveNodeUp,
+    moveNodeDown: moveNodeDown,
     updateNode: updateNode,
     addEdge: addEdge,
     deleteEdge: deleteEdge,
