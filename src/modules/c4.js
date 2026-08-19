@@ -3,8 +3,38 @@ window.MA = window.MA || {};
 window.MA.modules = window.MA.modules || {};
 
 window.MA.modules.c4 = (function() {
-  var ELEMENT_KINDS = ['Person', 'Person_Ext', 'System', 'System_Ext', 'System_Boundary', 'Container', 'ContainerDb', 'ContainerQueue', 'Component', 'ComponentDb'];
+  var BOUNDARY_KINDS = ['System_Boundary', 'Container_Boundary', 'Enterprise_Boundary'];
+  // Boundary kinds are listed alongside the leaf kinds so the panel can select,
+  // edit and delete them. Without this a Container_Boundary is a ghost: it renders,
+  // but never appears in the element list, yet a collapse can still remove it.
+  var ELEMENT_KINDS = ['Person', 'Person_Ext', 'System', 'System_Ext',
+    'Container', 'ContainerDb', 'ContainerQueue', 'Component', 'ComponentDb'].concat(BOUNDARY_KINDS);
   var REL_KINDS = ['Rel', 'Rel_R', 'Rel_L', 'Rel_U', 'Rel_D', 'BiRel'];
+
+  // Sticky add-form choices. renderProps rebuilds the panel on every refresh, so
+  // without these the Kind and parent selects snap back on each addition.
+  var lastAddKind = 'Person';
+  var lastAddParent = '';
+
+  // Quoted C4 arguments cannot contain a raw '"' — mermaid rejects both `"` and
+  // `\"` inside them, and accepts only its own `#quot;` entity, which it renders
+  // as a double quote. Without this, typing a quote into a label produced a line
+  // mermaid could not parse, and the quote was then silently dropped on the next
+  // edit when parseArgs re-read the mangled text.
+  // '#' is escaped first so a label the user actually typed as "#quot;" survives
+  // the round trip instead of coming back as a bare quote. Decoding undoes the two
+  // steps in reverse for the same reason.
+  function encodeArg(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/#/g, '#35;')
+      .replace(/"/g, '#quot;');
+  }
+
+  function decodeArg(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/#quot;/g, '"')
+      .replace(/#35;/g, '#');
+  }
 
   function parseArgs(str) {
     // Parse comma-separated args, respecting double-quoted strings.
@@ -23,7 +53,64 @@ window.MA.modules.c4 = (function() {
       }
     }
     if (cur.trim().length > 0) args.push(cur.trim());
-    return args;
+    return args.map(decodeArg);
+  }
+
+  // Map each block-opening line (index) to the index of its matching '}'.
+  // Counts braces textually rather than by element kind: Container_Boundary and
+  // other hand-written boundary kinds are not in ELEMENT_KINDS, and a kind-based
+  // count would mis-pair across them and delete the wrong range.
+  function matchBraces(lines) {
+    var pairs = {};
+    var stack = [];
+    var lastMeaningful = -1;
+    for (var i = 0; i < lines.length; i++) {
+      // mermaid accepts a trailing comment after the closing brace ('} %% close'),
+      // so strip it before testing — otherwise the brace goes uncounted and the
+      // boundary looks unclosed.
+      var t = stripComment(lines[i]);
+      if (!t) continue;
+      if (t === '}') {
+        var open = stack.pop();
+        if (open !== undefined) pairs[open] = i;
+      } else if (t === '{') {
+        // `Kind(...)` on one line and `{` on the next is valid mermaid. Attribute
+        // the opening brace to the element line above so callers can look the
+        // boundary up by the line the user actually selected.
+        stack.push(lastMeaningful === -1 ? i : lastMeaningful);
+      } else if (t.charAt(t.length - 1) === '{') {
+        stack.push(i);
+      }
+      lastMeaningful = i;
+    }
+    return pairs;
+  }
+
+  // Drop a trailing `%%` comment, but only when the marker is outside quotes —
+  // a label may legitimately contain one (`"進捗 50%% 済"` parses fine in mermaid),
+  // and cutting there would truncate the line mid-string.
+  function stripComment(line) {
+    var at = commentIndex(line);
+    var t = line.trim();
+    return at === -1 ? t : t.substring(0, at).trim();
+  }
+
+  // The ' %% …' tail of a line, or '' when there is none. Rewrites re-append it so
+  // editing a commented line does not silently drop the user's note.
+  function commentSuffix(line) {
+    var at = commentIndex(line);
+    return at === -1 ? '' : ' ' + line.trim().substring(at).trim();
+  }
+
+  function commentIndex(line) {
+    var t = line.trim();
+    var inQ = false;
+    for (var i = 0; i < t.length; i++) {
+      var ch = t.charAt(i);
+      if (ch === '"') { inQ = !inQ; continue; }
+      if (!inQ && ch === '%' && t.charAt(i + 1) === '%') return i;
+    }
+    return -1;
   }
 
   function parseC4(text) {
@@ -32,11 +119,15 @@ window.MA.modules.c4 = (function() {
 
     var lines = text.split('\n');
     var relCounter = 0;
+    var bracePairs = matchBraces(lines);
 
     for (var i = 0; i < lines.length; i++) {
       var lineNum = i + 1;
-      var trimmed = lines[i].trim();
-      if (!trimmed || trimmed.indexOf('%%') === 0) continue;
+      // Strip a trailing comment first: `System(a, "A") %% note` is valid mermaid,
+      // and matching against the raw line would leave that element out of the
+      // model entirely — invisible in the list, yet deleted by a range delete.
+      var trimmed = stripComment(lines[i]);
+      if (!trimmed) continue;
 
       var hm = trimmed.match(/^C4(Context|Container|Component|Dynamic|Deployment)/);
       if (hm) { result.meta.variant = hm[1]; continue; }
@@ -60,6 +151,17 @@ window.MA.modules.c4 = (function() {
             el.descr = args[3] || '';
           } else {
             el.descr = args[2] || '';
+          }
+          // Block form: 'Kind(...) {' … '}', or the brace on the following line.
+          // Both are recorded by matchBraces against this element's index, so the
+          // depth counter and the boundary check read the same source and cannot
+          // disagree about where the block ends.
+          if (bracePairs[i] !== undefined) {
+            el.isBoundary = true;
+            el.endLine = bracePairs[i] + 1;
+          } else if (trimmed.charAt(trimmed.length - 1) === '{') {
+            el.isBoundary = true;
+            el.endLine = lineNum; // unclosed block
           }
           result.elements.push(el);
           break;
@@ -121,22 +223,144 @@ window.MA.modules.c4 = (function() {
     return text;
   }
 
-  function formatArgs(kind, id, label, descr, tech) {
-    var parts = [id, '"' + (label || '') + '"'];
+  function formatArgs(kind, id, label, descr, tech, isBoundary) {
+    var parts = [id, '"' + encodeArg(label) + '"'];
     if (kind === 'Container' || kind === 'ContainerDb' || kind === 'Component' || kind === 'ComponentDb' || kind === 'ContainerQueue') {
-      parts.push('"' + (tech || '') + '"');
-      if (descr) parts.push('"' + descr + '"');
+      parts.push('"' + encodeArg(tech) + '"');
+      if (descr) parts.push('"' + encodeArg(descr) + '"');
     } else {
-      if (descr) parts.push('"' + descr + '"');
+      if (descr) parts.push('"' + encodeArg(descr) + '"');
     }
-    return kind + '(' + parts.join(', ') + ')';
+    return kind + '(' + parts.join(', ') + ')' + (isBoundary ? ' {' : '');
   }
 
-  function addElement(text, kind, id, label, descr, tech) {
+  function isBoundaryKind(kind) {
+    return BOUNDARY_KINDS.indexOf(kind) !== -1;
+  }
+
+  // How much a delete would actually remove, counted by running it and diffing
+  // the parse. Guessing from the line range under-reports: relations pointing into
+  // the range are cascaded, and an emptied parent boundary collapses with it.
+  function deletionImpact(text, el) {
+    var before = parseC4(text);
+    var after = parseC4(el.isBoundary ? deleteBoundary(text, el.line, el.endLine)
+                                      : deleteElementLine(text, el.line));
+    return {
+      elements: before.elements.length - after.elements.length,
+      relations: before.relations.length - after.relations.length,
+    };
+  }
+
+  // Same answer as deletionImpact, but derived from a parse the caller already has
+  // whenever the cheap analysis is conclusive. renderProps needs this for every row
+  // and runs on each keystroke; measuring 105 elements the exact form cost 280ms
+  // per render because it reparses the document twice per row.
+  function deletionImpactFrom(parsed, el, text) {
+    if (!el.isBoundary) {
+      var enclosing = null;
+      for (var bi = 0; bi < parsed.elements.length; bi++) {
+        var b = parsed.elements[bi];
+        if (!b.isBoundary || b.id === el.id) continue;
+        if (el.line > b.line && el.line < b.endLine) {
+          if (!enclosing || b.line > enclosing.line) enclosing = b;
+        }
+      }
+      // A boundary left empty collapses, and that can cascade outwards — too
+      // fiddly to shortcut, so fall back to the exact computation. Rare: it needs
+      // this element to be the only thing inside its boundary.
+      if (enclosing && contentCount(parsed, enclosing) <= 1) return deletionImpact(text, el);
+
+      var relHits = 0;
+      for (var ri = 0; ri < parsed.relations.length; ri++) {
+        var r = parsed.relations[ri];
+        if (r.from === el.id || r.to === el.id) relHits++;
+      }
+      return { elements: 1, relations: relHits };
+    }
+    return deletionImpact(text, el); // boundaries are few; keep the exact answer
+  }
+
+  function contentCount(parsed, boundary) {
+    var n = 0, i;
+    for (i = 0; i < parsed.elements.length; i++) {
+      var e = parsed.elements[i];
+      if (e.line > boundary.line && e.line < boundary.endLine) n++;
+    }
+    for (i = 0; i < parsed.relations.length; i++) {
+      var r = parsed.relations[i];
+      if (r.line > boundary.line && r.line < boundary.endLine) n++;
+    }
+    return n;
+  }
+
+  // The boundary element occupying `lineNum`, or null when that line is not one.
+  function boundaryAt(text, lineNum) {
+    var parsed = parseC4(text);
+    for (var i = 0; i < parsed.elements.length; i++) {
+      var el = parsed.elements[i];
+      if (el.line === lineNum && el.isBoundary) return el;
+    }
+    return null;
+  }
+
+  function uniqueId(text, wanted) {
+    var taken = collectIds(text);
+    if (taken.indexOf(wanted) === -1) return wanted;
+    for (var n = 2; ; n++) {
+      if (taken.indexOf(wanted + n) === -1) return wanted + n;
+    }
+  }
+
+  // Kind options for the detail panel. A boundary may only stay a boundary and a
+  // plain element may not become one, because converting needs braces added or
+  // removed on two separate lines. The element's own kind is always included so
+  // an unlisted kind never silently displays as the first option instead.
+  function kindOptionsFor(kind, isBoundary) {
+    var list = ELEMENT_KINDS.filter(function(k) { return isBoundaryKind(k) === !!isBoundary; });
+    if (kind && list.indexOf(kind) === -1) list = [kind].concat(list);
+    return list.map(function(k) { return { value: k, label: k, selected: k === kind }; });
+  }
+
+  function addElement(text, kind, id, label, descr, tech, parentId) {
     var lines = text.split('\n');
+    var indentUnit = '    ';
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
-    lines.splice(insertAt, 0, '    ' + formatArgs(kind, id, label, descr, tech));
+
+    // Placing an element inside a boundary is the whole point of having one; without
+    // this the only way to fill a boundary is to hand-edit the text.
+    if (parentId) {
+      var parent = null;
+      var parsed = parseC4(text);
+      for (var pi = 0; pi < parsed.elements.length; pi++) {
+        if (parsed.elements[pi].id === parentId && parsed.elements[pi].isBoundary) {
+          parent = parsed.elements[pi];
+          break;
+        }
+      }
+      if (parent && parent.endLine > parent.line) {
+        insertAt = parent.endLine - 1; // just before the closing brace
+        indentUnit = (lines[parent.line - 1].match(/^(\s*)/)[1] || '') + '    ';
+      }
+    }
+    // mermaid accepts a duplicate alias without complaint, but the property panel
+    // resolves a selection by first id match — so a duplicate silently hands the
+    // user a different element to edit or delete. Suffix rather than collide.
+    id = uniqueId(text, id);
+    if (isBoundaryKind(kind)) {
+      // mermaid v11 rejects an empty boundary ('Parse error … Expecting PERSON,
+      // SYSTEM, …'), so a boundary is always created with one placeholder child
+      // that the user then renames or replaces. mermaid accepts duplicate aliases
+      // silently, and renderProps resolves a selection by first id match, so a
+      // collision would hand the user someone else's element — pick a free name.
+      var childKind = kind === 'Container_Boundary' ? 'Container' : 'System';
+      lines.splice(insertAt, 0,
+        indentUnit + formatArgs(kind, id, label, descr, tech, true),
+        indentUnit + '    ' + formatArgs(childKind, uniqueId(text, id + '_sys'), '新規要素'),
+        indentUnit + '}');
+    } else {
+      lines.splice(insertAt, 0, indentUnit + formatArgs(kind, id, label, descr, tech));
+    }
     return lines.join('\n');
   }
 
@@ -144,26 +368,109 @@ window.MA.modules.c4 = (function() {
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
-    var parts = [from, to, '"' + (label || '') + '"'];
-    if (tech) parts.push('"' + tech + '"');
+    var parts = [from, to, '"' + encodeArg(label) + '"'];
+    if (tech) parts.push('"' + encodeArg(tech) + '"');
     lines.splice(insertAt, 0, '    ' + (kind || 'Rel') + '(' + parts.join(', ') + ')');
     return lines.join('\n');
   }
 
   function deleteLine(text, lineNum) { return window.MA.textUpdater.deleteLine(text, lineNum); }
 
+  // Delete a boundary together with everything it encloses. Matches the delete
+  // semantics of requirement/ER (container delete removes its contents) rather
+  // than unwrapping, which would silently change what the diagram means.
+  // Element ids the parser recognises in `text`.
+  function collectIds(text) {
+    var ids = [];
+    var parsed = parseC4(text);
+    for (var i = 0; i < parsed.elements.length; i++) {
+      var id = parsed.elements[i].id;
+      if (id && ids.indexOf(id) === -1) ids.push(id);
+    }
+    return ids;
+  }
+
+  // Drop relations whose endpoint disappeared between `before` and `after`.
+  // Comparing the two id sets — rather than matching against the deleted line —
+  // leaves relations that were already dangling before this edit untouched.
+  function pruneDanglingRels(before, after) {
+    var idsBefore = collectIds(before);
+    var idsAfter = collectIds(after);
+    var removed = idsBefore.filter(function(id) { return idsAfter.indexOf(id) === -1; });
+    if (removed.length === 0) return after;
+    var parsed = parseC4(after);
+    var dropLines = {};
+    for (var i = 0; i < parsed.relations.length; i++) {
+      var r = parsed.relations[i];
+      if (removed.indexOf(r.from) !== -1 || removed.indexOf(r.to) !== -1) dropLines[r.line] = true;
+    }
+    return after.split('\n').filter(function(_, idx) { return !dropLines[idx + 1]; }).join('\n');
+  }
+
+  // Remove every boundary left with nothing inside, repeating outwards: taking
+  // the last child out of a boundary makes it empty, and mermaid will not render
+  // an empty one. Applies to both kinds of delete — removing a nested boundary
+  // empties its parent just as removing a plain element does.
+  function collapseEmptyBoundaries(lines) {
+    for (;;) {
+      var pairs = matchBraces(lines);
+      var collapsed = false;
+      for (var openIdx in pairs) {
+        if (!Object.prototype.hasOwnProperty.call(pairs, openIdx)) continue;
+        var o = parseInt(openIdx, 10);
+        var closeIdx = pairs[o];
+        var empty = true;
+        for (var j = o + 1; j < closeIdx; j++) {
+          if (stripComment(lines[j])) { empty = false; break; }
+        }
+        if (empty) {
+          lines.splice(o, closeIdx - o + 1);
+          collapsed = true;
+          break; // indices shifted; recompute
+        }
+      }
+      if (!collapsed) break;
+    }
+    return lines;
+  }
+
+  // Delete one element line, then tidy up what that leaves behind.
+  function deleteElementLine(text, lineNum) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    lines.splice(idx, 1);
+    return pruneDanglingRels(text, collapseEmptyBoundaries(lines).join('\n'));
+  }
+
+  function deleteBoundary(text, startLine, endLine) {
+    var lines = text.split('\n');
+    var from = startLine - 1;
+    var to = (endLine || startLine) - 1;
+    if (from < 0 || from >= lines.length) return text;
+    if (to < from || to >= lines.length) to = from;
+    lines.splice(from, to - from + 1);
+    return pruneDanglingRels(text, collapseEmptyBoundaries(lines).join('\n'));
+  }
+
   function updateElement(text, lineNum, field, value) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var indent = lines[idx].match(/^(\s*)/)[1];
-    var trimmed = lines[idx].trim();
-    var kindRe = null, matchedKind = null, km = null;
+    var comment = commentSuffix(lines[idx]);
+    var trimmed = stripComment(lines[idx]);
+    // A trailing '{' means this line opens a block; it has to survive the rewrite
+    // or the matching '}' below is orphaned and mermaid fails to parse.
+    var hadBrace = trimmed.charAt(trimmed.length - 1) === '{';
+    var matchedKind = null, km = null;
     for (var k = 0; k < ELEMENT_KINDS.length; k++) {
       var ki = ELEMENT_KINDS[k];
-      var rr = new RegExp('^' + ki + '\\s*\\(\\s*(.+?)\\s*\\)');
+      // Anchored and greedy, matching parseC4: a non-greedy unanchored `\)` stops
+      // at the first ')' and silently truncates labels like "決済 (Core)".
+      var rr = new RegExp('^' + ki + '\\s*\\(\\s*(.+)\\s*\\)\\s*(?:\\{)?\\s*$');
       var m = trimmed.match(rr);
-      if (m) { kindRe = rr; matchedKind = ki; km = m; break; }
+      if (m) { matchedKind = ki; km = m; break; }
     }
     if (!matchedKind) return text;
     var args = parseArgs(km[1]);
@@ -178,7 +485,7 @@ window.MA.modules.c4 = (function() {
     else if (field === 'descr') descr = value;
     else if (field === 'kind') matchedKind = value;
 
-    lines[idx] = indent + formatArgs(matchedKind, id, label, descr, tech);
+    lines[idx] = indent + formatArgs(matchedKind, id, label, descr, tech, hadBrace) + comment;
     return lines.join('\n');
   }
 
@@ -187,10 +494,12 @@ window.MA.modules.c4 = (function() {
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var indent = lines[idx].match(/^(\s*)/)[1];
-    var trimmed = lines[idx].trim();
+    var comment = commentSuffix(lines[idx]);
+    var trimmed = stripComment(lines[idx]);
     var matchedKind = null, km = null;
     for (var k = 0; k < REL_KINDS.length; k++) {
-      var rr = new RegExp('^' + REL_KINDS[k] + '\\s*\\(\\s*(.+?)\\s*\\)');
+      // Anchored and greedy, matching parseC4 (see updateElement).
+      var rr = new RegExp('^' + REL_KINDS[k] + '\\s*\\(\\s*(.+)\\s*\\)\\s*$');
       var m = trimmed.match(rr);
       if (m) { matchedKind = REL_KINDS[k]; km = m; break; }
     }
@@ -202,9 +511,9 @@ window.MA.modules.c4 = (function() {
     else if (field === 'label') label = value;
     else if (field === 'tech') tech = value;
     else if (field === 'kind') matchedKind = value;
-    var parts = [from, to, '"' + label + '"'];
-    if (tech) parts.push('"' + tech + '"');
-    lines[idx] = indent + matchedKind + '(' + parts.join(', ') + ')';
+    var parts = [from, to, '"' + encodeArg(label) + '"'];
+    if (tech) parts.push('"' + encodeArg(tech) + '"');
+    lines[idx] = indent + matchedKind + '(' + parts.join(', ') + ')' + comment;
     return lines.join('\n');
   }
 
@@ -219,19 +528,54 @@ window.MA.modules.c4 = (function() {
       var variantOpts = ['Context','Container','Component','Dynamic','Deployment'].map(function(v) {
         return { value: v, label: 'C4' + v, selected: v === parsedData.meta.variant };
       });
-      var kindOpts = ELEMENT_KINDS.map(function(k) { return { value: k, label: k, selected: k === 'Person' }; });
+      // The add form keeps its Kind and parent between submissions: adding several
+      // elements of the same kind into the same boundary is the common case, and
+      // resetting to Person/top-level every time makes the user re-pick each round.
+      var kindOpts = ELEMENT_KINDS.map(function(k) { return { value: k, label: k, selected: k === lastAddKind }; });
       var relKindOpts = REL_KINDS.map(function(k) { return { value: k, label: k, selected: k === 'Rel' }; });
       var elemIdOpts = els.map(function(e) { return { value: e.id, label: e.id + ' (' + e.kind + ')' }; });
       if (elemIdOpts.length === 0) elemIdOpts = [{ value: '', label: '（要素を先に追加）' }];
 
+      var boundaries = els.filter(function(e) { return e.isBoundary; });
+      var parentOpts = [{ value: '', label: '（なし・トップレベル）', selected: !lastAddParent }];
+      boundaries.forEach(function(b) {
+        parentOpts.push({ value: b.id, label: b.id + ' (' + b.label + ')', selected: b.id === lastAddParent });
+      });
+
+      // Which boundary encloses each element, for the list's depth hint.
+      function enclosingOf(e) {
+        var best = null;
+        for (var bi = 0; bi < boundaries.length; bi++) {
+          var b = boundaries[bi];
+          if (b.id === e.id) continue;
+          if (e.line > b.line && e.line < b.endLine) {
+            if (!best || b.line > best.line) best = b; // innermost
+          }
+        }
+        return best;
+      }
+
       var elList = '';
       for (var i = 0; i < els.length; i++) {
         var e = els[i];
+        var parent = enclosingOf(e);
+        var sub = parent ? '(in ' + parent.id + ')' : (e.tech ? '[tech: ' + e.tech + ']' : '');
+        // Deleting anything can cascade — a boundary takes its contents, an emptied
+        // parent collapses, and relations into the removed range go with it. Put the
+        // real total on the button itself: the row's text is ellipsised at the panel
+        // width, so a warning inside the label is never actually read.
+        var impact = deletionImpactFrom(parsedData, e, ctx.getMmdText());
+        var extra = impact.elements + impact.relations;
         elList += P.listItemHtml({
           label: e.kind + '(' + e.id + ', "' + e.label + '")',
-          sublabel: e.tech ? '[tech: ' + e.tech + ']' : '',
-          selectClass: 'c4-select-element', deleteClass: 'c4-delete-element',
-          dataElementId: e.id, dataLine: e.line, mono: true,
+          sublabel: sub,
+          selectClass: 'c4-select-element',
+          deleteClass: e.isBoundary ? 'c4-delete-boundary' : 'c4-delete-element',
+          deleteLabel: extra > 1 ? '✕' + extra : '✕',
+          deleteTitle: extra > 1
+            ? ('削除すると ' + impact.elements + ' 要素 / ' + impact.relations + ' リレーションが消えます')
+            : '削除',
+          dataElementId: e.id, dataLine: e.line, dataEndLine: e.endLine, mono: true,
         });
       }
       if (!elList) elList = P.emptyListHtml('（要素なし）');
@@ -262,6 +606,7 @@ window.MA.modules.c4 = (function() {
           P.selectFieldHtml('Kind', 'c4-add-kind', kindOpts) +
           P.fieldHtml('ID', 'c4-add-id', '', '例: user1') +
           P.fieldHtml('Label', 'c4-add-label', '', '例: Customer') +
+          P.selectFieldHtml('親境界', 'c4-add-parent', parentOpts) +
           P.fieldHtml('Tech (Container系のみ)', 'c4-add-tech', '', '省略可') +
           P.fieldHtml('Description', 'c4-add-descr', '', '省略可') +
           P.primaryButtonHtml('c4-add-btn', '+ 要素追加') +
@@ -300,9 +645,18 @@ window.MA.modules.c4 = (function() {
         var label = document.getElementById('c4-add-label').value.trim();
         var tech = document.getElementById('c4-add-tech').value.trim();
         var descr = document.getElementById('c4-add-descr').value.trim();
+        var parent = document.getElementById('c4-add-parent').value;
         if (!id || !label) { alert('ID と Label は必須'); return; }
+        var before = ctx.getMmdText();
+        var finalId = uniqueId(before, id);
+        // A duplicate alias is renamed rather than rejected, because mermaid accepts
+        // duplicates silently and the panel would then edit the wrong element. Say so:
+        // the user may be keeping ids in step with a design document.
+        if (finalId !== id) alert('ID "' + id + '" は既に使われているため "' + finalId + '" で追加します');
+        lastAddKind = kind;
+        lastAddParent = parent;
         window.MA.history.pushHistory();
-        ctx.setMmdText(addElement(ctx.getMmdText(), kind, id, label, descr, tech));
+        ctx.setMmdText(addElement(before, kind, id, label, descr, tech, parent));
         ctx.onUpdate();
       });
       P.bindEvent('c4-add-rel-btn', 'click', function() {
@@ -319,7 +673,8 @@ window.MA.modules.c4 = (function() {
 
       P.bindSelectButtons(propsEl, 'c4-select-element', 'element');
       P.bindSelectButtons(propsEl, 'c4-select-rel', 'rel');
-      P.bindDeleteButtons(propsEl, 'c4-delete-element', ctx, deleteLine);
+      P.bindDeleteButtons(propsEl, 'c4-delete-element', ctx, deleteElementLine);
+      P.bindDeleteButtons(propsEl, 'c4-delete-boundary', ctx, deleteBoundary, true);
       P.bindDeleteButtons(propsEl, 'c4-delete-rel', ctx, deleteLine);
       return;
     }
@@ -330,7 +685,11 @@ window.MA.modules.c4 = (function() {
         var el = null;
         for (var i = 0; i < els.length; i++) if (els[i].id === sel.id) { el = els[i]; break; }
         if (!el) { propsEl.innerHTML = '<p>要素が見つかりません</p>'; return; }
-        var kOpts = ELEMENT_KINDS.map(function(k) { return { value: k, label: k, selected: k === el.kind }; });
+        // Converting between a boundary and a plain element would need braces
+        // added or removed on two separate lines, so the kind list is filtered:
+        // a boundary can only stay a boundary, and a plain element cannot become
+        // one. Boundaries are created from the add form instead.
+        var kOpts = kindOptionsFor(el.kind, el.isBoundary);
         propsEl.innerHTML =
           P.panelHeaderHtml(el.id) +
           P.selectFieldHtml('Kind', 'c4-edit-kind', kOpts) +
@@ -338,8 +697,10 @@ window.MA.modules.c4 = (function() {
           P.fieldHtml('Label', 'c4-edit-label', el.label) +
           P.fieldHtml('Tech', 'c4-edit-tech', el.tech || '') +
           P.fieldHtml('Description', 'c4-edit-descr', el.descr || '') +
-          P.dangerButtonHtml('c4-edit-delete', '削除');
+          P.dangerButtonHtml('c4-edit-delete', el.isBoundary ? '削除（中の要素ごと）' : '削除');
         var ln = el.line;
+        var endLn = el.endLine;
+        var isB = !!el.isBoundary;
         ['kind', 'id', 'label', 'tech', 'descr'].forEach(function(f) {
           var input = document.getElementById('c4-edit-' + f);
           if (input) input.addEventListener('change', function() {
@@ -350,7 +711,8 @@ window.MA.modules.c4 = (function() {
         });
         P.bindEvent('c4-edit-delete', 'click', function() {
           window.MA.history.pushHistory();
-          ctx.setMmdText(deleteLine(ctx.getMmdText(), ln));
+          ctx.setMmdText(isB ? deleteBoundary(ctx.getMmdText(), ln, endLn)
+                             : deleteElementLine(ctx.getMmdText(), ln));
           window.MA.selection.clearSelection();
           ctx.onUpdate();
         });
@@ -427,7 +789,14 @@ window.MA.modules.c4 = (function() {
         if (ELEMENT_KINDS.indexOf(kind) >= 0) return addElement(text, kind, props.id, props.label, props.descr, props.tech);
         return text;
       },
-      delete: function(text, lineNum) { return deleteLine(text, lineNum); },
+      // Boundary-aware, like the property panel. These entry points are not wired
+      // up yet, but leaving them on the naive deleteLine/swapLines would bring the
+      // orphaned-brace bug straight back the day the registry starts calling them.
+      delete: function(text, lineNum) {
+        var b = boundaryAt(text, lineNum);
+        if (b) return deleteBoundary(text, b.line, b.endLine);
+        return deleteElementLine(text, lineNum);
+      },
       update: function(text, lineNum, field, value, opts) {
         opts = opts || {};
         if (opts.kind === 'rel') return updateRel(text, lineNum, field, value);
@@ -436,12 +805,15 @@ window.MA.modules.c4 = (function() {
         return updateElement(text, lineNum, field, value);
       },
       moveUp: function(text, lineNum) {
-        if (lineNum <= 1) return text;
+        // Swapping a boundary header with the line above tears the '{' away from
+        // the block it opens. Moving a whole block is a separate feature; refuse
+        // rather than corrupt.
+        if (lineNum <= 1 || boundaryAt(text, lineNum)) return text;
         return window.MA.textUpdater.swapLines(text, lineNum, lineNum - 1);
       },
       moveDown: function(text, lineNum) {
         var total = text.split('\n').length;
-        if (lineNum >= total) return text;
+        if (lineNum >= total || boundaryAt(text, lineNum)) return text;
         return window.MA.textUpdater.swapLines(text, lineNum, lineNum + 1);
       },
       connect: function(text, fromId, toId, props) {
@@ -452,6 +824,11 @@ window.MA.modules.c4 = (function() {
     setTitle: setTitle, setVariant: setVariant,
     addElement: addElement, addRel: addRel,
     updateElement: updateElement, updateRel: updateRel, deleteLine: deleteLine,
+    deleteBoundary: deleteBoundary, isBoundaryKind: isBoundaryKind,
+    deleteElementLine: deleteElementLine, kindOptionsFor: kindOptionsFor,
+    deletionImpact: deletionImpact, deletionImpactFrom: deletionImpactFrom,
+    BOUNDARY_KINDS: BOUNDARY_KINDS,
+    uniqueId: uniqueId, stripComment: stripComment,
     parseArgs: parseArgs,
   };
 })();

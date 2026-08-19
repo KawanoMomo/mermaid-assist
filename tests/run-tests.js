@@ -129,12 +129,18 @@ global.expect = function(actual) {
         if (!actual.includes(item)) throw new Error(`Array does not contain ${JSON.stringify(item)}`);
       } else if (typeof actual === 'string') {
         if (!actual.includes(item)) throw new Error(`String does not contain "${item}"`);
+      } else {
+        // Silently passing here turns a typo'd subject into a green test.
+        throw new Error(`toContain expects a string or array, got ${typeof actual}`);
       }
     },
     not: {
       toBe(expected) { if (actual === expected) throw new Error(`Expected not ${JSON.stringify(expected)}`); },
       toBeNull() { if (actual === null) throw new Error('Expected not null'); },
       toContain(item) {
+        if (typeof actual !== 'string' && !Array.isArray(actual)) {
+          throw new Error(`not.toContain expects a string or array, got ${typeof actual}`);
+        }
         if (typeof actual === 'string' && actual.includes(item)) throw new Error(`String should not contain "${item}"`);
         if (Array.isArray(actual) && actual.includes(item)) throw new Error(`Array should not contain ${JSON.stringify(item)}`);
       },
