@@ -150,7 +150,7 @@ describe('deleteBlock: 入れ子 group', function() {
     expect(out).not.toContain('block:outer');
     expect(out).not.toContain('block:inner');
     expect(out.split('\n').filter(function(l) { return l.trim() === 'end'; }).length).toBe(0);
-    expect(out).toContain('c');
+    expect(out.split('\n').filter(function(l) { return l.trim() === 'c'; }).length).toBe(1);
   });
 
   test('B2: 内側 group のみ削除で外側 group と end は保持される', function() {
@@ -160,7 +160,7 @@ describe('deleteBlock: 入れ子 group', function() {
     expect(out).toContain('block:outer');
     expect(out).not.toContain('block:inner');
     expect(out.split('\n').filter(function(l) { return l.trim() === 'end'; }).length).toBe(1);
-    expect(out).toContain('b');
+    expect(out.split('\n').filter(function(l) { return l.trim() === 'b'; }).length).toBe(1);
   });
 
   test('B6: ネストなし group の削除は従来どおり (regression)', function() {
@@ -212,7 +212,7 @@ describe('deleteBlock: 削除範囲内を参照するリンクのカスケード
     var outer = p.elements.filter(function(e) { return e.id === 'outer'; })[0];
     var out = block.deleteBlock(t, outer.line, 'outer');
     expect(out).not.toContain('inner --> c');
-    expect(out).toContain('c');
+    expect(out.split('\n').filter(function(l) { return l.trim() === 'c'; }).length).toBe(1);
   });
 });
 
@@ -285,5 +285,119 @@ describe('group id の前方一致衝突', function() {
       if (lines[i].indexOf('nb') >= 0) nbIdx = i;
     }
     expect(nbIdx).toBeGreaterThan(g1Idx);
+  });
+});
+
+// ── 列スパン構文 block:id:N / カスケードの精度 / 未閉じ group ──────────────
+describe('列スパン構文 block:id:N', function() {
+  test('C1: span group を削除しても以降の行が消えない', function() {
+    var t = [
+      'block-beta',        // 1
+      '  columns 3',       // 2
+      '  aa bb cc',        // 3
+      '  block:grp:3',     // 4
+      '    dd',            // 5
+      '    ee',            // 6
+      '  end',             // 7
+      '  ff gg hh',        // 8
+      ''
+    ].join('\n');
+    var out = block.deleteBlock(t, 4, 'grp');
+    expect(out).not.toContain('block:grp');
+    expect(out).not.toContain('dd');
+    expect(out.split('\n').filter(function(l) { return l.trim() === 'end'; }).length).toBe(0);
+    expect(out).toContain('ff gg hh');
+    expect(out).toContain('aa bb cc');
+  });
+
+  test('C2: 内側が span 構文でも外側削除で残骸が出ない', function() {
+    var t = [
+      'block-beta',            // 1
+      '  block:outer',         // 2
+      '    block:inner:2',     // 3
+      '      xx',              // 4
+      '    end',               // 5
+      '    yy',                // 6
+      '  end',                 // 7
+      '  zz',                  // 8
+      ''
+    ].join('\n');
+    var out = block.deleteBlock(t, 2, 'outer');
+    expect(out.split('\n').filter(function(l) { return l.trim() === 'end'; }).length).toBe(0);
+    expect(out).not.toContain('yy');
+    expect(out).not.toContain('xx');
+    expect(out).toContain('zz');
+  });
+
+  test('C3: span group が parse で group として認識される', function() {
+    var p = block.parseBlock('block-beta\n  block:grp:3\n    dd\n  end\n');
+    var g = p.elements.filter(function(e) { return e.id === 'grp'; })[0];
+    expect(g.kind).toBe('group');
+  });
+});
+
+describe('リンクカスケードの精度', function() {
+  test('M2: 未対応 shape のラベル語を id と誤認して範囲外リンクを消さない', function() {
+    var t = [
+      'block-beta',
+      '  block:g1',
+      '    dd{"Decision Node"}',
+      '  end',
+      '  Decision',
+      '  Node',
+      '  Decision --> Node',
+      ''
+    ].join('\n');
+    var out = block.deleteBlock(t, 2, 'g1');
+    expect(out).toContain('Decision --> Node');
+  });
+
+  test('M3: 同名 id が範囲外にも存在する場合はリンクを残す', function() {
+    var t = [
+      'block-beta',
+      '  block:g1',
+      '    aa',
+      '  end',
+      '  aa',
+      '  bb',
+      '  aa --> bb',
+      ''
+    ].join('\n');
+    var out = block.deleteBlock(t, 2, 'g1');
+    expect(out).toContain('aa --> bb');
+  });
+
+  test('M5: 元から壊れているリンクは削除で巻き添えにしない', function() {
+    var t = [
+      'block-beta',
+      '  block:g1',
+      '    aa',
+      '  end',
+      '  bb',
+      '  ghost --> bb',
+      ''
+    ].join('\n');
+    var out = block.deleteBlock(t, 2, 'g1');
+    expect(out).toContain('ghost --> bb');
+  });
+});
+
+describe('未閉じ group', function() {
+  test('M4: end が無い group の削除で以降の行を巻き込まない', function() {
+    var t = [
+      'block-beta',
+      '  aa',
+      '  block:g1',
+      '    bb',
+      '  cc',
+      '  dd',
+      '  aa --> dd',
+      ''
+    ].join('\n');
+    var out = block.deleteBlock(t, 3, 'g1');
+    expect(out).not.toContain('block:g1');
+    expect(out).toContain('cc');
+    expect(out).toContain('dd');
+    expect(out).toContain('aa --> dd');
   });
 });

@@ -4,7 +4,11 @@ window.MA.modules = window.MA.modules || {};
 
 window.MA.modules.blockBeta = (function() {
   var COLUMNS_RE = /^columns\s+(\d+)\s*$/;
-  var GROUP_START_RE = /^block:([A-Za-z_][A-Za-z0-9_-]*)\s*(?:columns\s+\d+)?\s*$/;
+  // `block:id`, `block:id columns N`, and the column-span form `block:id:N`.
+  // Every place that asks "is this a group start?" must use this one regex —
+  // a depth counter and an identity check that disagree will pair the wrong
+  // braces and delete the wrong range.
+  var GROUP_START_RE = /^block:([A-Za-z_][A-Za-z0-9_-]*)(?::\d+)?\s*(?:columns\s+\d+)?\s*$/;
   var BLOCK_TOKEN_RE = /([A-Za-z_][A-Za-z0-9_-]*)(?:\["([^"]*)"\]|\(\("([^"]*)"\)\)|\("([^"]*)"\))?/g;
   var LINK_RE = /^([A-Za-z_][A-Za-z0-9_-]*)\s*(?:--\s*"?([^"]*?)"?\s*)?-->\s*([A-Za-z_][A-Za-z0-9_-]*)\s*$/;
 
@@ -113,32 +117,38 @@ window.MA.modules.blockBeta = (function() {
     return lines.join('\n');
   }
 
+  // Ids the parser itself recognises in `text`. Reusing parseBlock rather than
+  // re-scanning tokens keeps this in step with the shapes the module supports,
+  // including its keyword guards for `block` / `end` / `columns`.
+  function collectIds(text) {
+    var ids = [];
+    var parsed = parseBlock(text);
+    for (var i = 0; i < parsed.elements.length; i++) {
+      var id = parsed.elements[i].id;
+      if (id && ids.indexOf(id) === -1) ids.push(id);
+    }
+    return ids;
+  }
+
   function deleteBlock(text, lineNum, blockId) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var trimmed = lines[idx].trim();
 
-    // Every id that disappears with this delete. Links pointing at any of them
-    // would dangle and make mermaid fail, so they are removed too.
-    var removedIds = [blockId];
+    // Ids present before the delete, so the cascade below can work out which
+    // ones actually disappeared rather than guessing from the raw text. Scanning
+    // tokens by hand mis-reads label words as ids for any shape the token regex
+    // does not cover (e.g. `d{"Decision Node"}`), which silently killed links
+    // between blocks that were never deleted.
+    var idsBefore = collectIds(text);
 
     // Group block:ID ... end
     if (isGroupStart(trimmed, blockId)) {
       var endIdx = findMatchingEnd(lines, idx);
-      if (endIdx === -1) endIdx = lines.length - 1;
-      for (var j = idx + 1; j < endIdx; j++) {
-        var inner = lines[j].trim();
-        if (!inner || inner === 'end' || inner.indexOf('%%') === 0) continue;
-        var gm = inner.match(GROUP_START_RE);
-        if (gm) { removedIds.push(gm[1]); continue; }
-        if (LINK_RE.test(inner) || COLUMNS_RE.test(inner)) continue;
-        BLOCK_TOKEN_RE.lastIndex = 0;
-        var tm;
-        while ((tm = BLOCK_TOKEN_RE.exec(inner)) !== null) {
-          if (tm[1]) removedIds.push(tm[1]);
-        }
-      }
+      // An unclosed group (the user deleted its `end` mid-edit) must not swallow
+      // the rest of the file; drop the header line alone and leave the body.
+      if (endIdx === -1) endIdx = idx;
       lines.splice(idx, endIdx - idx + 1);
     } else {
       // Remove just this block token from the line, or whole line if only this token
@@ -154,9 +164,17 @@ window.MA.modules.blockBeta = (function() {
         lines[idx] = indent + kept.join(' ');
       }
     }
-    // Cascade: remove links referencing anything that was deleted
+    // Cascade: drop links whose endpoint no longer exists. Comparing the id sets
+    // before and after keeps two cases honest — an id that also lives outside the
+    // deleted range survives, so its links stay; and a link that was already
+    // dangling before this edit is left exactly as the user wrote it.
+    var result = lines.join('\n');
+    var idsAfter = collectIds(result);
+    var removedIds = idsBefore.filter(function(id) { return idsAfter.indexOf(id) === -1; });
+    if (removedIds.length === 0) return result;
+
     var linkRe = /^(\s*)([A-Za-z_][A-Za-z0-9_-]*)\s*(?:--\s*"?[^"]*?"?\s*)?-->\s*([A-Za-z_][A-Za-z0-9_-]*)\s*$/;
-    lines = lines.filter(function(ln) {
+    lines = result.split('\n').filter(function(ln) {
       var m = ln.match(linkRe);
       if (!m) return true;
       return removedIds.indexOf(m[2]) === -1 && removedIds.indexOf(m[3]) === -1;
