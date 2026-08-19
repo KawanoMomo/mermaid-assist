@@ -472,3 +472,26 @@ describe('B2: 削除の影響件数', function() {
     expect(impact.relations).toBe(0);
   });
 });
+
+describe('B1d: インデント文字の追随', function() {
+  var TAB = String.fromCharCode(9);
+
+  test('タブでインデントされた図にはタブで足す', function() {
+    var t = ['block-beta', TAB + 'block:ecu', TAB + TAB + 'block:periph',
+             TAB + TAB + TAB + 'uart["UART"]', TAB + TAB + 'end', TAB + 'end', ''].join('\n');
+    var out = block.addNestedBlock(t, 'periph', 'can', 'CAN');
+    var lines = out.split('\n');
+    var can = lines.filter(function(l) { return l.indexOf('can') >= 0; })[0];
+    var uart = lines.filter(function(l) { return l.indexOf('uart') >= 0; })[0];
+    // 既存の子と同じインデント文字列であること (混在させない)
+    expect(can.match(/^(\s*)/)[1]).toBe(uart.match(/^(\s*)/)[1]);
+  });
+
+  test('スペースの図ではスペースのまま', function() {
+    var t = 'block-beta\n  block:g\n    a["A"]\n  end\n';
+    var out = block.addNestedBlock(t, 'g', 'x', 'X');
+    var lines = out.split('\n');
+    var x = lines.filter(function(l) { return l.indexOf('x[') >= 0; })[0];
+    expect(x.match(/^(\s*)/)[1]).toBe('    ');
+  });
+});

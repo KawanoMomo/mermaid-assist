@@ -108,7 +108,11 @@ window.MA.modules.blockBeta = (function() {
         // Indent one step past the parent rather than a fixed four spaces. The text
         // is the source of truth here, so a child sitting at its parent's depth
         // reads as a sibling — the diagram is right but the diff lies about it.
-        var indent = (lines[i].match(/^(\s*)/)[1] || '') + '  ';
+        // Follow the parent's indent character too: mixing a tab-indented file with
+        // spaces makes the new line look shallower than its siblings.
+        var parentIndent = lines[i].match(/^(\s*)/)[1] || '';
+        var step = parentIndent.indexOf('\t') !== -1 ? '\t' : '  ';
+        var indent = parentIndent + step;
         lines.splice(endIdx, 0, indent + token);
         return lines.join('\n');
       }
