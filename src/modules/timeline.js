@@ -373,7 +373,10 @@ window.MA.modules.timeline = (function() {
           '</div>' +
           P.actionBarHtml('tl-edit-p', {
             insertBefore: false, insertAfter: false,
-            move: true, delete: true,
+            // move は無効。_is*Line が「宣言行か」で判定しており、イベント継続行 (`: Google`) をピリオド行と誤判定し、別ピリオドへ付け替える。
+          // mermaid の parse も render も通るため無言で壊れる。述語をブレース深度
+          // ベースに直すまで UI から出さない (敵対レビュー指摘)。
+          move: false, delete: true,
             labels: { delete: 'ピリオド削除' },
           });
 

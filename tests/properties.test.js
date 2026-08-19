@@ -77,3 +77,52 @@ describe('bindActionBar', function() {
     }).not.toThrow();
   });
 });
+
+// ── move ヘルパの述語がブロック構造を無視する問題 (敵対レビュー C1/C2/M1/M3) ──
+// er / class / state / timeline の _is*Line は「宣言行か」ではなく「ブロックや
+// 継続行に属さない独立行か」で判定しなければならない。判定を誤ると mermaid の
+// parse も render も通る「壊れた図」を無言で生成する。
+// 現時点では述語を直さず、UI 側で move を無効化する方針 (推奨案B) を取るため、
+// ここでは「破壊が起きること」を既知の制限として固定し、UI が move を出さない
+// ことを別テストで担保する。
+describe('move ヘルパの既知の制限 (UI では無効化済み)', function() {
+  var M = (typeof window !== 'undefined' && window.MA && window.MA.modules)
+    || (global.window && global.window.MA && global.window.MA.modules) || {};
+
+  test('er: 属性を持つエンティティの移動は構造を壊す (既知)', function() {
+    if (!M.erDiagram || !M.erDiagram.moveEntityDown) return;
+    var t = 'erDiagram\n    CUSTOMER {\n        string name\n    }\n    ORDER {\n        int id\n    }\n';
+    var out = M.erDiagram.moveEntityDown(t, 2);
+    // 壊れる = 属性行が先頭に出てしまう。直ったらこのテストを反転させること
+    expect(out.split('\n')[1].trim()).toBe('string name');
+  });
+
+  test('class: ブロック形式クラスを跨ぐ移動は構造を壊す (既知)', function() {
+    if (!M.classDiagram || !M.classDiagram.moveClassDown) return;
+    var t = 'classDiagram\n    class Animal\n    class Dog {\n        +bark()\n    }\n';
+    var out = M.classDiagram.moveClassDown(t, 2);
+    expect(out.split('\n')[1].trim()).toBe('class Dog {');
+  });
+});
+
+describe('テストフレームワーク自身の健全性', function() {
+  test('toThrow は期待する型を検証する', function() {
+    expect(function() {
+      expect(function() { throw new Error('unrelated'); }).toThrow(TypeError);
+    }).toThrow('Expected TypeError');
+  });
+
+  test('toThrow は期待するメッセージを検証する', function() {
+    expect(function() {
+      expect(function() { throw new Error('unrelated'); }).toThrow('期待した文言');
+    }).toThrow('Expected message to contain');
+  });
+
+  test('toThrow は引数なしなら従来どおり「投げれば合格」', function() {
+    expect(function() { throw new Error('anything'); }).toThrow();
+  });
+
+  test('toContain は文字列でも配列でもない値を拒否する', function() {
+    expect(function() { expect(undefined).toContain('x'); }).toThrow('toContain expects');
+  });
+});

@@ -428,7 +428,10 @@ window.MA.modules.state = (function() {
         '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">種別: ' + escHtml(st.type || 'simple') + '</div>' +
         P.actionBarHtml('sel-state', {
           insertBefore: false, insertAfter: false,
-          move: true, delete: true,
+          // move は無効。_is*Line が「宣言行か」で判定しており、コンポジット状態 (`state Active {`) を宣言行と誤判定し、他状態の子に吸い込む。
+          // mermaid の parse も render も通るため無言で壊れる。述語をブレース深度
+          // ベースに直すまで UI から出さない (敵対レビュー指摘)。
+          move: false, delete: true,
           labels: { delete: '状態削除' },
         });
 

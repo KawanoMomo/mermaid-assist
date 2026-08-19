@@ -370,7 +370,10 @@ window.MA.modules.erDiagram = (function() {
         '</div>' +
         P.actionBarHtml('sel-ent', {
           insertBefore: false, insertAfter: false,
-          move: true, delete: true,
+          // move は無効。_is*Line が「宣言行か」で判定しており、属性行 (`string name`) をエンティティ行と誤判定し、ブロック構造を破壊する。
+          // mermaid の parse も render も通るため無言で壊れる。述語をブレース深度
+          // ベースに直すまで UI から出さない (敵対レビュー指摘)。
+          move: false, delete: true,
           labels: { delete: 'エンティティ削除' },
         });
 

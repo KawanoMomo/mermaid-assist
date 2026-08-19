@@ -489,7 +489,10 @@ window.MA.modules.classDiagram = (function() {
         '</div>' +
         props.actionBarHtml('sel-class', {
           insertBefore: false, insertAfter: false,
-          move: true, delete: true,
+          // move は無効。_is*Line が「宣言行か」で判定しており、ブロック形式のクラス (`class Dog {`) を宣言行と誤判定し、他クラスの本体に飲み込ませる。
+          // mermaid の parse も render も通るため無言で壊れる。述語をブレース深度
+          // ベースに直すまで UI から出さない (敵対レビュー指摘)。
+          move: false, delete: true,
           labels: { delete: 'クラス削除' },
         });
 
