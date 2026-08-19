@@ -3,8 +3,18 @@ window.MA = window.MA || {};
 window.MA.modules = window.MA.modules || {};
 
 window.MA.modules.c4 = (function() {
-  var ELEMENT_KINDS = ['Person', 'Person_Ext', 'System', 'System_Ext', 'System_Boundary', 'Container', 'ContainerDb', 'ContainerQueue', 'Component', 'ComponentDb'];
+  var BOUNDARY_KINDS = ['System_Boundary', 'Container_Boundary', 'Enterprise_Boundary'];
+  // Boundary kinds are listed alongside the leaf kinds so the panel can select,
+  // edit and delete them. Without this a Container_Boundary is a ghost: it renders,
+  // but never appears in the element list, yet a collapse can still remove it.
+  var ELEMENT_KINDS = ['Person', 'Person_Ext', 'System', 'System_Ext',
+    'Container', 'ContainerDb', 'ContainerQueue', 'Component', 'ComponentDb'].concat(BOUNDARY_KINDS);
   var REL_KINDS = ['Rel', 'Rel_R', 'Rel_L', 'Rel_U', 'Rel_D', 'BiRel'];
+
+  // Sticky add-form choices. renderProps rebuilds the panel on every refresh, so
+  // without these the Kind and parent selects snap back on each addition.
+  var lastAddKind = 'Person';
+  var lastAddParent = '';
 
   function parseArgs(str) {
     // Parse comma-separated args, respecting double-quoted strings.
@@ -205,7 +215,20 @@ window.MA.modules.c4 = (function() {
   }
 
   function isBoundaryKind(kind) {
-    return kind === 'System_Boundary';
+    return BOUNDARY_KINDS.indexOf(kind) !== -1;
+  }
+
+  // How much a delete would actually remove, counted by running it and diffing
+  // the parse. Guessing from the line range under-reports: relations pointing into
+  // the range are cascaded, and an emptied parent boundary collapses with it.
+  function deletionImpact(text, el) {
+    var before = parseC4(text);
+    var after = parseC4(el.isBoundary ? deleteBoundary(text, el.line, el.endLine)
+                                      : deleteElementLine(text, el.line));
+    return {
+      elements: before.elements.length - after.elements.length,
+      relations: before.relations.length - after.relations.length,
+    };
   }
 
   // The boundary element occupying `lineNum`, or null when that line is not one.
@@ -236,10 +259,28 @@ window.MA.modules.c4 = (function() {
     return list.map(function(k) { return { value: k, label: k, selected: k === kind }; });
   }
 
-  function addElement(text, kind, id, label, descr, tech) {
+  function addElement(text, kind, id, label, descr, tech, parentId) {
     var lines = text.split('\n');
+    var indentUnit = '    ';
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
+
+    // Placing an element inside a boundary is the whole point of having one; without
+    // this the only way to fill a boundary is to hand-edit the text.
+    if (parentId) {
+      var parent = null;
+      var parsed = parseC4(text);
+      for (var pi = 0; pi < parsed.elements.length; pi++) {
+        if (parsed.elements[pi].id === parentId && parsed.elements[pi].isBoundary) {
+          parent = parsed.elements[pi];
+          break;
+        }
+      }
+      if (parent && parent.endLine > parent.line) {
+        insertAt = parent.endLine - 1; // just before the closing brace
+        indentUnit = (lines[parent.line - 1].match(/^(\s*)/)[1] || '') + '    ';
+      }
+    }
     // mermaid accepts a duplicate alias without complaint, but the property panel
     // resolves a selection by first id match — so a duplicate silently hands the
     // user a different element to edit or delete. Suffix rather than collide.
@@ -250,12 +291,13 @@ window.MA.modules.c4 = (function() {
       // that the user then renames or replaces. mermaid accepts duplicate aliases
       // silently, and renderProps resolves a selection by first id match, so a
       // collision would hand the user someone else's element — pick a free name.
+      var childKind = kind === 'Container_Boundary' ? 'Container' : 'System';
       lines.splice(insertAt, 0,
-        '    ' + formatArgs(kind, id, label, descr, tech, true),
-        '        ' + formatArgs('System', uniqueId(text, id + '_sys'), '新規要素'),
-        '    }');
+        indentUnit + formatArgs(kind, id, label, descr, tech, true),
+        indentUnit + '    ' + formatArgs(childKind, uniqueId(text, id + '_sys'), '新規要素'),
+        indentUnit + '}');
     } else {
-      lines.splice(insertAt, 0, '    ' + formatArgs(kind, id, label, descr, tech));
+      lines.splice(insertAt, 0, indentUnit + formatArgs(kind, id, label, descr, tech));
     }
     return lines.join('\n');
   }
@@ -424,29 +466,53 @@ window.MA.modules.c4 = (function() {
       var variantOpts = ['Context','Container','Component','Dynamic','Deployment'].map(function(v) {
         return { value: v, label: 'C4' + v, selected: v === parsedData.meta.variant };
       });
-      var kindOpts = ELEMENT_KINDS.map(function(k) { return { value: k, label: k, selected: k === 'Person' }; });
+      // The add form keeps its Kind and parent between submissions: adding several
+      // elements of the same kind into the same boundary is the common case, and
+      // resetting to Person/top-level every time makes the user re-pick each round.
+      var kindOpts = ELEMENT_KINDS.map(function(k) { return { value: k, label: k, selected: k === lastAddKind }; });
       var relKindOpts = REL_KINDS.map(function(k) { return { value: k, label: k, selected: k === 'Rel' }; });
       var elemIdOpts = els.map(function(e) { return { value: e.id, label: e.id + ' (' + e.kind + ')' }; });
       if (elemIdOpts.length === 0) elemIdOpts = [{ value: '', label: '（要素を先に追加）' }];
 
+      var boundaries = els.filter(function(e) { return e.isBoundary; });
+      var parentOpts = [{ value: '', label: '（なし・トップレベル）', selected: !lastAddParent }];
+      boundaries.forEach(function(b) {
+        parentOpts.push({ value: b.id, label: b.id + ' (' + b.label + ')', selected: b.id === lastAddParent });
+      });
+
+      // Which boundary encloses each element, for the list's depth hint.
+      function enclosingOf(e) {
+        var best = null;
+        for (var bi = 0; bi < boundaries.length; bi++) {
+          var b = boundaries[bi];
+          if (b.id === e.id) continue;
+          if (e.line > b.line && e.line < b.endLine) {
+            if (!best || b.line > best.line) best = b; // innermost
+          }
+        }
+        return best;
+      }
+
       var elList = '';
       for (var i = 0; i < els.length; i++) {
         var e = els[i];
-        var sub = e.tech ? '[tech: ' + e.tech + ']' : '';
-        if (e.isBoundary) {
-          // Deleting a boundary takes its contents with it, so show how many
-          // elements are inside before the user presses ✕.
-          var inner = 0;
-          for (var ci = 0; ci < els.length; ci++) {
-            if (els[ci].line > e.line && els[ci].line < e.endLine) inner++;
-          }
-          sub = '(' + inner + ' 要素を含む)';
-        }
+        var parent = enclosingOf(e);
+        var sub = parent ? '(in ' + parent.id + ')' : (e.tech ? '[tech: ' + e.tech + ']' : '');
+        // Deleting anything can cascade — a boundary takes its contents, an emptied
+        // parent collapses, and relations into the removed range go with it. Put the
+        // real total on the button itself: the row's text is ellipsised at the panel
+        // width, so a warning inside the label is never actually read.
+        var impact = deletionImpact(ctx.getMmdText(), e);
+        var extra = impact.elements + impact.relations;
         elList += P.listItemHtml({
           label: e.kind + '(' + e.id + ', "' + e.label + '")',
           sublabel: sub,
           selectClass: 'c4-select-element',
           deleteClass: e.isBoundary ? 'c4-delete-boundary' : 'c4-delete-element',
+          deleteLabel: extra > 1 ? '✕' + extra : '✕',
+          deleteTitle: extra > 1
+            ? ('削除すると ' + impact.elements + ' 要素 / ' + impact.relations + ' リレーションが消えます')
+            : '削除',
           dataElementId: e.id, dataLine: e.line, dataEndLine: e.endLine, mono: true,
         });
       }
@@ -478,6 +544,7 @@ window.MA.modules.c4 = (function() {
           P.selectFieldHtml('Kind', 'c4-add-kind', kindOpts) +
           P.fieldHtml('ID', 'c4-add-id', '', '例: user1') +
           P.fieldHtml('Label', 'c4-add-label', '', '例: Customer') +
+          P.selectFieldHtml('親境界', 'c4-add-parent', parentOpts) +
           P.fieldHtml('Tech (Container系のみ)', 'c4-add-tech', '', '省略可') +
           P.fieldHtml('Description', 'c4-add-descr', '', '省略可') +
           P.primaryButtonHtml('c4-add-btn', '+ 要素追加') +
@@ -516,9 +583,18 @@ window.MA.modules.c4 = (function() {
         var label = document.getElementById('c4-add-label').value.trim();
         var tech = document.getElementById('c4-add-tech').value.trim();
         var descr = document.getElementById('c4-add-descr').value.trim();
+        var parent = document.getElementById('c4-add-parent').value;
         if (!id || !label) { alert('ID と Label は必須'); return; }
+        var before = ctx.getMmdText();
+        var finalId = uniqueId(before, id);
+        // A duplicate alias is renamed rather than rejected, because mermaid accepts
+        // duplicates silently and the panel would then edit the wrong element. Say so:
+        // the user may be keeping ids in step with a design document.
+        if (finalId !== id) alert('ID "' + id + '" は既に使われているため "' + finalId + '" で追加します');
+        lastAddKind = kind;
+        lastAddParent = parent;
         window.MA.history.pushHistory();
-        ctx.setMmdText(addElement(ctx.getMmdText(), kind, id, label, descr, tech));
+        ctx.setMmdText(addElement(before, kind, id, label, descr, tech, parent));
         ctx.onUpdate();
       });
       P.bindEvent('c4-add-rel-btn', 'click', function() {
@@ -688,6 +764,7 @@ window.MA.modules.c4 = (function() {
     updateElement: updateElement, updateRel: updateRel, deleteLine: deleteLine,
     deleteBoundary: deleteBoundary, isBoundaryKind: isBoundaryKind,
     deleteElementLine: deleteElementLine, kindOptionsFor: kindOptionsFor,
+    deletionImpact: deletionImpact, BOUNDARY_KINDS: BOUNDARY_KINDS,
     uniqueId: uniqueId, stripComment: stripComment,
     parseArgs: parseArgs,
   };

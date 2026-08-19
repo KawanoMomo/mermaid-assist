@@ -485,3 +485,117 @@ describe('ラベル中の丸括弧・行末コメントの保存', function() {
     expect(out).toContain('%% 備考');
   });
 });
+
+// ── ユーザーレビュー指摘への対応 ─────────────────────────────────────────
+describe('A6: 他の境界種別のサポート', function() {
+  test('A6a: Container_Boundary が parse され境界として認識される', function() {
+    var t = 'C4Container\n    Container_Boundary(b1, "ECU内部") {\n        Container(c1, "App", "C")\n    }\n';
+    var p = c4.parseC4(t);
+    var b = p.elements.filter(function(e) { return e.id === 'b1'; })[0];
+    expect(b.kind).toBe('Container_Boundary');
+    expect(b.isBoundary).toBe(true);
+    expect(b.endLine).toBe(4);
+  });
+
+  test('A6b: Enterprise_Boundary も同様', function() {
+    var t = 'C4Context\n    Enterprise_Boundary(e1, "社内") {\n        System(s1, "S")\n    }\n';
+    var p = c4.parseC4(t);
+    var b = p.elements.filter(function(e) { return e.id === 'e1'; })[0];
+    expect(b.isBoundary).toBe(true);
+  });
+
+  test('A6c: Container_Boundary を追加できる', function() {
+    var out = c4.addElement('C4Container\n', 'Container_Boundary', 'b1', 'ECU内部');
+    expect(out).toContain('Container_Boundary(b1, "ECU内部") {');
+    var p = c4.parseC4(out);
+    var b = p.elements.filter(function(e) { return e.id === 'b1'; })[0];
+    expect(b.isBoundary).toBe(true);
+  });
+});
+
+describe('A2: 境界の中へ要素を追加する', function() {
+  var T = [
+    'C4Context',                            // 1
+    '    Person(u, "User")',                // 2
+    '    System_Boundary(b1, "境界") {',     // 3
+    '        System(s1, "既存")',            // 4
+    '    }',                                // 5
+    ''
+  ].join('\n');
+
+  test('A2a: parentId を指定すると境界の中に入る', function() {
+    var out = c4.addElement(T, 'System', 'newone', '新規', '', '', 'b1');
+    var lines = out.split('\n');
+    var bIdx = -1, closeIdx = -1, newIdx = -1;
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].indexOf('System_Boundary(b1') >= 0) bIdx = i;
+      if (lines[i].trim() === '}') closeIdx = i;
+      if (lines[i].indexOf('newone') >= 0) newIdx = i;
+    }
+    expect(newIdx).toBeGreaterThan(bIdx);
+    expect(newIdx).toBeLessThan(closeIdx);
+  });
+
+  test('A2b: parentId 無しなら従来どおりトップレベル', function() {
+    var out = c4.addElement(T, 'System', 'top', 'トップ');
+    var lines = out.split('\n');
+    var closeIdx = -1, newIdx = -1;
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].trim() === '}') closeIdx = i;
+      if (lines[i].indexOf('top') >= 0) newIdx = i;
+    }
+    expect(newIdx).toBeGreaterThan(closeIdx);
+  });
+
+  test('A2c: 境界に本物の要素を足してからプレースホルダを消すと境界が残る', function() {
+    // ユーザーレビュー A1 の「箱を作る→中身を入れ替える」フローが成立すること
+    var t = c4.addElement('C4Context\n', 'System_Boundary', 'b1', '車載ECU');
+    var withReal = c4.addElement(t, 'System', 'ecu_main', 'メインCPU', '', '', 'b1');
+    var p = c4.parseC4(withReal);
+    var ph = p.elements.filter(function(e) { return e.id === 'b1_sys'; })[0];
+    var out = c4.deleteElementLine(withReal, ph.line);
+    expect(out).toContain('System_Boundary(b1, "車載ECU") {');
+    expect(out).toContain('ecu_main');
+    expect(out).not.toContain('b1_sys');
+  });
+});
+
+describe('A4/A5: 削除で実際に消える行数', function() {
+  test('A4a: deletionImpact が要素とリレーションの両方を数える', function() {
+    var t = [
+      'C4Context',
+      '    Person(u, "User")',
+      '    System_Boundary(b1, "B") {',
+      '        System(s1, "S1")',
+      '        System(s2, "S2")',
+      '    }',
+      '    Rel(u, s1, "a")',
+      '    Rel(u, s2, "b")',
+      ''
+    ].join('\n');
+    var p = c4.parseC4(t);
+    var b = p.elements.filter(function(e) { return e.id === 'b1'; })[0];
+    var impact = c4.deletionImpact(t, b);
+    // 境界自身 + 中の2要素 = 3。「消える総数」を返すので境界も含む
+    expect(impact.elements).toBe(3);
+    expect(impact.relations).toBe(2);
+  });
+
+  test('A4b: 連鎖して外側まで消える場合も数に含む', function() {
+    var t = [
+      'C4Context',
+      '    System_Boundary(outer, "外") {',
+      '        System_Boundary(inner, "内") {',
+      '            System(s1, "S")',
+      '        }',
+      '    }',
+      '    Person(u, "U")',
+      ''
+    ].join('\n');
+    var p = c4.parseC4(t);
+    var i = p.elements.filter(function(e) { return e.id === 'inner'; })[0];
+    var impact = c4.deletionImpact(t, i);
+    // inner + s1 + 空になって連鎖で畳まれる outer = 3
+    expect(impact.elements).toBe(3);
+  });
+});
