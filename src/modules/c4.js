@@ -16,6 +16,19 @@ window.MA.modules.c4 = (function() {
   var lastAddKind = 'Person';
   var lastAddParent = '';
 
+  // Quoted C4 arguments cannot contain a raw '"' — mermaid rejects both `"` and
+  // `\"` inside them, and accepts only its own `#quot;` entity, which it renders
+  // as a double quote. Without this, typing a quote into a label produced a line
+  // mermaid could not parse, and the quote was then silently dropped on the next
+  // edit when parseArgs re-read the mangled text.
+  function encodeArg(s) {
+    return String(s === undefined || s === null ? '' : s).replace(/"/g, '#quot;');
+  }
+
+  function decodeArg(s) {
+    return String(s === undefined || s === null ? '' : s).replace(/#quot;/g, '"');
+  }
+
   function parseArgs(str) {
     // Parse comma-separated args, respecting double-quoted strings.
     var args = [];
@@ -33,7 +46,7 @@ window.MA.modules.c4 = (function() {
       }
     }
     if (cur.trim().length > 0) args.push(cur.trim());
-    return args;
+    return args.map(decodeArg);
   }
 
   // Map each block-opening line (index) to the index of its matching '}'.
@@ -204,12 +217,12 @@ window.MA.modules.c4 = (function() {
   }
 
   function formatArgs(kind, id, label, descr, tech, isBoundary) {
-    var parts = [id, '"' + (label || '') + '"'];
+    var parts = [id, '"' + encodeArg(label) + '"'];
     if (kind === 'Container' || kind === 'ContainerDb' || kind === 'Component' || kind === 'ComponentDb' || kind === 'ContainerQueue') {
-      parts.push('"' + (tech || '') + '"');
-      if (descr) parts.push('"' + descr + '"');
+      parts.push('"' + encodeArg(tech) + '"');
+      if (descr) parts.push('"' + encodeArg(descr) + '"');
     } else {
-      if (descr) parts.push('"' + descr + '"');
+      if (descr) parts.push('"' + encodeArg(descr) + '"');
     }
     return kind + '(' + parts.join(', ') + ')' + (isBoundary ? ' {' : '');
   }
@@ -306,8 +319,8 @@ window.MA.modules.c4 = (function() {
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
-    var parts = [from, to, '"' + (label || '') + '"'];
-    if (tech) parts.push('"' + tech + '"');
+    var parts = [from, to, '"' + encodeArg(label) + '"'];
+    if (tech) parts.push('"' + encodeArg(tech) + '"');
     lines.splice(insertAt, 0, '    ' + (kind || 'Rel') + '(' + parts.join(', ') + ')');
     return lines.join('\n');
   }
@@ -449,8 +462,8 @@ window.MA.modules.c4 = (function() {
     else if (field === 'label') label = value;
     else if (field === 'tech') tech = value;
     else if (field === 'kind') matchedKind = value;
-    var parts = [from, to, '"' + label + '"'];
-    if (tech) parts.push('"' + tech + '"');
+    var parts = [from, to, '"' + encodeArg(label) + '"'];
+    if (tech) parts.push('"' + encodeArg(tech) + '"');
     lines[idx] = indent + matchedKind + '(' + parts.join(', ') + ')' + comment;
     return lines.join('\n');
   }

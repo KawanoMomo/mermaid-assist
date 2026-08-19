@@ -599,3 +599,39 @@ describe('A4/A5: 削除で実際に消える行数', function() {
     expect(impact.elements).toBe(3);
   });
 });
+
+describe('ラベル中の二重引用符', function() {
+  // mermaid は素の " も \" も受理せず、#quot; だけを " として描画する (実機確認)
+  test('Q1: 追加時に " が #quot; へ変換される', function() {
+    var out = c4.addElement('C4Context\n', 'System', 'x', 'いわゆる "Core"');
+    expect(out).toContain('System(x, "いわゆる #quot;Core#quot;")');
+  });
+
+  test('Q2: 編集時も同様', function() {
+    var t = 'C4Context\n    System(s1, "元", "説明")\n';
+    var p = c4.parseC4(t);
+    var out = c4.updateElement(t, p.elements[0].line, 'label', 'いわゆる "Core"');
+    expect(out).toContain('"いわゆる #quot;Core#quot;"');
+  });
+
+  test('Q3: parse は #quot; を " に戻すのでパネル表示は素のまま', function() {
+    var t = 'C4Context\n    System(s1, "いわゆる #quot;Core#quot;")\n';
+    var p = c4.parseC4(t);
+    expect(p.elements[0].label).toBe('いわゆる "Core"');
+  });
+
+  test('Q4: 編集を往復しても引用符が失われない', function() {
+    var t = c4.addElement('C4Context\n', 'System', 'x', 'いわゆる "Core"');
+    var p = c4.parseC4(t);
+    var out = c4.updateElement(t, p.elements[0].line, 'descr', '新説明');
+    var p2 = c4.parseC4(out);
+    expect(p2.elements[0].label).toBe('いわゆる "Core"');
+  });
+
+  test('Q5: リレーションのラベルでも同様', function() {
+    var out = c4.addRel('C4Context\n', 'Rel', 'a', 'b', '"同期" 呼出');
+    expect(out).toContain('#quot;同期#quot; 呼出');
+    var p = c4.parseC4(out);
+    expect(p.relations[0].label).toBe('"同期" 呼出');
+  });
+});
