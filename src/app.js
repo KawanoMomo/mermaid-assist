@@ -225,6 +225,8 @@ modules.gantt = {
           sectionListHtml +=
             '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;">' +
               '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + window.MA.htmlUtils.escHtml(sec.name) + '">' + window.MA.htmlUtils.escHtml(sec.name) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + taskCount + ')</span></div>' +
+              '<button class="prop-section-up" data-section-line="' + sec.line + '" title="上のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:10px;padding:0;">↑</button>' +
+              '<button class="prop-section-down" data-section-line="' + sec.line + '" title="下のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:10px;padding:0;">↓</button>' +
               '<button class="prop-section-delete" data-section-name="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-line="' + sec.line + '" title="セクションごと削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
             '</div>';
         }
@@ -337,6 +339,28 @@ modules.gantt = {
           scheduleRefresh();
         });
       }
+
+      // Bind section move buttons. Sections own the tasks between their header and
+      // the next one, so moving a section carries its tasks along — the task-level
+      // ↑↓ only reorders within a section.
+      ['up', 'down'].forEach(function(dir) {
+        var btns = propsEl.querySelectorAll('.prop-section-' + dir);
+        for (var mi = 0; mi < btns.length; mi++) {
+          btns[mi].addEventListener('click', function() {
+            var ln = parseInt(this.getAttribute('data-section-line'), 10);
+            if (isNaN(ln)) return;
+            var moved = window.MA.modules.gantt.moveSection(mmdText, ln, dir === 'up' ? -1 : 1);
+            if (moved === mmdText) return; // at the edge — nothing to do
+            window.MA.history.pushHistory();
+            mmdText = moved;
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            syncLineNumbers();
+            scheduleRefresh();
+          });
+        }
+      });
 
       // Bind section delete buttons
       var sectionDeleteBtns = propsEl.querySelectorAll('.prop-section-delete');

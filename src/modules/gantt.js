@@ -338,6 +338,44 @@ window.MA.modules.gantt = (function() {
     return lines.join('\n');
   }
 
+  // The lines a section owns: its own `section` line through the line before the
+  // next section, blank lines at the end trimmed off. deleteSection also swallows
+  // the blank line *before* the header; moveSection deliberately does not, because
+  // carrying it along would drift the separators every time a section is moved.
+  function sectionBlock(lines, sections, secIdx) {
+    var start = sections[secIdx].line - 1;
+    var end = (secIdx + 1 < sections.length) ? sections[secIdx + 1].line - 1 : lines.length;
+    while (end > start + 1 && lines[end - 1].trim() === '') end--;
+    return { start: start, end: end };
+  }
+
+  // moveSection — swaps a section, with the tasks it contains, past its neighbour.
+  // direction: -1 = earlier, +1 = later. A move at either edge is a no-op.
+  function moveSection(text, sectionLine, direction) {
+    if (direction !== -1 && direction !== 1) return text;
+    var lines = text.split('\n');
+    var sections = parseGantt(text).sections;
+    var idx = -1;
+    for (var i = 0; i < sections.length; i++) {
+      if (sections[i].line === sectionLine) { idx = i; break; }
+    }
+    if (idx === -1) return text;
+    var other = idx + direction;
+    if (other < 0 || other >= sections.length) return text;
+
+    var a = sectionBlock(lines, sections, Math.min(idx, other));
+    var b = sectionBlock(lines, sections, Math.max(idx, other));
+    var blockA = lines.slice(a.start, a.end);
+    var blockB = lines.slice(b.start, b.end);
+    // Whatever sat between the two blocks (usually one blank line) stays between
+    // them, so the separator does not travel with the section.
+    var between = lines.slice(a.end, b.start);
+
+    var out = lines.slice(0, a.start)
+      .concat(blockB, between, blockA, lines.slice(b.end));
+    return out.join('\n');
+  }
+
   // deleteSection — removes the section and all its tasks.
   function deleteSection(text, sectionLine) {
     var lines = text.split('\n');
@@ -625,7 +663,7 @@ window.MA.modules.gantt = (function() {
     addTask: addTask,
     deleteTask: deleteTask,
     sanitizeAfterDependencies: sanitizeAfterDependencies,
-    addSection: addSection,
+    addSection: addSection, moveSection: moveSection,
     deleteSection: deleteSection,
     updateGlobalSetting: updateGlobalSetting,
     moveTaskWithinSection: moveTaskWithinSection,
