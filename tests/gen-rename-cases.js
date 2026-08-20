@@ -11,7 +11,7 @@ const path = require('path');
 global.window = { MA: { modules: {} } };
 [ 'core/text-updater', 'core/parser-utils', 'core/date-utils',
   'modules/c4', 'modules/flowchart', 'modules/architecture',
-  'modules/gantt', 'modules/gitgraph', 'modules/sequence',
+  'modules/gantt', 'modules/gitgraph', 'modules/sequence', 'modules/block',
 ].forEach(m => require(path.join(__dirname, '..', 'src', m + '.js')));
 
 const M = window.MA.modules;
@@ -47,6 +47,13 @@ pair('gitgraph-rename', t, M.gitGraph.updateBranch(t, 3, 'feature'), { allowText
 t = 'sequenceDiagram\n    participant A as 端末\n    participant B as サーバ\n' +
     '    A->>B: 要求\n    activate B\n    B-->>A: 応答\n    deactivate B\n';
 pair('sequence-rename', t, M.sequence.updateParticipant(t, 2, 'id', 'Client'));
+
+// block-beta は1行に複数ブロックを書くのが標準形なので、ID が前方一致する組を
+// 並べておく。トークン境界を取り違えると隣のブロックが巻き添えになるが、
+// mermaid は黙って描いてしまうのでテキスト比較でしか気づけない。
+t = 'block-beta\n  columns 3\n  a["A"] ab["AB"] abc["ABC"]\n  a --> ab\n';
+pair('block-label-edit', t, M.blockBeta.updateBlockLabel(t, 3, 'a', 'センサ'), { expectText: 'センサABABC' });
+pair('block-id-rename', t, M.blockBeta.updateBlockId(t, 3, 'a', 'sensor'));
 
 const out = path.join(__dirname, 'render-cases', 'rename-cascade.json');
 fs.writeFileSync(out, JSON.stringify(cases, null, 1) + '\n');

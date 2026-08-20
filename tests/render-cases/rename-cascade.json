@@ -47,5 +47,22 @@
  {
   "name": "sequence-rename/after",
   "text": "sequenceDiagram\n    participant Client as 端末\n    participant B as サーバ\n    Client->>B: 要求\n    activate B\n    B-->>Client: 応答\n    deactivate B\n"
+ },
+ {
+  "name": "block-label-edit/before",
+  "text": "block-beta\n  columns 3\n  a[\"A\"] ab[\"AB\"] abc[\"ABC\"]\n  a --> ab\n"
+ },
+ {
+  "name": "block-label-edit/after",
+  "text": "block-beta\n  columns 3\n  a[\"センサ\"] ab[\"AB\"] abc[\"ABC\"]\n  a --> ab\n",
+  "expectText": "センサABABC"
+ },
+ {
+  "name": "block-id-rename/before",
+  "text": "block-beta\n  columns 3\n  a[\"A\"] ab[\"AB\"] abc[\"ABC\"]\n  a --> ab\n"
+ },
+ {
+  "name": "block-id-rename/after",
+  "text": "block-beta\n  columns 3\n  sensor[\"A\"] ab[\"AB\"] abc[\"ABC\"]\n  sensor --> ab\n"
  }
 ]

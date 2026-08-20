@@ -98,8 +98,14 @@ async function runCases(cases) {
 //   after で render が壊れた       → FAIL
 //   after で描画テキストが変わった  → FAIL (要素が増減した / 中身が化けた)
 //   after で gantt のバー位置が動いた → FAIL (依存が切れて日付が飛んだ)
-// を判定する。after 側にだけ現れてよい差分は id 名そのものなので、比較対象からは
-// ケース定義の allowTextChange / allowRectChange で明示的に外せる。
+// を判定する。
+//
+// テキストが変わって当然のケース (ラベルを編集した、commit ハッシュが毎回変わる)
+// は、after 側に次のどちらかを書く:
+//   expectText: '…'      描画テキストがこの文字列と完全一致することを要求する
+//   allowTextChange: true 比較しない。何が描かれても通るので、期待値を書ける
+//                         ケースでは使わないこと
+// allowRectChange も同様に gantt のバー比較を外す。
 function comparePairs(results, cases) {
   const byName = {};
   results.forEach(r => { byName[r.name] = r; });
@@ -114,7 +120,11 @@ function comparePairs(results, cases) {
     const o = opts[name] || {};
     if (a.render !== 'OK') failures.push(name + ': render が失敗 → ' + a.render);
     if (b.render === 'OK' && a.render === 'OK') {
-      if (!o.allowTextChange && a.text !== b.text) {
+      if (o.expectText !== undefined) {
+        if (a.text !== o.expectText) {
+          failures.push(name + ': 描画テキストが期待と違う\n      期待: ' + o.expectText + '\n      実際: ' + a.text);
+        }
+      } else if (!o.allowTextChange && a.text !== b.text) {
         failures.push(name + ': 描画テキストが変わった\n      before: ' + b.text + '\n      after : ' + a.text);
       }
       if (!o.allowRectChange && stripIds(a.rects) !== stripIds(b.rects)) {
