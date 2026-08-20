@@ -1,0 +1,51 @@
+[
+ {
+  "name": "c4-rename/before",
+  "text": "C4Context\n  title システム\n  Person(user, \"利用者\")\n  System(sys, \"基幹\")\n  Rel(user, sys, \"利用\")\n"
+ },
+ {
+  "name": "c4-rename/after",
+  "text": "C4Context\n  title システム\n  Person(customer, \"利用者\")\n  System(sys, \"基幹\")\n  Rel(customer, sys, \"利用\")\n"
+ },
+ {
+  "name": "flowchart-rename/before",
+  "text": "flowchart TD\n    A[開始]\n    B[処理]\n    A --> B\n    B -.-> A\n"
+ },
+ {
+  "name": "flowchart-rename/after",
+  "text": "flowchart TD\n    Start[開始]\n    B[処理]\n    Start --> B\n    B -.-> Start\n"
+ },
+ {
+  "name": "architecture-rename/before",
+  "text": "architecture-beta\n  group g(cloud)[Cloud]\n  service api(server)[API] in g\n  service db(database)[DB] in g\n  api:R -- L:db\n"
+ },
+ {
+  "name": "architecture-rename/after",
+  "text": "architecture-beta\n  group g(cloud)[Cloud]\n  service gateway(server)[API] in g\n  service db(database)[DB] in g\n  gateway:R -- L:db\n"
+ },
+ {
+  "name": "gantt-rename/before",
+  "text": "gantt\n    dateFormat YYYY-MM-DD\n    axisFormat %m/%d\n    section S\n    検証 :v1, 2026-06-01, 5d\n    設計 :t1, 2026-03-01, 5d\n    実装 :impl, after t1, 10d\n"
+ },
+ {
+  "name": "gantt-rename/after",
+  "text": "gantt\n    dateFormat YYYY-MM-DD\n    axisFormat %m/%d\n    section S\n    検証 :v1, 2026-06-01, 5d\n    設計 :design, 2026-03-01, 5d\n    実装 :impl, after design, 10d\n"
+ },
+ {
+  "name": "gitgraph-rename/before",
+  "text": "gitGraph\n  commit\n  branch dev\n  checkout dev\n  commit\n  checkout main\n  merge dev\n"
+ },
+ {
+  "name": "gitgraph-rename/after",
+  "text": "gitGraph\n  commit\n  branch feature\n  checkout feature\n  commit\n  checkout main\n  merge feature\n",
+  "allowTextChange": true
+ },
+ {
+  "name": "sequence-rename/before",
+  "text": "sequenceDiagram\n    participant A as 端末\n    participant B as サーバ\n    A->>B: 要求\n    activate B\n    B-->>A: 応答\n    deactivate B\n"
+ },
+ {
+  "name": "sequence-rename/after",
+  "text": "sequenceDiagram\n    participant Client as 端末\n    participant B as サーバ\n    Client->>B: 要求\n    activate B\n    B-->>Client: 応答\n    deactivate B\n"
+ }
+]

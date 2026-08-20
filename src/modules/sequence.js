@@ -238,12 +238,64 @@ window.MA.modules.sequence = (function() {
     var m = trimmed.match(/^(participant|actor)\s+(\S+)(?:\s+as\s+(.+))?$/);
     if (!m) return text;
     var kind = m[1], id = m[2], label = m[3] ? m[3].trim() : id;
+    var oldId = id;
     if (field === 'kind') kind = value;
     else if (field === 'id') id = value;
     else if (field === 'label') label = value;
     var indent = lines[idx].match(/^(\s*)/)[1];
     lines[idx] = indent + kind + ' ' + id + (label && label !== id ? ' as ' + label : '');
+    if (field === 'id' && value !== oldId) renameParticipantRefs(lines, oldId, value, idx);
     return lines.join('\n');
+  }
+
+  // Rewrite every reference to a renamed participant. Without this, mermaid
+  // implicitly declares a participant for the stale id: parse and render both
+  // succeed and the diagram silently grows an extra lifeline that the user never
+  // added, with no error anywhere.
+  //
+  // Only the id positions are rewritten. Message bodies, note text and the
+  // participant's own `as` alias are free text and keep whatever they said, even
+  // when that text happens to equal the old id.
+  function renameParticipantRefs(lines, oldId, newId, skipIdx) {
+    for (var j = 0; j < lines.length; j++) {
+      if (j === skipIdx) continue;
+      var indent = lines[j].match(/^(\s*)/)[1];
+      var trimmed = lines[j].trim();
+      if (!trimmed || trimmed.indexOf('%%') === 0) continue;
+
+      // activate / deactivate <id>
+      var act = trimmed.match(/^(activate|deactivate)\s+(\S+)\s*$/);
+      if (act) {
+        if (act[2] === oldId) lines[j] = indent + act[1] + ' ' + newId;
+        continue;
+      }
+
+      // note <position> <id>[,<id>]: text — same shape as parseSequence's noteMatch
+      var note = trimmed.match(/^(note\s+(?:left of|right of|over)\s+)([^:]+)(:.*)$/i);
+      if (note) {
+        var targets = note[2].split(',').map(function(s) {
+          return s.trim() === oldId ? s.replace(oldId, newId) : s;
+        });
+        lines[j] = indent + note[1] + targets.join(',') + note[3];
+        continue;
+      }
+
+      // message: <from><arrow><to>: label — arrow scan mirrors parseSequence
+      var arrow = null, arrowPos = -1;
+      for (var ai = 0; ai < ARROW_TYPES.length; ai++) {
+        var pos = trimmed.indexOf(ARROW_TYPES[ai]);
+        if (pos > 0) { arrow = ARROW_TYPES[ai]; arrowPos = pos; break; }
+      }
+      if (!arrow) continue;
+      var from = trimmed.slice(0, arrowPos);
+      var rest = trimmed.slice(arrowPos + arrow.length);
+      var colonIdx = rest.indexOf(':');
+      var to = colonIdx >= 0 ? rest.slice(0, colonIdx) : rest;
+      var tail = colonIdx >= 0 ? rest.slice(colonIdx) : '';
+      if (from.trim() === oldId) from = from.replace(oldId, newId);
+      if (to.trim() === oldId) to = to.replace(oldId, newId);
+      lines[j] = indent + from + arrow + to + tail;
+    }
   }
 
   // addMessage: append at end of file (or within last block)

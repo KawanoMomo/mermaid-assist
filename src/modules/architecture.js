@@ -90,13 +90,47 @@ window.MA.modules.architectureBeta = (function() {
     var m = trimmed.match(/^(group|service)\s+(\S+)\s*\(([^)]+)\)\s*\[([^\]]*)\]\s*(?:in\s+(\S+))?\s*$/);
     if (!m) return text;
     var kind = m[1], id = m[2], icon = m[3], label = m[4], parent = m[5] || '';
+    var oldId = id;
     if (field === 'id') id = value;
     else if (field === 'icon') icon = value;
     else if (field === 'label') label = value;
     else if (field === 'parentId') parent = value;
     else if (field === 'kind') kind = value;
     lines[idx] = indent + kind + ' ' + id + '(' + icon + ')[' + label + ']' + (parent ? ' in ' + parent : '');
+    if (field === 'id' && value !== oldId) renameRefs(lines, oldId, value, idx);
     return lines.join('\n');
+  }
+
+  // Rewrite the references to a renamed id: the two endpoints of an edge line
+  // and the `in <parent>` clause of anything nested under a renamed group.
+  // Leaving them behind makes mermaid refuse the whole diagram
+  // ("The left-hand id [x] does not yet exist"), so the preview is replaced by
+  // an error that names an id the user can no longer see anywhere.
+  //
+  // Labels are free text and keep the old string even when it matches the id.
+  function renameRefs(lines, oldId, newId, skipIdx) {
+    for (var j = 0; j < lines.length; j++) {
+      var indent = lines[j].match(/^(\s*)/)[1];
+      var trimmed = lines[j].trim();
+      if (!trimmed) continue;
+
+      if (j !== skipIdx) {
+        // group/service ... in <parent>  — same shape as parseArchitecture
+        var em = trimmed.match(/^(group|service)\s+(\S+)\s*\(([^)]+)\)\s*\[([^\]]*)\]\s*in\s+(\S+)\s*$/);
+        if (em && em[5] === oldId) {
+          lines[j] = indent + em[1] + ' ' + em[2] + '(' + em[3] + ')[' + em[4] + '] in ' + newId;
+          continue;
+        }
+      }
+
+      // <id>:<side> -- <side>:<id>
+      var edge = trimmed.match(/^(\S+):([TBLR])(\s+--\s+)([TBLR]):(\S+)\s*$/);
+      if (edge) {
+        var from = edge[1] === oldId ? newId : edge[1];
+        var to = edge[5] === oldId ? newId : edge[5];
+        lines[j] = indent + from + ':' + edge[2] + edge[3] + edge[4] + ':' + to;
+      }
+    }
   }
 
   function updateEdge(text, lineNum, field, value) {

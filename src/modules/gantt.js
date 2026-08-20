@@ -215,6 +215,7 @@ window.MA.modules.gantt = (function() {
 
     var parsed = parseTaskLine(lines[idx]);
     if (!parsed) return text;
+    var oldId = parsed.id;
 
     if (field === 'label') {
       parsed.label = value;
@@ -233,7 +234,31 @@ window.MA.modules.gantt = (function() {
 
     var meta = rebuildTaskMeta(parsed.status, parsed.id, parsed.startDate, parsed.endDate, parsed.after);
     lines[idx] = parsed.indent + parsed.label + ' :' + meta;
+    if (field === 'id' && value !== oldId) renameAfterRefs(lines, oldId, value, idx);
     return lines.join('\n');
+  }
+
+  // Rewrite `after <id>` dependencies when a task id is renamed. Leaving them
+  // dangling is the quietest failure of the three the GUI can produce: mermaid
+  // parses and renders the chart without complaint, but resolves the unknown
+  // reference somewhere else entirely — a bar measured at x=132 moved to x=1128
+  // (March to June on the same chart) with no error and no visual cue that the
+  // dependency was lost.
+  //
+  // Only the token right after `after`/`until` is an id; task labels are free
+  // text and keep the old string even when it matches.
+  function renameAfterRefs(lines, oldId, newId, skipIdx) {
+    for (var j = 0; j < lines.length; j++) {
+      if (j === skipIdx) continue;
+      var p = parseTaskLine(lines[j]);
+      if (!p || !p.after) continue;
+      // `after a b` chains several dependencies on one task.
+      var deps = p.after.split(/\s+/).map(function(d) { return d === oldId ? newId : d; });
+      var joined = deps.join(' ');
+      if (joined === p.after) continue;
+      lines[j] = p.indent + p.label + ' :' +
+        rebuildTaskMeta(p.status, p.id, p.startDate, p.endDate, joined);
+    }
   }
 
   // addTask — inserts a new task line at the end of the section identified by

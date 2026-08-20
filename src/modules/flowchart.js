@@ -36,6 +36,102 @@ window.MA.modules.flowchart = (function() {
     return wrap[0] + label + wrap[1];
   }
 
+  // Locate the edge operator on a line. parseFlowchart, updateNode and
+  // renameNodeRefs all have to agree on where the edge is: when they disagree,
+  // the GUI edits a different node than the one the properties panel is showing.
+  // (updateNode used to omit the `et.length > edgeLen` clause and so could pick
+  // a shorter operator than the parser did on the same line.)
+  function findEdge(trimmed) {
+    var edgeType = null, edgePos = -1, edgeLen = 0;
+    for (var ei = 0; ei < EDGE_TYPES.length; ei++) {
+      var et = EDGE_TYPES[ei];
+      var pos = trimmed.indexOf(et);
+      if (pos > 0 && (edgePos === -1 || pos < edgePos || et.length > edgeLen)) {
+        edgeType = et; edgePos = pos; edgeLen = et.length;
+      }
+    }
+    return edgeType ? { type: edgeType, pos: edgePos } : null;
+  }
+
+  // Split "A[x] -->|note| B[y];" into its parts, keeping every piece verbatim so
+  // a caller can rewrite one of them without reformatting the rest.
+  function splitEdgeLine(trimmed) {
+    var e = findEdge(trimmed);
+    if (!e) return null;
+    var rest = trimmed.slice(e.pos + e.type.length);
+    var labelPart = '';
+    var lblMatch = rest.match(/^\|([^|]*)\|/);
+    if (lblMatch) { labelPart = lblMatch[0]; rest = rest.slice(lblMatch[0].length); }
+    var tail = '';
+    var tm = rest.match(/(\s*;\s*)$/);
+    if (tm) { tail = tm[1]; rest = rest.slice(0, rest.length - tm[1].length); }
+    return {
+      left: trimmed.slice(0, e.pos),
+      edge: e.type,
+      labelPart: labelPart,
+      right: rest,
+      tail: tail,
+    };
+  }
+
+  // Split a node reference ("A", "A[Start]") into its id and its shape suffix.
+  // Mirrors extractNode inside parseFlowchart.
+  function splitNodeRef(raw) {
+    var shapeChars = ['[', '(', '{', '>'];
+    for (var si = 0; si < raw.length; si++) {
+      if (shapeChars.indexOf(raw[si]) !== -1) {
+        return { id: raw.slice(0, si), shape: raw.slice(si) };
+      }
+    }
+    return { id: raw, shape: '' };
+  }
+
+  // Rewrite every reference to oldId. Without this, renaming a node id leaves
+  // the edges pointing at the old id: mermaid.parse and mermaid.render both
+  // succeed and silently grow a phantom node, so the diagram gains an element
+  // the user never drew and nothing reports an error.
+  //
+  // Only the id positions are touched — shape labels, edge labels and comments
+  // keep the old text even when it happens to equal the id.
+  function renameNodeRefs(lines, oldId, newId, skipIdx) {
+    for (var j = 0; j < lines.length; j++) {
+      if (j === skipIdx) continue;
+      var raw = lines[j];
+      var indent = raw.match(/^(\s*)/)[1];
+      var trimmed = raw.trim();
+      if (!trimmed || trimmed.indexOf('%%') === 0) continue;
+      if (/^(flowchart|graph)\s+/.test(trimmed) || trimmed === 'end') continue;
+      if (/^(classDef|subgraph|direction|linkStyle)\b/.test(trimmed)) continue;
+
+      // "class A,B name" / "style A fill:#fff" / "click A callback"
+      var kw = trimmed.match(/^(class|style|click)\s+(\S+)(.*)$/);
+      if (kw) {
+        var ids = kw[2].split(',').map(function(s) { return s === oldId ? newId : s; });
+        lines[j] = indent + kw[1] + ' ' + ids.join(',') + kw[3];
+        continue;
+      }
+
+      var parts = splitEdgeLine(trimmed);
+      if (parts) {
+        var l = splitNodeRef(parts.left.replace(/\s+$/, ''));
+        var lPad = parts.left.slice(parts.left.replace(/\s+$/, '').length);
+        var rLead = parts.right.slice(0, parts.right.length - parts.right.replace(/^\s+/, '').length);
+        var r = splitNodeRef(parts.right.replace(/^\s+/, ''));
+        if (l.id.trim() === oldId) l.id = newId;
+        if (r.id.trim() === oldId) r.id = newId;
+        lines[j] = indent + l.id + l.shape + lPad + parts.edge + parts.labelPart +
+                   rLead + r.id + r.shape + parts.tail;
+        continue;
+      }
+
+      // Standalone reference, e.g. a bare "A" listed inside a subgraph.
+      var solo = splitNodeRef(trimmed.replace(/;\s*$/, ''));
+      if (solo.id === oldId) {
+        lines[j] = indent + newId + solo.shape + trimmed.slice(trimmed.replace(/;\s*$/, '').length);
+      }
+    }
+  }
+
   function parseFlowchart(text) {
     var result = {
       meta: { direction: 'TD' },
@@ -298,18 +394,15 @@ window.MA.modules.flowchart = (function() {
     // This handles: "A[Start]" or "A[Start] --> B[End]"
     var indent = lines[idx].match(/^(\s*)/)[1];
 
-    // Check if line has edge
-    var edgeType = null, edgePos = -1;
-    for (var ei = 0; ei < EDGE_TYPES.length; ei++) {
-      var pos = trimmed.indexOf(EDGE_TYPES[ei]);
-      if (pos > 0 && (edgePos === -1 || pos < edgePos)) { edgePos = pos; edgeType = EDGE_TYPES[ei]; }
-    }
+    // Check if line has edge (same detection as parseFlowchart — see findEdge)
+    var edge = findEdge(trimmed);
 
-    if (!edgeType) {
+    if (!edge) {
       // Standalone node line
       var m = trimmed.match(/^(\S+?)(\[.*\]|\(.*\)|\{.*\}|>.*\])?\s*;?\s*$/);
       if (!m) return text;
       var nid = m[1];
+      var oldId = nid;
       var sh = m[2] ? parseNodeShape(m[2]) : null;
       var label = sh ? sh.label : nid;
       var shape = sh ? sh.shape : 'rect';
@@ -317,6 +410,7 @@ window.MA.modules.flowchart = (function() {
       else if (field === 'label') label = value;
       else if (field === 'shape') shape = value;
       lines[idx] = indent + nid + buildShape(shape, label);
+      if (field === 'id' && value !== oldId) renameNodeRefs(lines, oldId, value, idx);
       return lines.join('\n');
     }
 
