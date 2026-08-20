@@ -989,6 +989,23 @@ window.MA.modules.gantt = (function() {
   // 追加フォームの状態。gantt 固有なので app.js ではなくここで持つ。
   var addForm = { label: '', id: '', start: '', end: '', kind: 'task', focus: null };
   function setAddFormFocus(field) { addForm.focus = field; }
+
+  // 文書が入れ替わったときの後始末。
+  //
+  // 追加フォームの入力は前の文書に紐づくものなので、図種を切り替えたり
+  // ファイルを開いたら捨てる。残しておくと、本文はひな形に置き換わっているのに
+  // 入力欄にだけ前の図の名前や日付が残り、そのまま追加を押すと意図しない
+  // 要素が入る。他の図種はフォームを毎回作り直すので起きないが、
+  // gantt は状態をモジュール側で保持しているため明示的に消す必要がある。
+  function resetTransientState() {
+    addForm.label = '';
+    addForm.id = '';
+    addForm.start = '';
+    addForm.end = '';
+    addForm.section = undefined;
+    addForm.kind = 'task';
+    addForm.focus = null;
+  }
   function addFormSectionIndex(parsedData) {
     var count = (parsedData && parsedData.sections) ? parsedData.sections.length : 0;
     if (count === 0) return -1;
@@ -1742,6 +1759,7 @@ window.MA.modules.gantt = (function() {
     renderProps: renderProps,
     addForm: addForm,
     setAddFormFocus: setAddFormFocus,
+    resetTransientState: resetTransientState,
     calibrateScale: calibrateScale,
     isMilestoneRect: isMilestoneRect,
     pxToDate: pxToDate,

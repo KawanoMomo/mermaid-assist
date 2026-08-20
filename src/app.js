@@ -1184,6 +1184,8 @@ function init() {
       setZoom(1.0);
       mmdText = ev.target.result;
       loadedFileName = openedName;
+      // ファイルを開いたときも文書は入れ替わる。
+      if (currentModule && currentModule.resetTransientState) currentModule.resetTransientState();
       // 別のファイルを開いたら、前の保存先への参照は捨てる。
       // 残しておくと、開いたつもりの無いファイルを上書きする。
       saveHandle = null;
@@ -1320,15 +1322,31 @@ function init() {
     if (ev.target === helpBox) toggleShortcutHelp(false);   // 外側をクリックでも閉じる
   });
 
-  document.getElementById('exp-mmd').addEventListener('click', function() {
-    exportMenu.classList.remove('open');
-    saveFile();
-  });
+  // 保存の入口は Save に集約した。
+  //
+  // 以前は Save ボタン / Ctrl+S / Ctrl+Shift+S / Export の2項目の4つに散っていた。
+  // 初回に1度だけ使う「保存先の指定」が、毎日使う Export と同じ場所にあった。
+  var saveMenu = document.getElementById('save-menu');
+  var saveMenuBtn = document.getElementById('btn-save-menu');
+  if (saveMenuBtn && saveMenu) {
+    saveMenuBtn.addEventListener('click', function(ev) {
+      ev.stopPropagation();
+      saveMenu.classList.toggle('open');
+    });
+    document.getElementById('save-as').addEventListener('click', function() {
+      saveMenu.classList.remove('open');
+      saveFileAs();
+    });
+    document.addEventListener('click', function() { saveMenu.classList.remove('open'); });
+  }
 
-  document.getElementById('exp-mmd-as').addEventListener('click', function() {
-    exportMenu.classList.remove('open');
-    saveFileAs();
-  });
+  // `?` の存在に気づいてもらうのは初回だけでよい。
+  // 置いた場所が画面最下部の二次色なので、数秒だけアクセント色にする。
+  var helpHint = document.getElementById('status-help');
+  if (helpHint) {
+    helpHint.classList.add('first-run');
+    setTimeout(function() { helpHint.classList.remove('first-run'); }, 5000);
+  }
 
   document.getElementById('exp-svg').addEventListener('click', function() {
     exportMenu.classList.remove('open');
@@ -2183,6 +2201,9 @@ function init() {
       pendingAutoFit = true;
       mmdText = mod.template();
       loadedFileName = '';
+      // 文書が入れ替わったので、モジュールが持っている一時状態を捨てさせる。
+      // 実装していないモジュールは何もしなくてよい (フォームを毎回作り直すため)。
+      if (mod.resetTransientState) mod.resetTransientState();
       markSaved();
       suppressSync = true;
       editorEl.value = mmdText;

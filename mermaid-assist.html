@@ -437,6 +437,33 @@ html, body {
   padding: 0 2px;
 }
 #status-help:hover { color: var(--accent); }
+#status-help.first-run { color: var(--accent); font-weight: 600; }
+
+.save-wrap { position: relative; display: inline-flex; }
+#save-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  z-index: 100;
+  min-width: 220px;
+}
+#save-menu.open { display: block; }
+#save-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+#save-menu button:hover { background: var(--bg-tertiary); }
 
 #statusbar {
   display: flex;
@@ -530,7 +557,13 @@ html, body {
     <span class="logo">MermaidAssist</span>
 
     <button class="tb-btn" id="btn-open" title="ファイルを開く (Ctrl+O)">Open</button>
-    <button class="tb-btn" id="btn-save" title="ファイルを保存 (Ctrl+S)">Save</button>
+    <span class="save-wrap">
+      <button class="tb-btn" id="btn-save" title="ファイルを保存 (Ctrl+S)">Save</button>
+      <button class="tb-btn" id="btn-save-menu" title="保存先を指定して上書き (Ctrl+Shift+S)">▾</button>
+      <div id="save-menu">
+        <button id="save-as">保存先を指定して上書き…</button>
+      </div>
+    </span>
 
     <div class="tb-sep"></div>
 
@@ -549,8 +582,6 @@ html, body {
     <div class="export-wrap">
       <button class="tb-btn" id="btn-export" title="エクスポート">Export ▾</button>
       <div id="export-menu">
-        <button id="exp-mmd">Mermaid記法 (.mmd)</button>
-        <button id="exp-mmd-as">保存先を指定して上書き…</button>
         <button id="exp-svg">SVGとして保存</button>
         <button id="exp-png">PNGとして保存</button>
         <button id="exp-png-transparent">PNG（透過背景）</button>
