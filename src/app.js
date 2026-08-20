@@ -77,6 +77,49 @@ var addCounter = 0;
 // Set when the document is replaced by a different diagram type, so the next
 // render fits the new drawing to the pane instead of inheriting the old zoom.
 var pendingAutoFit = false;
+
+// Every value a selection could legitimately point at, taken from the parse.
+//
+// Modules disagree about which field carries the identity: most use `id`, but a
+// gantt section is selected by its `name` and has no `id` at all. Collecting
+// both is what lets one guard serve every diagram type without a per-module
+// list that would drift.
+function knownSelectionIds(parsedData) {
+  var out = {};
+  if (!parsedData) return out;
+  Object.keys(parsedData).forEach(function(key) {
+    var arr = parsedData[key];
+    if (!Array.isArray(arr)) return;
+    arr.forEach(function(x) {
+      if (!x) return;
+      if (x.id !== undefined && x.id !== null) out[String(x.id)] = true;
+      if (x.name !== undefined && x.name !== null) out[String(x.name)] = true;
+    });
+  });
+  return out;
+}
+
+// Drop selections that no longer point at anything.
+//
+// Deleting the selected task from the editor left the selection on its id, so
+// the properties panel sat on 「タスクが見つかりません」 and stayed there — the
+// user had removed the row and the panel kept reporting an error about it.
+// Renaming the selected element did the same: the selection still named the old
+// id, so editing your own rename cost you the panel.
+//
+// Guarded on a non-empty id set: if a module's parse yields nothing we know
+// about, clearing every selection would be worse than leaving it alone.
+function pruneStaleSelection(parsedData) {
+  var current = window.MA.selection.getSelected();
+  if (!current.length) return;
+  var known = knownSelectionIds(parsedData);
+  if (!Object.keys(known).length) return;
+  var kept = current.filter(function(s) { return known[String(s.id)]; });
+  if (kept.length === current.length) return;
+  // setSelected fires onChange → renderProps + rebuildOverlay. Calling it from
+  // inside refresh() is safe because it does not schedule another refresh.
+  window.MA.selection.setSelected(kept);
+}
 var modules = {};
 var currentModule = null;
 
@@ -813,6 +856,7 @@ async function refresh(skipRender) {
     } catch (e) {
       parsed = { title: '', dateFormat: 'YYYY-MM-DD', axisFormat: '', sections: [], tasks: [] };
     }
+    pruneStaleSelection(parsed);
   }
 
   // During drag: update parse/status/props only, skip expensive mermaid render

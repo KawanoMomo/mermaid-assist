@@ -22,9 +22,21 @@ window.MA.properties = (function() {
     el.addEventListener('change', function() {
       window.MA.history.pushHistory();
       var newText = state.moduleUpdater(state.getMmdText(), lineNum, field, el.value);
+      // Renaming the selected element left the selection on the old id, so the
+      // panel you were typing in switched to 「見つかりません」 the moment the
+      // rename landed. Carry the selection over to the new id instead.
+      if (field === 'id' && el.value) followRename(el.value);
       state.setMmdText(newText);
       state.onUpdate();
     });
+  }
+
+  // Move any selection that pointed at the renamed element to its new id,
+  // keeping the selection type as it was.
+  function followRename(newId) {
+    var sel = window.MA.selection.getSelected();
+    if (sel.length !== 1) return;
+    window.MA.selection.setSelected([{ type: sel[0].type, id: newId }]);
   }
 
   // bindDateField: 開始日/終了日 ペアのバインド (datesUpdater は外部から注入)
