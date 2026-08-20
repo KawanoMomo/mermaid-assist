@@ -843,15 +843,35 @@ window.MA.modules.gantt = (function() {
       }
     }
 
-    // Single-task fallback
+    // Single-task fallback.
+    //
+    // The end used to have to be a `YYYY-MM-DD`, which excluded the most common
+    // way of writing a gantt:
+    //
+    //     設計 :t1, 2026-03-01, 10d
+    //     実装 :t2, after t1, 10d
+    //
+    // Neither task qualifies — the second has no start date at all — so pxPerDay
+    // stayed 0 and dragging did nothing. The bars and the resize handles were
+    // still drawn, so the diagram looked interactive and simply was not.
+    //
+    // A duration is a number of days too; there is no reason to refuse it.
     if (!calibrated && tasksWithDates.length >= 1) {
-      var st = tasksWithDates[0];
-      if (st.task.endDate && DATE_RE.test(st.task.endDate)) {
-        var dur = window.MA.dateUtils.daysBetween(st.task.startDate, st.task.endDate);
-        if (dur > 0) {
+      for (var si = 0; si < tasksWithDates.length && !calibrated; si++) {
+        var st = tasksWithDates[si];
+        var dur = null;
+        if (st.task.endDate && DATE_RE.test(st.task.endDate)) {
+          dur = window.MA.dateUtils.daysBetween(st.task.startDate, st.task.endDate);
+        } else if (st.task.endDate) {
+          dur = durationDays(st.task.endDate);
+        }
+        // 0d (a milestone) would divide by zero, and an unparseable token would
+        // invent a scale out of nothing. Both are better left uncalibrated.
+        if (typeof dur === 'number' && isFinite(dur) && dur > 0 && st.rect.width > 0) {
           calibration.pxPerDay = st.rect.width / dur;
           calibration.originX = st.rect.x;
           calibration.baseDate = st.task.startDate;
+          calibrated = true;
         }
       }
     }

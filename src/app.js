@@ -49,6 +49,8 @@ function rebuildOverlay() {
 
 // ── Drag State ────────────────────────────────────────────────────────────
 var dragState = null;
+// 直近のドラッグ拒否理由。ステータスバーに出し、次の描画で消える。
+var dragBlockedMsg = '';
 // Sequence-specific drag state (participant reorder via gap drop).
 // Kept separate from the Gantt date-drag state above since the two handlers
 // run on the same overlay element but track fundamentally different motion.
@@ -1182,6 +1184,11 @@ function renderStatus() {
   // said so: after pressing 「ここから線を引く」 the panel and the status bar
   // looked exactly as before, so the mode was invisible until a line appeared
   // somewhere unexpected.
+  if (dragBlockedMsg) {
+    statusInfoEl.textContent = dragBlockedMsg;
+    dragBlockedMsg = '';
+    return;
+  }
   var conn = window.MA.connectionMode.getSource();
   if (conn) {
     statusInfoEl.textContent = '接続モード: ' + conn.id +
@@ -1920,6 +1927,21 @@ function init() {
         for (var dti = 0; dti < parsed.tasks.length; dti++) {
           if (parsed.tasks[dti].id === taskId) { task = parsed.tasks[dti]; break; }
         }
+      }
+      // A task whose start comes from `after <id>` has no date to shift, so the
+      // drag never starts. That silence reads as the app being broken: the bar
+      // and its resize handles are drawn like any other, and grabbing them does
+      // nothing at all. Say why.
+      //
+      // (Before date-utils was fixed this branch was worse than silent —
+      // addDays(null, n) counted from the epoch, so the few paths that did get
+      // through moved the task to 1970 and dropped the dependency with it.)
+      if (task && (!task.startDate || !DATE_RE.test(task.startDate))) {
+        dragBlockedMsg = task.after
+          ? '「' + task.label + '」は after ' + task.after + ' で位置が決まります。' +
+            '動かすには開始日を直接指定してください'
+          : '「' + task.label + '」は開始日が日付ではないため動かせません';
+        renderStatus();
       }
       if (task && task.startDate && DATE_RE.test(task.startDate)) {
         // Use overlay SVG for coordinate conversion (same viewBox as mermaid SVG)
