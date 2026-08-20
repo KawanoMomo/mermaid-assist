@@ -21,7 +21,28 @@ window.MA.history = (function() {
   var lastTag = null;
   var lastAt = 0;
 
+  // 連続した編集をひとつに束ねるモード。
+  //
+  // ラベル欄を打鍵ごとに反映させると、各モジュールの change ハンドラが
+  // そのたび pushHistory を呼ぶので、1つの名前を直しただけで履歴が何件も積み、
+  // Ctrl+Z を何度も押すことになる。各モジュール (80か所) を書き換える代わりに、
+  // 呼び出し側がこのモードを張る。
+  var coalesceTag = null;
+  var coalesceWindowMs = 0;
+  function setCoalesceMode(tag, windowMs) {
+    coalesceTag = tag;
+    coalesceWindowMs = windowMs || 0;
+  }
+
   function pushHistory() {
+    if (coalesceTag) {
+      var tag = coalesceTag;
+      var win = coalesceWindowMs;
+      coalesceTag = null;                       // 再入を防ぐ
+      pushHistoryCoalesced(tag, win);
+      coalesceTag = tag;
+      return;
+    }
     undoStack.push(state.getMmdText());
     if (undoStack.length > MAX_HISTORY) undoStack.shift();
     future = [];
@@ -82,6 +103,7 @@ window.MA.history = (function() {
   return {
     init: init,
     pushHistory: pushHistory,
+    setCoalesceMode: setCoalesceMode,
     pushHistoryCoalesced: pushHistoryCoalesced,
     reset: reset,
     undo: undo,

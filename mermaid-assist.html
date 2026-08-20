@@ -361,6 +361,51 @@ html, body {
 }
 
 /* ── Status Bar ────────────────────────────────────────────────────────────── */
+#shortcut-help {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+#shortcut-help[hidden] { display: none; }
+#shortcut-help-inner {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 18px;
+  min-width: 380px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow: auto;
+}
+#shortcut-help-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+#shortcut-help-close {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 7px;
+}
+#shortcut-help-table { border-collapse: collapse; font-size: 12px; }
+#shortcut-help-table td { padding: 3px 14px 3px 0; color: var(--text-primary); vertical-align: top; }
+#shortcut-help-table td:first-child {
+  font-family: var(--font-mono);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
 #statusbar {
   display: flex;
   align-items: center;
@@ -452,8 +497,8 @@ html, body {
   <div id="toolbar">
     <span class="logo">MermaidAssist</span>
 
-    <button class="tb-btn" id="btn-open" title="ファイルを開く">Open</button>
-    <button class="tb-btn" id="btn-save" title="ファイルを保存">Save</button>
+    <button class="tb-btn" id="btn-open" title="ファイルを開く (Ctrl+O)">Open</button>
+    <button class="tb-btn" id="btn-save" title="ファイルを保存 (Ctrl+S)">Save</button>
 
     <div class="tb-sep"></div>
 
@@ -472,6 +517,8 @@ html, body {
     <div class="export-wrap">
       <button class="tb-btn" id="btn-export" title="エクスポート">Export ▾</button>
       <div id="export-menu">
+        <button id="exp-mmd">Mermaid記法 (.mmd)</button>
+        <button id="exp-mmd-as">保存先を指定して上書き…</button>
         <button id="exp-svg">SVGとして保存</button>
         <button id="exp-png">PNGとして保存</button>
         <button id="exp-png-transparent">PNG（透過背景）</button>
@@ -541,6 +588,29 @@ html, body {
     </div>
 
   </div><!-- /#main -->
+
+  <!-- ── Shortcut help (? キー) ────────────────────────────────── -->
+  <div id="shortcut-help" hidden>
+    <div id="shortcut-help-inner">
+      <div id="shortcut-help-head">
+        <span>キーボードショートカット</span>
+        <button id="shortcut-help-close" title="閉じる (Escape)">✕</button>
+      </div>
+      <table id="shortcut-help-table">
+        <tr><td>Ctrl+S</td><td>保存</td></tr>
+        <tr><td>Ctrl+Shift+S</td><td>保存先を指定して上書き (Chrome / Edge)</td></tr>
+        <tr><td>Ctrl+O</td><td>開く</td></tr>
+        <tr><td>Ctrl+Z / Ctrl+Y</td><td>元に戻す / やり直す</td></tr>
+        <tr><td>↑ ↓ ← →</td><td>要素を順に選ぶ (図にフォーカスがあるとき)</td></tr>
+        <tr><td>Delete</td><td>選んでいる要素を削除</td></tr>
+        <tr><td>Ctrl+A</td><td>すべて選択</td></tr>
+        <tr><td>Ctrl+C / Ctrl+V</td><td>選んでいる要素を複写 / 貼り付け</td></tr>
+        <tr><td>Ctrl+Shift+C</td><td>図をクリップボードへ</td></tr>
+        <tr><td>Escape</td><td>選択解除 / 接続モードを中止</td></tr>
+        <tr><td>?</td><td>この一覧を開閉</td></tr>
+      </table>
+    </div>
+  </div>
 
   <!-- ── Status bar ──────────────────────────────────────────────────────── -->
   <div id="statusbar">

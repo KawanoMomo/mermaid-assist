@@ -308,7 +308,11 @@ modules.gantt = {
               '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + window.MA.htmlUtils.escHtml(sec.name) + '">' + window.MA.htmlUtils.escHtml(sec.name) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + taskCount + ')</span></div>' +
               '<button class="prop-section-up" data-section-line="' + sec.line + '" title="上のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:10px;padding:0;">↑</button>' +
               '<button class="prop-section-down" data-section-line="' + sec.line + '" title="下のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:10px;padding:0;">↓</button>' +
-              '<button class="prop-section-delete" data-section-name="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-line="' + sec.line + '" title="セクションごと削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
+              // 巻き添えの件数をボタン自体に出す (block と同じ手)。
+              // 以前はここだけ confirm を出していて、同じ画面のタスク ✕ は無言、
+              // block は件数表示と、3通りの作法が混在していた。押す前に何が起きるかを
+              // ボタンの文字で示し、確認は出さない (Undo で戻せる)。
+              '<button class="prop-section-delete" data-section-name="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-line="' + sec.line + '" data-task-count="' + taskCount + '" title="セクション「' + window.MA.htmlUtils.escHtml(sec.name) + '」と含まれるタスク' + taskCount + '件を削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">✕' + (taskCount > 0 ? taskCount : '') + '</button>' +
             '</div>';
 
           // セクションの下にタスクを並べる。
@@ -323,7 +327,7 @@ modules.gantt = {
             var tkLabel = window.MA.htmlUtils.escHtml(tk.label || tk.id || '');
             var tkId = window.MA.htmlUtils.escHtml(tk.id || '');
             sectionListHtml +=
-              '<div style="display:flex;align-items:center;gap:4px;margin:0 0 3px 14px;padding:2px 4px;background:var(--bg-primary);border-radius:3px;">' +
+              '<div class="ma-list-row" style="display:flex;align-items:center;gap:4px;margin:0 0 3px 14px;padding:2px 4px;background:var(--bg-primary);border-radius:3px;">' +
                 '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + tkLabel + '">' + tkLabel + '</div>' +
                 '<button class="prop-task-select" data-element-id="' + tkId + '" data-line="' + tk.line + '" title="「' + tkLabel + '」を選択" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' +
                 '<button class="prop-task-delete" data-element-id="' + tkId + '" data-line="' + tk.line + '" title="「' + tkLabel + '」を削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
@@ -565,7 +569,7 @@ modules.gantt = {
           btn.addEventListener('click', function() {
             var secName = btn.getAttribute('data-section-name');
             var secLine = parseInt(btn.getAttribute('data-section-line'), 10);
-            if (!confirm('セクション「' + secName + '」と含まれるタスクを削除しますか？')) return;
+            var secTasks = parseInt(btn.getAttribute('data-task-count'), 10) || 0;
             window.MA.history.pushHistory();
             mmdText = deleteSection(mmdText, secLine);
             suppressSync = true;
@@ -573,6 +577,8 @@ modules.gantt = {
             suppressSync = false;
             window.MA.selection.setSelected([]);
             syncLineNumbers();
+            showTransient('セクション「' + secName + '」とタスク' + secTasks +
+              '件を削除 — Ctrl+Z で戻せます');
             scheduleRefresh();
           });
         })(sectionDeleteBtns[sdbi]);
@@ -1250,8 +1256,44 @@ function ganttStatusText(parsedData) {
   return info;
 }
 
+// 一時メッセージ。
+//
+// 「保存できたのか」「いま何が消えたのか」を画面が何も言っていなかった。
+// 行を増やさずに済ませたいので、既存のステータス行を数秒だけ borrow する
+// (dragBlockedMsg が同じ枠を使っているのと同じやり方)。
+var transientMsg = '';
+var transientUntil = 0;
+var transientTimer = null;
+function showTransient(msg, ms) {
+  transientMsg = msg;
+  transientUntil = Date.now() + (ms || 4000);
+  if (transientTimer) clearTimeout(transientTimer);
+  transientTimer = setTimeout(function() { transientMsg = ''; renderStatus(); }, ms || 4000);
+  renderStatus();
+}
+// ショートカット一覧の開閉。Escape でも閉じられる (閉じ方を探させない)。
+function toggleShortcutHelp(force) {
+  var box = document.getElementById('shortcut-help');
+  if (!box) return;
+  var show = (force === undefined) ? box.hasAttribute('hidden') : force;
+  if (show) box.removeAttribute('hidden');
+  else box.setAttribute('hidden', '');
+}
+
+function twoDigit(n) { return (n < 10 ? '0' : '') + n; }
+function savedMessage(d) {
+  return '保存: ' + twoDigit(d.getHours()) + ':' + twoDigit(d.getMinutes());
+}
+function deletedMessage(n) {
+  return n + '件削除 — Ctrl+Z で戻せます';
+}
+
 function renderStatus() {
   if (!statusInfoEl) return;
+  if (transientMsg && Date.now() < transientUntil) {
+    statusInfoEl.textContent = transientMsg;
+    return;
+  }
   // Connection mode changes what the next click means, and nothing on screen
   // said so: after pressing 「ここから線を引く」 the panel and the status bar
   // looked exactly as before, so the mode was invisible until a line appeared
@@ -1271,7 +1313,97 @@ function renderStatus() {
 }
 
 // ── Properties Panel ───────────────────────────────────────────────────────
+//
+// パネルは innerHTML の入れ替えで作り直されるので、再描画のたびに入力欄が
+// 別物になる。確定 (change) のあとだけ再描画していたころは、利用者が既に欄から
+// 離れているので問題にならなかった。打鍵ごとに反映するなら、フォーカスと
+// カーソル位置を持ち越さないと**打っている途中で欄から弾き出される**。
+function withFocusKept(fn) {
+  var a = document.activeElement;
+  var keepId = a && a.id && propsEl && propsEl.contains(a) ? a.id : null;
+  var start = null, end = null;
+  if (keepId && a.setSelectionRange) {
+    try { start = a.selectionStart; end = a.selectionEnd; } catch (e) { /* type による */ }
+  }
+  fn();
+  if (!keepId) return;
+  // 再描画の中でモジュールが自分でフォーカスを置いた場合は、そちらを優先する。
+  // タスク連続入力は「追加ボタンを押したあとラベル欄に戻す」ことで成立しているので、
+  // ここで無差別に戻すとその意図を上書きしてしまう (e2e が捕まえた)。
+  // 戻すのは、再描画でフォーカスが**失われた**ときだけ。
+  var nowFocused = document.activeElement;
+  if (nowFocused && nowFocused !== document.body &&
+      propsEl && propsEl.contains(nowFocused)) return;
+  var back = document.getElementById(keepId);
+  if (!back) return;
+  back.focus();
+  if (start !== null && back.setSelectionRange) {
+    try { back.setSelectionRange(start, end); } catch (e) { /* 同上 */ }
+  }
+}
+
+// 一覧の絞り込み。
+//
+// 100要素の図で一覧は7.7画面分になり、目的の要素に辿り着く手段が目視の
+// スクロールしか無かった。要素数に対して線形に効く唯一の摩擦なので、ここだけは
+// 縦に1行増やす価値がある。行が少ないうちは出さない。
+var listFilterText = '';
+var LIST_FILTER_MIN_ROWS = 12;
+
+function applyListFilter() {
+  if (!propsEl) return;
+  var rows = propsEl.querySelectorAll('.ma-list-row');
+  if (rows.length < LIST_FILTER_MIN_ROWS) return;
+
+  var box = document.getElementById('ma-list-filter');
+  if (!box) {
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'margin-bottom:6px;';
+    wrap.innerHTML = '<input id="ma-list-filter" type="text" placeholder="一覧を絞り込む (' +
+      rows.length + '件)" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);' +
+      'color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">';
+    propsEl.insertBefore(wrap, propsEl.firstChild);
+    box = document.getElementById('ma-list-filter');
+    box.value = listFilterText;
+    box.addEventListener('input', function() {
+      listFilterText = box.value;
+      filterRows();
+    });
+  }
+  filterRows();
+}
+
+function filterRows() {
+  if (!propsEl) return;
+  var q = listFilterText.trim().toLowerCase();
+  var rows = propsEl.querySelectorAll('.ma-list-row');
+  var hit = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    if (!q) { r.style.display = ''; hit++; continue; }
+    var idAttr = '';
+    var withId = r.querySelector('[data-element-id]');
+    if (withId) idAttr = withId.getAttribute('data-element-id') || '';
+    var text = (r.textContent || '') + ' ' + idAttr;
+    var show = text.toLowerCase().indexOf(q) >= 0;
+    r.style.display = show ? '' : 'none';
+    if (show) hit++;
+  }
+  var box = document.getElementById('ma-list-filter');
+  if (box) {
+    // 絞った結果0件を無言で見せると「一覧が消えた」と読めるので、件数を常に出す。
+    box.placeholder = q ? ('絞り込み中: ' + hit + '件') : ('一覧を絞り込む (' + rows.length + '件)');
+  }
+}
+
 function renderProps() {
+  withFocusKept(function() {
+    renderPropsInner();
+    applyListFilter();
+  });
+}
+
+function renderPropsInner() {
   if (!propsEl || !currentModule) return;
   // Gantt's renderProps uses the old 2-arg form (inline in app.js)
   // Sequence and future modules use the 4-arg form: (selData, parsedData, propsEl, ctx)
@@ -1453,6 +1585,10 @@ var loadedFileName = '';
 // autosave and no server — so closing it threw the work away without a word.
 var savedText = null;
 
+// markSaved は「保存した」ではなく「未保存判定の基準を今の本文にする」関数。
+// 起動時のサンプル読み込み・ファイルを開いたとき・図種切替でも呼ばれるので、
+// ここに「保存: HH:MM」を出すと**保存していないのに保存したと言う**ことになる
+// (実機のスクリーンショットで発覚した)。表示は保存動作の側で行う。
 function markSaved() { savedText = mmdText; }
 
 // A diagram is worth warning about only when it differs from what was last
@@ -1506,14 +1642,71 @@ function openFile() {
   document.getElementById('file-input').click();
 }
 
-function saveFile() {
+// 一度「名前を付けて保存」したファイルへの参照。以後はここへ上書きする。
+var saveHandle = null;
+
+function downloadAsFile() {
   var blob = new Blob([mmdText], { type: 'text/plain' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = currentBaseName() + '.mmd';
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+// 保存。
+//
+// 従来はダウンロードだけで、名前は図の title から自動で決まり、場所も選べなかった。
+// リポジトリの `docs/arch.mmd` を更新する運用だと、毎回ダウンロードフォルダから
+// 移動してリネームすることになる。
+//
+// ただし Save の既定をファイル選択ダイアログに変えるのは違う。1クリックで
+// 終わっていた操作がモーダルになるのは、毎日使う側には改悪ではない
+// (実際、ヘッドレス環境ではダイアログが戻らず Save が完了しなくなった)。
+// 上書き先を一度指定したときだけ、以後の Save がそこへの上書きになる。
+function saveFile() {
+  if (saveHandle) { overwriteSaved(); return; }
+  downloadAsFile();
   markSaved();
+  showTransient(savedMessage(new Date()) + ' (ダウンロード)');
+}
+
+async function overwriteSaved() {
+  try {
+    var w = await saveHandle.createWritable();
+    await w.write(mmdText);
+    await w.close();
+    markSaved();
+    showTransient(savedMessage(new Date()) + ' → ' + (saveHandle.name || ''));
+  } catch (e) {
+    // 上書きに失敗したら参照を捨て、黙ってダウンロードに落とす。
+    // 保存できたことにして本文を失わせるのが一番悪い。
+    saveHandle = null;
+    downloadAsFile();
+    markSaved();
+    showTransient('上書きに失敗したのでダウンロードしました');
+  }
+}
+
+// 上書き先を指定する (Ctrl+Shift+S / Export メニュー)。
+// 非対応ブラウザ (Firefox / Safari) ではこの機能自体が無いので、
+// できないことをその場で言う。黙ってダウンロードすると「指定できた」と誤解される。
+async function saveFileAs() {
+  if (!window.showSaveFilePicker) {
+    showTransient('このブラウザは上書き保存に対応していません (Chrome / Edge なら可能)', 5000);
+    return;
+  }
+  try {
+    saveHandle = await window.showSaveFilePicker({
+      suggestedName: currentBaseName() + '.mmd',
+      types: [{ description: 'Mermaid', accept: { 'text/plain': ['.mmd', '.mermaid'] } }],
+    });
+  } catch (e) {
+    showTransient('保存先の指定を中止しました', 2500);
+    return;
+  }
+  if (saveHandle && saveHandle.name) loadedFileName = saveHandle.name;
+  overwriteSaved();
 }
 
 // ── Export Functions ───────────────────────────────────────────────────────
@@ -1734,6 +1927,9 @@ function init() {
       setZoom(1.0);
       mmdText = ev.target.result;
       loadedFileName = openedName;
+      // 別のファイルを開いたら、前の保存先への参照は捨てる。
+      // 残しておくと、開いたつもりの無いファイルを上書きする。
+      saveHandle = null;
       markSaved();
       suppressSync = true;
       editorEl.value = mmdText;
@@ -1760,6 +1956,73 @@ function init() {
   });
 
   // Export actions
+  // .mmd を Export の先頭に置く。Git に載せるのは .mmd なのに、「書き出す」の
+  // 入口が Save と Export に割れており、最も使う形式がメニューに無かった。
+  // 打鍵ごとに反映させる。
+  //
+  // プロパティ欄は change (確定時) でしか反映せず、エディタ側は input で即時だった。
+  // 同じ「ラベルを直す」で反映のタイミングが違うので、名前を試行錯誤する場面で
+  // GUI 側だけ結果を見ながら詰められない。
+  //
+  // 対象はラベル欄だけ。ID 欄を即時にすると、打ちかけの不完全な id で
+  // 参照側を一斉に書き換えてしまう (リネームは伝播する)。
+  // 既存の change ハンドラをそのまま使うので、各モジュールは手を入れない。
+  var LIVE_MS = 150;
+  var liveTimer = null;
+  if (propsEl) {
+    propsEl.addEventListener('input', function(ev) {
+      var t = ev.target;
+      if (!t || t.tagName !== 'INPUT' || t.type !== 'text') return;
+      if (!/-label$/.test(t.id || '')) return;
+      // 欄を触っている間はずっと束ねる。
+      //
+      // 合成した change だけ束ねても足りなかった。欄を離れるとブラウザが
+      // 本物の change を出すので、そちらが別の履歴を積む。結果、1つの名前を
+      // 直しただけで Ctrl+Z が2回必要になっていた (e2e が捕まえた)。
+      window.MA.history.setCoalesceMode('live-label:' + t.id, 600000);
+      if (liveTimer) clearTimeout(liveTimer);
+      liveTimer = setTimeout(function() {
+        // 打鍵ごとに反映すると、モジュール側の change ハンドラがそのたび
+        // pushHistory を呼ぶ。束ねないと、1つの名前を直すのに Ctrl+Z を
+        // 何度も押すことになる (「1編集 = Undo 1回」はこのツールの規律)。
+        t.dispatchEvent(new Event('change', { bubbles: true }));
+      }, LIVE_MS);
+    });
+
+    // 欄を離れたら束ねを終える。次の操作は別の Undo 単位。
+    // 再描画で同じ欄にフォーカスが戻る場合 (withFocusKept) は継続する。
+    propsEl.addEventListener('focusout', function(ev) {
+      var t = ev.target;
+      if (!t || !/-label$/.test(t.id || '')) return;
+      setTimeout(function() {
+        var a = document.activeElement;
+        if (a && a.id === t.id) return;
+        // 保留中の合成 change を捨てる。欄を離れた時点でブラウザが本物の
+        // change を出して確定済みなので、この後に遅れて発火すると束ねが切れた
+        // あとにもう一件履歴を積む (打ってすぐ離れると Undo が2回必要になっていた)。
+        if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
+        window.MA.history.setCoalesceMode(null, 0);
+      }, 0);
+    });
+  }
+
+  var helpClose = document.getElementById('shortcut-help-close');
+  if (helpClose) helpClose.addEventListener('click', function() { toggleShortcutHelp(false); });
+  var helpBox = document.getElementById('shortcut-help');
+  if (helpBox) helpBox.addEventListener('click', function(ev) {
+    if (ev.target === helpBox) toggleShortcutHelp(false);   // 外側をクリックでも閉じる
+  });
+
+  document.getElementById('exp-mmd').addEventListener('click', function() {
+    exportMenu.classList.remove('open');
+    saveFile();
+  });
+
+  document.getElementById('exp-mmd-as').addEventListener('click', function() {
+    exportMenu.classList.remove('open');
+    saveFileAs();
+  });
+
   document.getElementById('exp-svg').addEventListener('click', function() {
     exportMenu.classList.remove('open');
     exportSVG();
@@ -2428,6 +2691,9 @@ function init() {
       e.preventDefault(); window.MA.history.undo();
     } else if (e.ctrlKey && e.key === 'y' && !e.isComposing) {
       e.preventDefault(); window.MA.history.redo();
+    } else if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
+      e.preventDefault();
+      saveFileAs();
     } else if (e.ctrlKey && e.key === 's') {
       e.preventDefault(); saveFile();
     } else if (e.ctrlKey && e.key === 'o') {
@@ -2445,7 +2711,19 @@ function init() {
       suppressSync = false;
       window.MA.selection.setSelected([]);
       syncLineNumbers();
+      // 削除に確認を出さないのは Undo で戻せるからだが、戻せることを示して
+      // いるのはツールバーの Undo だけで、視線は図の上にある。消したその場で言う。
+      showTransient(deletedMessage(lines.length));
       scheduleRefresh();
+    } else if (e.key === '?' && !inInput && !inEditor) {
+      // ショートカットが12個あるのに、それを知る手段が画面に無かった。
+      // キーボード中心の人にとって一番価値のある部分が伝わっていない。
+      e.preventDefault();
+      toggleShortcutHelp();
+    } else if (e.key === 'Escape' &&
+               document.getElementById('shortcut-help') &&
+               !document.getElementById('shortcut-help').hasAttribute('hidden')) {
+      toggleShortcutHelp(false);
     } else if (e.key === 'Escape') {
       // Escape has to get out of connection mode too. Without it the only way
       // to leave was to complete the edge — clicking anywhere else on the canvas

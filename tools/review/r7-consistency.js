@@ -42,6 +42,11 @@ const CANON = [
     await p.keyboard.press('Escape');
     await p.waitForTimeout(300);
 
+    // 一覧は「何も選んでいない状態」に出る。選ぶと編集画面に切り替わるので、
+    // 選択より前に数えないと、全図種で0件に見える (最初それで誤検出した)。
+    const listRowsBefore = await p.evaluate(() =>
+      document.querySelectorAll('#props-content .ma-list-row').length);
+
     // 図の上から1つ選ぶ。選べない図種はオーバーレイ非対応 (E2 で見送り済み) なので
     // 一覧側から選ぶ経路にも回して、どちらでも選べない場合だけ記録する。
     let picked = false;
@@ -66,6 +71,7 @@ const CANON = [
       }));
       return { btns, labels, fields, empty: root.textContent.trim().length === 0 };
     });
+    info.listRows = listRowsBefore;
     dump[t] = info;
     await p.close();
   }
@@ -78,6 +84,17 @@ const CANON = [
     if (d.empty) findings.push({ module: t, fn: 'K1 編集手段', what: 'プロパティ欄が空のまま' });
     else if (d.btns.length === 0 && d.fields.length === 0) {
       findings.push({ module: t, fn: 'K1 編集手段', what: '選んでもボタンも入力欄も出ない' });
+    }
+  });
+
+  // K7 入口の揃い: どの図種でも「一覧 → 選択 → 編集」が同じ位置に出ること。
+  //
+  // gantt だけ一覧が無く、タスクを選ぶ手段がチャート上のバーだけだった。
+  // 図種をまたぐたびに入口を探し直すのは、熟達しても速くならない設計。
+  Object.keys(dump).forEach((t) => {
+    if (!dump[t].listRows) {
+      findings.push({ module: t, fn: 'K7 入口',
+        what: '要素の一覧が出ない (他の図種にはある)' });
     }
   });
 

@@ -179,7 +179,9 @@ window.MA.properties = (function() {
     var delTitle = ' title="' + escHtml(delTitleText) + '"';
     var deleteBtn = opts.deleteClass ?
       '<button class="' + opts.deleteClass + '"' + dataAttrs + delTitle + ' style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">' + delLabel + '</button>' : '';
-    return '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
+    // 行に印を付ける。一覧の絞り込みはこの印を見て行を選ぶので、
+    // 各モジュールは何もしなくてよい (41か所がこの関数を通る)。
+    return '<div class="ma-list-row" style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
       '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + fontStyle + '">' + escHtml(opts.label) + sub + '</div>' +
       selectBtn + deleteBtn +
     '</div>';
