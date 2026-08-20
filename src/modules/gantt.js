@@ -219,7 +219,23 @@ window.MA.modules.gantt = (function() {
     if (field === 'label') {
       parsed.label = value;
     } else if (field === 'status') {
+      var wasMilestone = parsed.status === 'milestone';
       parsed.status = value || null;
+      // status is the single source of truth for "is this a milestone", so the
+      // line shape has to follow it. `0d` is not decoration: without it mermaid
+      // cannot resolve the milestone's extent and drops it (F7), so marking a
+      // task as a milestone would make it vanish. Leaving `0d` behind on the way
+      // out is the same failure mirrored — a zero-width bar.
+      if (parsed.status === 'milestone') {
+        parsed.endDate = '0d';
+      } else if (wasMilestone && parsed.endDate === '0d') {
+        // Not null: `納品 :m1, 2026-04-01` with no third field makes mermaid read
+        // the id as a date and refuse the whole chart ("Invalid date:m1"). The
+        // unit test that only asserted "0d is gone" passed on that output — the
+        // render oracle is what caught it. 1d is the shortest task that is still
+        // a task; 0d would be the milestone we are leaving.
+        parsed.endDate = '1d';
+      }
     } else if (field === 'id') {
       parsed.id = value;
     } else if (field === 'after') {
@@ -239,10 +255,69 @@ window.MA.modules.gantt = (function() {
   // addTask — inserts a new task line at the end of the section identified by
   // sectionIndex (0-based, from parseGantt result). Pass -1 to append at end of
   // the whole diagram.
-  function addTask(text, sectionIndex, label, id, startDate, endDate) {
+  // Next unused auto id.
+  //
+  // The old `'t' + (++addCounter)` counter lived in app.js and knew nothing about
+  // the document: reopening a file, or deleting and re-adding, produced an id
+  // that already existed. Two tasks with the same id make `after <id>` point at
+  // whichever one mermaid saw last, so a dependency silently moves.
+  function nextTaskId(text) {
+    var used = {};
+    var tasks = parseGantt(text).tasks;
+    for (var i = 0; i < tasks.length; i++) {
+      if (tasks[i].id) used[tasks[i].id] = true;
+    }
+    var n = 1;
+    while (used['t' + n]) n++;
+    return 't' + n;
+  }
+
+  // The task the next one should follow on from: the last task of the section
+  // whose start and end are *both* plain dates.
+  //
+  // Anything else (a duration, an `after` reference, a missing value) returns
+  // null and the caller leaves the date fields empty. Guessing a resolved date
+  // and filling it in silently is worse: F9 showed the naive version producing
+  // either an exception or a 1970-01-01, and a wrong date that looks right is
+  // harder to notice than a blank field.
+  function lastResolvedTask(text, sectionIndex) {
+    if (!text) return null;
+    var parsed = parseGantt(text);
+    var sections = parsed.sections || [];
+    var tasks = parsed.tasks || [];
+    var inSection = tasks.filter(function(t) {
+      if (sectionIndex === -1 || sections.length === 0) return true;
+      return t.sectionIndex === sectionIndex;
+    });
+    if (inSection.length === 0) return null;
+    var last = inSection[inSection.length - 1];
+    if (!last.startDate || !last.endDate) return null;
+    if (!DATE_RE.test(last.startDate) || !DATE_RE.test(last.endDate)) return null;
+    return last;
+  }
+
+  function nextStartDate(text, sectionIndex) {
+    var last = lastResolvedTask(text, sectionIndex);
+    return last ? last.endDate : null;
+  }
+
+  function nextDurationDays(text, sectionIndex) {
+    var last = lastResolvedTask(text, sectionIndex);
+    if (!last) return null;
+    var days = window.MA.dateUtils.daysBetween(last.startDate, last.endDate);
+    return (typeof days === 'number' && isFinite(days)) ? days : null;
+  }
+
+  // `0d` is not optional: without it mermaid cannot resolve the milestone's
+  // extent and drops it from the chart (F7).
+  function milestoneMeta(id, date) {
+    return rebuildTaskMeta('milestone', id, date, '0d', null);
+  }
+
+  function addTask(text, sectionIndex, label, id, startDate, endDate, status) {
     var lines = text.split('\n');
     var parsed = parseGantt(text);
-    var newLine = '    ' + label + ' :' + rebuildTaskMeta(null, id, startDate, endDate, null);
+    var newLine = '    ' + label + ' :' + rebuildTaskMeta(status || null, id, startDate, endDate, null);
 
     var insertAt; // index in lines array AFTER which we insert (we splice at insertAt+1)
 
@@ -746,6 +821,10 @@ window.MA.modules.gantt = (function() {
     updateTaskDates: updateTaskDates,
     updateTaskField: updateTaskField,
     addTask: addTask,
+    nextTaskId: nextTaskId,
+    nextStartDate: nextStartDate,
+    nextDurationDays: nextDurationDays,
+    milestoneMeta: milestoneMeta,
     deleteTask: deleteTask,
     sanitizeAfterDependencies: sanitizeAfterDependencies,
     addSection: addSection, moveSection: moveSection, resolveSpan: resolveSpan,

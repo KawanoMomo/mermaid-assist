@@ -293,15 +293,24 @@ test.describe('Zoom', () => {
     expect(parseInt(newZoom)).toBeGreaterThan(parseInt(initialZoom));
   });
 
-  test('Fit button adjusts zoom to container', async ({ page }) => {
+  // Fit no longer means "scale the drawing down to a percentage" for gantt.
+  // It redraws the chart at the container width and shows the mode name instead
+  // of a percentage, so asserting on parseInt('概観') is meaningless.
+  // What matters is that the chart actually stops overflowing.
+  test('Fit button fits the chart to the container', async ({ page }) => {
     await page.goto(HTML_PATH);
     await waitForRender(page);
 
     await page.locator('#btn-zoom-fit').click();
-    const zoomText = await page.locator('#zoom-display').textContent();
-    const zoomVal = parseInt(zoomText);
-    expect(zoomVal).toBeGreaterThan(10);
-    expect(zoomVal).toBeLessThan(500);
+    await page.waitForTimeout(500);
+
+    await expect(page.locator('#zoom-display')).toHaveText('概観');
+    const fits = await page.evaluate(() => {
+      const svg = document.querySelector('#preview-svg svg');
+      const box = document.getElementById('preview-container');
+      return svg.getBoundingClientRect().width <= box.clientWidth + 1;
+    });
+    expect(fits).toBe(true);
   });
 });
 

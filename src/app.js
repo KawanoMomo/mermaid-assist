@@ -71,6 +71,32 @@ var dragRenderTimer = null;
 var renderCounter = 0;
 var clipboard = null;
 var addCounter = 0;
+
+// Add-form state, held outside the DOM.
+//
+// renderProps rebuilds the panel with innerHTML on every keystroke in the editor
+// and on every selection change, and the date fields were hardcoded
+// (value="2026-04-01" / "2026-04-15"). A date the user typed for a parallel
+// task was overwritten by the next refresh, so "adjust the date only when the
+// work is parallel" was not a workflow the panel could support.
+//
+// Cleared on a successful add and on a diagram-type switch, nowhere else.
+var addForm = { label: '', id: '', start: '', end: '', kind: 'task', focus: null };
+
+// Which field to focus after the panel is rebuilt, so a continuous run of adds
+// does not need a click between each one.
+function setAddFormFocus(field) { addForm.focus = field; }
+
+// The section the add form should be pointing at. Falls back to the first
+// section when the remembered one no longer exists (the user deleted it), and to
+// -1 when there are no sections at all.
+function addFormSectionIndex(parsedData) {
+  var count = (parsedData && parsedData.sections) ? parsedData.sections.length : 0;
+  if (count === 0) return -1;
+  var want = parseInt(addForm.section, 10);
+  if (isNaN(want) || want < 0 || want >= count) return 0;
+  return want;
+}
 var modules = {};
 var currentModule = null;
 
@@ -204,8 +230,12 @@ modules.gantt = {
     if (!selData || selData.length === 0) {
       var sectionOptions = '';
       if (parsedData && parsedData.sections) {
+        var keepSec = addFormSectionIndex(parsedData);
         for (var si = 0; si < parsedData.sections.length; si++) {
-          sectionOptions += '<option value="' + si + '">' + window.MA.htmlUtils.escHtml(parsedData.sections[si].name) + '</option>';
+          // The chosen section has to survive the rebuild too, otherwise every
+          // keystroke drops the user back to the first section.
+          var selAttr = (String(si) === String(keepSec)) ? ' selected' : '';
+          sectionOptions += '<option value="' + si + '"' + selAttr + '>' + window.MA.htmlUtils.escHtml(parsedData.sections[si].name) + '</option>';
         }
       }
       if (!sectionOptions) {
@@ -238,24 +268,47 @@ modules.gantt = {
         '</div>';
       }
 
+      var G = window.MA.modules.gantt;
+      var addSecIdx = parseInt(addFormSectionIndex(parsedData), 10);
+      var isMilestone = addForm.kind === 'milestone';
+      // Only used to prefill an empty field: a value the user typed wins.
+      var autoStart = G.nextStartDate(mmdText, addSecIdx);
+      var autoDays = G.nextDurationDays(mmdText, addSecIdx);
+      var autoEnd = (autoStart && autoDays !== null)
+        ? window.MA.dateUtils.addDays(autoStart, autoDays) : '';
+      var fStart = addForm.start || autoStart || '';
+      var fEnd = addForm.end || autoEnd || '';
+      var inputStyle = 'width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;';
+      var esc = window.MA.htmlUtils.escHtml;
+
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">タスクを選択するか、新規追加</div>' +
+        // 種別トグル。status を唯一の真とし、これはその入力手段でしかない。
+        '<div style="margin-bottom:8px;display:flex;gap:2px;">' +
+          '<button id="prop-add-kind-task" style="flex:1;background:' + (isMilestone ? 'var(--bg-tertiary)' : 'var(--accent)') + ';color:' + (isMilestone ? 'var(--text-primary)' : '#fff') + ';border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">タスク</button>' +
+          '<button id="prop-add-kind-milestone" style="flex:1;background:' + (isMilestone ? 'var(--accent)' : 'var(--bg-tertiary)') + ';color:' + (isMilestone ? '#fff' : 'var(--text-primary)') + ';border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">マイルストーン</button>' +
+        '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label>' +
-          '<input id="prop-add-label" type="text" value="新規タスク" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+          '<input id="prop-add-label" type="text" value="' + esc(addForm.label || '新規タスク') + '" style="' + inputStyle + '">' +
         '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ID</label>' +
-          '<input id="prop-add-id" type="text" placeholder="t' + (addCounter + 1) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+          '<input id="prop-add-id" type="text" value="' + esc(addForm.id) + '" placeholder="' + esc(G.nextTaskId(mmdText)) + '" style="' + inputStyle + '">' +
         '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
-          '<input id="prop-add-start" type="date" value="2026-04-01" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
-          '<input id="prop-add-end" type="date" value="2026-04-15" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' +
+        (isMilestone
+          ? '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">日付</label>' +
+              '<input id="prop-add-start" type="date" value="' + esc(fStart) + '" style="' + inputStyle + '">' +
+            '</div>'
+          : '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
+              '<input id="prop-add-start" type="date" value="' + esc(fStart) + '" style="' + inputStyle + '">' +
+            '</div>' +
+            '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
+              '<input id="prop-add-end" type="date" value="' + esc(fEnd) + '" style="' + inputStyle + '">' +
+            '</div>') +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション</label>' +
           '<select id="prop-add-section" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + sectionOptions + '</select>' +
@@ -302,26 +355,83 @@ modules.gantt = {
           })() +
         '</div>';
 
-      // Bind add task button
-      var addBtn = document.getElementById('prop-add-btn');
-      if (addBtn) {
-        addBtn.addEventListener('click', function() {
-          var label = document.getElementById('prop-add-label').value || '新規タスク';
-          var idEl = document.getElementById('prop-add-id');
-          var id = (idEl && idEl.value) ? idEl.value : ('t' + (++addCounter));
-          var start = document.getElementById('prop-add-start').value || '2026-04-01';
-          var end = document.getElementById('prop-add-end').value || '2026-04-15';
-          var secIdx = parseInt(document.getElementById('prop-add-section').value, 10);
-          window.MA.history.pushHistory();
-          mmdText = addTask(mmdText, secIdx, label, id, start, end);
-          window.MA.selection.setSelected([{ type: 'task', id: id }]); // 追加したタスクを自動選択
-          suppressSync = true;
-          editorEl.value = mmdText;
-          suppressSync = false;
-          syncLineNumbers();
-          scheduleRefresh();
-          // renderPropsは scheduleRefresh → refresh → renderProps で自動的に呼ばれるので、追加呼び出しは不要
+      // Keep every field in addForm as it is typed, so the next rebuild restores
+      // it instead of resetting to the hardcoded defaults.
+      ['label', 'id', 'start', 'end'].forEach(function(field) {
+        var el = document.getElementById('prop-add-' + field);
+        if (!el) return;
+        el.addEventListener('input', function() { addForm[field] = this.value; });
+        // Enter anywhere in the form adds the task — the add button is below the
+        // fold on a short panel and the round trip to it is the whole friction.
+        el.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') { e.preventDefault(); doAddTask(); }
         });
+      });
+      var secSel = document.getElementById('prop-add-section');
+      if (secSel) {
+        secSel.addEventListener('change', function() { addForm.section = this.value; });
+      }
+
+      window.MA.properties.bindEvent('prop-add-kind-task', 'click', function() {
+        addForm.kind = 'task';
+        setAddFormFocus('label');
+        renderProps();
+      });
+      window.MA.properties.bindEvent('prop-add-kind-milestone', 'click', function() {
+        addForm.kind = 'milestone';
+        setAddFormFocus('label');
+        renderProps();
+      });
+
+      function doAddTask() {
+        var labelEl = document.getElementById('prop-add-label');
+        var idEl = document.getElementById('prop-add-id');
+        var startEl = document.getElementById('prop-add-start');
+        var endEl = document.getElementById('prop-add-end');
+        var secEl = document.getElementById('prop-add-section');
+        var label = (labelEl && labelEl.value) || '新規タスク';
+        var id = (idEl && idEl.value) ? idEl.value : window.MA.modules.gantt.nextTaskId(mmdText);
+        var start = startEl ? startEl.value : '';
+        var secIdx = secEl ? parseInt(secEl.value, 10) : -1;
+        var milestone = addForm.kind === 'milestone';
+        // Without a date there is nothing to place the bar at; mermaid resolves a
+        // missing start to the chart origin, which reads as a task that silently
+        // jumped to the beginning of the project.
+        if (!start) {
+          if (startEl) startEl.focus();
+          return;
+        }
+        var end = milestone ? '0d' : ((endEl && endEl.value) || start);
+        window.MA.history.pushHistory();
+        mmdText = addTask(mmdText, secIdx, label, id, start, end, milestone ? 'milestone' : null);
+        window.MA.selection.setSelected([{ type: 'task', id: id }]); // 追加したタスクを自動選択
+        // Clear only what identifies this task. The section and the kind are the
+        // user's current context and carry over to the next add; the dates are
+        // recomputed from the task just added.
+        addForm.label = '';
+        addForm.id = '';
+        addForm.start = '';
+        addForm.end = '';
+        addForm.section = secEl ? secEl.value : addForm.section;
+        setAddFormFocus('label');
+        suppressSync = true;
+        editorEl.value = mmdText;
+        suppressSync = false;
+        syncLineNumbers();
+        scheduleRefresh();
+        // renderPropsは scheduleRefresh → refresh → renderProps で自動的に呼ばれるので、追加呼び出しは不要
+      }
+
+      window.MA.properties.bindEvent('prop-add-btn', 'click', doAddTask);
+
+      // Restore focus after the rebuild that follows an add or a kind switch.
+      if (addForm.focus) {
+        var focusEl = document.getElementById('prop-add-' + addForm.focus);
+        addForm.focus = null;
+        if (focusEl) {
+          focusEl.focus();
+          if (focusEl.select) focusEl.select();
+        }
       }
 
       // Bind add section button
@@ -482,14 +592,23 @@ modules.gantt = {
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ID</label>' +
           '<input id="prop-id" type="text" value="' + window.MA.htmlUtils.escHtml(window.MA.parserUtils.isAutoId(task.id) ? '' : task.id) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
         '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
-          '<input id="prop-start" type="date" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
-          '<input id="prop-end" type="date" value="' + window.MA.htmlUtils.escHtml(task.endDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' +
+        // A milestone is a point in time; the second date field has nothing to
+        // hold. status is the single source of truth for what a task is, so the
+        // panel folds purely on it — the add form's kind toggle only ever writes
+        // status, it never gets its own opinion.
+        (task.status === 'milestone'
+          ? '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">日付</label>' +
+              '<input id="prop-start" type="date" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '</div>'
+          : '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
+              '<input id="prop-start" type="date" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '</div>' +
+            '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
+              '<input id="prop-end" type="date" value="' + window.MA.htmlUtils.escHtml(task.endDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '</div>') +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ステータス</label>' +
           '<div style="display:flex;gap:2px;">' + statusBtns + '</div>' +

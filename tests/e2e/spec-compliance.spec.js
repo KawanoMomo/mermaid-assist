@@ -420,13 +420,26 @@ test.describe('Spec 4.4: ズーム', () => {
     await page.goto(HTML_URL);
     await waitForRender(page);
 
-    // Zoom in a lot first
+    // 拡大してはみ出させる
     for (let i = 0; i < 5; i++) await page.locator('#btn-zoom-in').click();
-    const zoomed = parseInt(await page.locator('#zoom-display').textContent());
+    await page.waitForTimeout(500);
+    const overflowed = await page.evaluate(() => {
+      const svg = document.querySelector('#preview-svg svg');
+      const box = document.getElementById('preview-container');
+      return svg.getBoundingClientRect().width > box.clientWidth;
+    });
+    expect(overflowed).toBe(true);
 
+    // Fit で概観モードに戻り、コンテナに収まる
     await page.locator('#btn-zoom-fit').click();
-    const fit = parseInt(await page.locator('#zoom-display').textContent());
-    expect(fit).toBeLessThan(zoomed);
+    await page.waitForTimeout(500);
+    await expect(page.locator('#zoom-display')).toHaveText('概観');
+    const fits = await page.evaluate(() => {
+      const svg = document.querySelector('#preview-svg svg');
+      const box = document.getElementById('preview-container');
+      return svg.getBoundingClientRect().width <= box.clientWidth + 1;
+    });
+    expect(fits).toBe(true);
   });
 
   test('Ctrl+ホイールでズーム', async ({ page }) => {
