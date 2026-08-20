@@ -56,7 +56,7 @@ window.MA.modules.blockBeta = (function() {
       BLOCK_TOKEN_RE.lastIndex = 0;
       while ((m = BLOCK_TOKEN_RE.exec(trimmed)) !== null) {
         var id = m[1];
-        var label = m[2] || m[3] || m[4] || id;
+        var label = decodeLabel(m[2] || m[3] || m[4] || id);
         // Skip tokens that are actually link keywords (shouldn't happen here but guard)
         if (id === 'block' || id === 'end' || id === 'columns') continue;
         result.elements.push({ kind: 'block', id: id, label: label, parentId: parent2, line: lineNum });
@@ -66,7 +66,7 @@ window.MA.modules.blockBeta = (function() {
   }
 
   function addBlock(text, id, label) {
-    var token = label && label !== id ? id + '["' + label + '"]' : id;
+    var token = label && label !== id ? id + '["' + encodeLabel(label) + '"]' : id;
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
@@ -99,7 +99,7 @@ window.MA.modules.blockBeta = (function() {
   }
 
   function addNestedBlock(text, parentId, id, label) {
-    var token = label && label !== id ? id + '["' + label + '"]' : id;
+    var token = label && label !== id ? id + '["' + encodeLabel(label) + '"]' : id;
     var lines = text.split('\n');
     for (var i = 0; i < lines.length; i++) {
       if (isGroupStart(lines[i].trim(), parentId)) {
@@ -235,12 +235,25 @@ window.MA.modules.blockBeta = (function() {
     return out + line.slice(last);
   }
 
+  // 引用の中の  は mermaid が受け付けない。 に逃がす (c4 と同じ手)。
+  //  を先に逃がすのは、利用者が実際に  と打った場合を壊さないため。
+  function encodeLabel(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/#/g, '#35;')
+      .replace(/"/g, '#quot;');
+  }
+  function decodeLabel(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/#quot;/g, '"')
+      .replace(/#35;/g, '#');
+  }
+
   function updateBlockLabel(text, lineNum, blockId, newLabel) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     lines[idx] = replaceBlockToken(lines[idx], blockId, function(id) {
-      return id + (newLabel ? '["' + newLabel + '"]' : '');
+      return id + (newLabel ? '["' + encodeLabel(newLabel) + '"]' : '');
     });
     return lines.join('\n');
   }

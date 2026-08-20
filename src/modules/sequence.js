@@ -48,7 +48,7 @@ window.MA.modules.sequence = (function() {
       // participant/actor
       var pMatch = trimmed.match(/^(participant|actor)\s+(\S+)(?:\s+as\s+(.+))?$/);
       if (pMatch) {
-        var p = { kind: pMatch[1], id: pMatch[2], label: pMatch[3] ? pMatch[3].trim() : pMatch[2], line: lineNum };
+        var p = { kind: pMatch[1], id: pMatch[2], label: pMatch[3] ? decodeLabel(pMatch[3].trim()) : pMatch[2], line: lineNum };
         result.elements.push(p);
         continue;
       }
@@ -283,6 +283,15 @@ window.MA.modules.sequence = (function() {
     return lines.join('\n');
   }
 
+  // ラベルの  は mermaid が実体参照の開始として食う。「A#1」は図に「A」だけが
+  // 出る (エラーは出ない)。mermaid 自身の実体  に逃がすとそのまま描かれる。
+  function encodeLabel(s) {
+    return String(s === undefined || s === null ? '' : s).replace(/#/g, '#35;');
+  }
+  function decodeLabel(s) {
+    return String(s === undefined || s === null ? '' : s).replace(/#35;/g, '#');
+  }
+
   function updateParticipant(text, lineNum, field, value) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
@@ -296,7 +305,7 @@ window.MA.modules.sequence = (function() {
     else if (field === 'id') id = value;
     else if (field === 'label') label = value;
     var indent = lines[idx].match(/^(\s*)/)[1];
-    lines[idx] = indent + kind + ' ' + id + (label && label !== id ? ' as ' + label : '');
+    lines[idx] = indent + kind + ' ' + id + (label && label !== id ? ' as ' + encodeLabel(label) : '');
     if (field === 'id' && value !== oldId) renameParticipantRefs(lines, oldId, value, idx);
     return lines.join('\n');
   }

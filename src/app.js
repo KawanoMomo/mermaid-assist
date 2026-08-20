@@ -1177,7 +1177,27 @@ async function refresh(skipRender) {
     statusParseEl.classList.remove('error');
   } catch (e) {
     if (thisRender !== renderCounter) return;
-    previewSvgEl.innerHTML = '<p style="color:var(--accent-red);padding:16px;font-family:var(--font-mono);font-size:12px;">Render error:<br>' + String(e).replace(/</g, '&lt;') + '</p>';
+    // mermaid のエラーは字句解析器の言葉なので、原因が分かる場合は先に日本語で言う。
+    // 「Lexer error on line 3, column 25」だけ見せられても、自分の入力のどの文字が
+    // 悪いのかは分からない (R11 特殊文字)。
+    var cause = window.MA.diagnose ? window.MA.diagnose.diagnose(mmdText, e) : '';
+    // 幅を明示して折り返す。
+    //
+    // このコンテナは図の大きさに合わせて広がるので、既定のままだと本文は
+    // 見えているペインの幅ではなく**キャンバスの幅**で折り返す。結果、一行が
+    // ペインの右端で切れ、肝心の「どの文字が該当するか」が読めない。
+    // 元からある Render error の行も同じ理由で切れていた (実機で確認)。
+    // 拡大率を一旦外す。このコンテナには scale(zoom) がかかっているので、
+    // 124% のまま文章を出すと文字も 124% になり、指定した幅で折り返しても
+    // ペインからはみ出す。図に戻れば次の描画で scale は付け直される。
+    previewSvgEl.style.transform = 'none';
+    previewSvgEl.innerHTML =
+      '<div style="max-width:680px;padding:16px;overflow-wrap:anywhere;white-space:normal;">' +
+        (cause ? '<p style="color:var(--accent-red);margin:0 0 12px 0;font-size:13px;line-height:1.6;">' +
+          window.MA.htmlUtils.escHtml(cause) + '</p>' : '') +
+        '<p style="color:var(--accent-red);margin:0;font-family:var(--font-mono);font-size:12px;line-height:1.5;">Render error:<br>' +
+          String(e).replace(/</g, '&lt;') + '</p>' +
+      '</div>';
     statusParseEl.textContent = 'Error';
     statusParseEl.classList.add('error');
   }

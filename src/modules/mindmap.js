@@ -57,6 +57,9 @@ window.MA.modules.mindmap = (function() {
         shape = 'rounded'; text = m[1];
       }
 
+      // 引用で囲まれていれば外し、実体を戻す (shapeToText の逆)
+      text = decodeText(text);
+
       // Determine parent by indent
       while (stack.length > 0 && stack[stack.length - 1].indent >= leadingSpaces) {
         stack.pop();
@@ -76,14 +79,38 @@ window.MA.modules.mindmap = (function() {
     return result;
   }
 
+  // 形状記号を含むラベルは引用で囲む。
+  //
+  // mindmap の `()` `[]` `{}` は形状の指定なので、「設計(詳細)」をそのまま置くと
+  // mermaid は `設計` を捨てて `詳細` を丸ノードとして描く。エラーも出ないので
+  // 気付けない。実測では全形状が引用囲みを受け付ける (default だけ不可)。
+  function _needsQuote(text) {
+    return /["()\[\]{}]/.test(String(text));
+  }
+  function _encode(text) {
+    // 引用の中の `"` は mermaid の実体 `#quot;` に逃がす (c4 と同じ手)
+    return String(text).replace(/#/g, '#35;').replace(/"/g, '#quot;');
+  }
+  function decodeText(text) {
+    var s = String(text === undefined || text === null ? '' : text);
+    if (s.length >= 2 && s.charAt(0) === '"' && s.charAt(s.length - 1) === '"') {
+      s = s.slice(1, -1);
+    }
+    return s.replace(/#quot;/g, '"').replace(/#35;/g, '#');
+  }
+
   function shapeToText(shape, text) {
-    if (shape === 'square') return '[' + text + ']';
-    if (shape === 'rounded') return '(' + text + ')';
-    if (shape === 'circle') return '((' + text + '))';
-    if (shape === 'bang') return '))' + text + '((';
-    if (shape === 'cloud') return ')' + text + '(';
-    if (shape === 'hexagon') return '{{' + text + '}}';
-    return text;
+    var body = _needsQuote(text) ? '"' + _encode(text) + '"' : String(text);
+    if (shape === 'square') return '[' + body + ']';
+    if (shape === 'rounded') return '(' + body + ')';
+    if (shape === 'circle') return '((' + body + '))';
+    if (shape === 'bang') return '))' + body + '((';
+    if (shape === 'cloud') return ')' + body + '(';
+    if (shape === 'hexagon') return '{{' + body + '}}';
+    // default は囲む場所が無く、mermaid は裸の引用を受け付けない。
+    // 文字が黙って消えるより、形状が付くほうがまし (形状は UI で選び直せる)。
+    if (_needsQuote(text)) return '[' + body + ']';
+    return String(text);
   }
 
   function addChild(text, parentLineNum, newText, newShape) {

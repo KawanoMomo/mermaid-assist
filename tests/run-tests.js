@@ -9,6 +9,7 @@ const sourceFiles = [
   'src/core/html-utils.js',
   'src/core/text-updater.js',
   'src/core/parser-utils.js',
+  'src/core/diagnose.js',
   'src/core/history.js',
   'src/core/selection.js',
   'src/core/connection-mode.js',
