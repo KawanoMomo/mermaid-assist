@@ -71,6 +71,10 @@ var dragRenderTimer = null;
 var renderCounter = 0;
 var clipboard = null;
 var addCounter = 0;
+
+// Set when the document is replaced by a different diagram type, so the next
+// render fits the new drawing to the pane instead of inheriting the old zoom.
+var pendingAutoFit = false;
 var modules = {};
 var currentModule = null;
 
@@ -849,8 +853,18 @@ async function refresh(skipRender) {
         overlayEl.setAttribute('viewBox', svgEl.getAttribute('viewBox'));
       }
 
-      // Auto-fit zoom on first render: fit chart width to container
-      if (thisRender === 1) {
+      // Fit the zoom to the container on the first render, and again whenever the
+      // document is replaced by a different diagram type.
+      //
+      // Without the second case the previous diagram's zoom carried over to the
+      // new one, and diagram types differ in natural size by more than an order
+      // of magnitude. Measured after switching from the startup gantt (fitted to
+      // 51%) in a 1400px window: stateDiagram came out 51px wide in a 750px pane
+      // — a thumbnail in an empty page — while timeline overflowed at 1190px.
+      // Neither is a state the user asked for; both cost a trip to the zoom
+      // controls before the diagram can even be read.
+      if (thisRender === 1 || pendingAutoFit) {
+        pendingAutoFit = false;
         var previewContainer = document.getElementById('preview-container');
         var containerW = previewContainer.clientWidth - 32;
         var fitZoom = containerW / naturalW;
@@ -1270,6 +1284,9 @@ function init() {
     var openedName = String(file.name || '').replace(/\.[^.]+$/, '');
     reader.onload = function(ev) {
       window.MA.history.pushHistory();
+      // Opening a file is a new drawing too, and its size is unrelated to
+      // whatever was on screen a moment ago.
+      pendingAutoFit = true;
       mmdText = ev.target.result;
       loadedFileName = openedName;
       markSaved();
@@ -1982,6 +1999,7 @@ function init() {
         return;
       }
       window.MA.history.pushHistory();
+      pendingAutoFit = true;
       mmdText = mod.template();
       loadedFileName = '';
       markSaved();
