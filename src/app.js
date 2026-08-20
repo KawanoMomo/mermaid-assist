@@ -58,6 +58,8 @@ var seqDragState = null;
 // 観点 C ("click が drag の残響で発火して popup が暴発する" の対策).
 var seqJustDraggedAt = 0;
 var SEQ_DRAG_CLICK_SUPPRESS_MS = 300;
+// 連続したタイプを1つの undo にまとめる窓。手が止まったら次のまとまりになる。
+var EDITOR_UNDO_COALESCE_MS = 600;
 
 // ── Application State ──────────────────────────────────────────────────────
 var mmdText = '';
@@ -1236,7 +1238,10 @@ function init() {
   // ── Editor events ────────────────────────────────────────────────────────
   editorEl.addEventListener('input', function() {
     if (suppressSync) return;
-    window.MA.history.pushHistory();
+    // A run of typing is one undo step. Pushing per keystroke made undo
+    // character-by-character and, with only 80 states kept, silently discarded
+    // the pre-edit text once a line grew past 80 characters.
+    window.MA.history.pushHistoryCoalesced('editor', EDITOR_UNDO_COALESCE_MS);
     mmdText = editorEl.value;
     scheduleRefresh();
   });
@@ -1938,11 +1943,23 @@ function init() {
       seqDragState = null;
       return;
     }
-    if (e.ctrlKey && e.key === 'z') {
-      if (inEditor) return;
+    // Ctrl+Z / Ctrl+Y always drive the app's history, including inside the
+    // editor.
+    //
+    // The editor used to be handed to the browser's native textarea undo. That
+    // made Ctrl+Z mean two different things depending on where the caret was —
+    // character-level inside the editor, operation-level everywhere else — and,
+    // worse, the native stack knows nothing about GUI edits: after changing a
+    // task through the properties panel, clicking into the editor and pressing
+    // Ctrl+Z could not undo that change at all. The two stacks also fought each
+    // other: a native undo fires `input`, which pushed the half-undone text back
+    // onto the app's stack.
+    //
+    // IME composition is left alone; taking Ctrl+Z during conversion would break
+    // candidate selection.
+    if (e.ctrlKey && e.key === 'z' && !e.isComposing) {
       e.preventDefault(); window.MA.history.undo();
-    } else if (e.ctrlKey && e.key === 'y') {
-      if (inEditor) return;
+    } else if (e.ctrlKey && e.key === 'y' && !e.isComposing) {
       e.preventDefault(); window.MA.history.redo();
     } else if (e.ctrlKey && e.key === 's') {
       e.preventDefault(); saveFile();
