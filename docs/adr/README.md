@@ -15,6 +15,13 @@
 | [017](ADR-017-mermaid-parser-auto-quote.md) | Mermaid parser に対する auto-quote 戦略 | インターフェース | 承認 | 2026-04-17 |
 | [018](ADR-018-module-registry-merge.md) | モジュールレジストリの merge 戦略 | アーキテクチャ | 承認 | 2026-04-17 |
 | [019](ADR-019-evaluator-cache-clear.md) | Evaluator の CDP cache clear プロトコル | エージェント運用 | 承認 | 2026-04-17 |
+| [020](ADR-020-action-bar-common-helper.md) | selected-element アクションバーの共通ヘルパ化 | インターフェース | 採択 | 2026-04-24 |
+| [021](ADR-021-overlay-selected-css-generalization.md) | overlay 選択強調 CSS の汎用化 | UI/UX | 採択 | 2026-04-24 |
+| [022](ADR-022-action-bar-id-naming-convention.md) | アクションバーボタン ID 命名規則 | インターフェース | 採択 | 2026-04-24 |
+| [023](ADR-023-adr-018-correction.md) | ADR-018 の「結果」欄の訂正 — 結合方向の記述が事実と逆 | アーキテクチャ | 承認 | 2026-08-19 |
+| [024](ADR-024-calibration-input-soundness.md) | 較正の入力健全性 — 横断 ADR-010 の前提の明文化 | アーキテクチャ | 承認 | 2026-08-19 |
+| [025](ADR-025-gantt-overview-detail-mode.md) | Gantt の概観/詳細モードと mermaid config の一元化 | アーキテクチャ | 承認 | 2026-08-19 |
+| [026](ADR-026-conditional-auto-quote.md) | 記号を含むラベルの条件付き auto-quote | インターフェース | 承認 | 2026-08-21 |
 
 ## 命名規則
 
