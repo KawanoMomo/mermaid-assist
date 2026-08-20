@@ -1178,6 +1178,16 @@ function ganttStatusText(parsedData) {
 
 function renderStatus() {
   if (!statusInfoEl) return;
+  // Connection mode changes what the next click means, and nothing on screen
+  // said so: after pressing 「ここから線を引く」 the panel and the status bar
+  // looked exactly as before, so the mode was invisible until a line appeared
+  // somewhere unexpected.
+  var conn = window.MA.connectionMode.getSource();
+  if (conn) {
+    statusInfoEl.textContent = '接続モード: ' + conn.id +
+      ' から線を引きます — 相手をクリック (Escape で中止)';
+    return;
+  }
   statusInfoEl.textContent = statusInfoText(parsed, currentModule && currentModule.type);
 }
 
@@ -1541,6 +1551,10 @@ function init() {
 
   // Properties initialization
   window.MA.properties.init({
+    onStatus: function() { renderStatus(); },
+    // 選択の生存判定と同じ集合を使う。別の判定を持つと「選択は消えるのに
+    // 接続はできる」のような食い違いが生まれる
+    elementExists: function(id) { return !!knownSelectionIds(parsed)[String(id)]; },
     getMmdText: function() { return mmdText; },
     setMmdText: function(t) {
       mmdText = t;
@@ -1633,6 +1647,9 @@ function init() {
       // on screen a moment ago, and the view mode resets the same way a type
       // switch does. Editing and undo deliberately do not reset the mode — the
       // one the user picked is theirs to keep while they work on the same diagram.
+      // Connection mode is bound to the document that started it (see the
+      // diagram-type handler).
+      window.MA.connectionMode.cancelConnectionMode();
       pendingAutoFit = true;
       setGanttViewMode('overview');
       setZoom(1.0);
@@ -2336,10 +2353,22 @@ function init() {
       syncLineNumbers();
       scheduleRefresh();
     } else if (e.key === 'Escape') {
+      // Escape has to get out of connection mode too. Without it the only way
+      // to leave was to complete the edge — clicking anywhere else on the canvas
+      // just drew the line you had changed your mind about.
+      if (window.MA.connectionMode.isInConnectionMode()) {
+        window.MA.connectionMode.cancelConnectionMode();
+        renderStatus();
+        return;
+      }
       window.MA.selection.clearSelection();
     } else if (!inEditor && !inInput && !e.ctrlKey && !e.altKey && !e.metaKey &&
+               !window.MA.connectionMode.isInConnectionMode() &&
                (e.key === 'ArrowDown' || e.key === 'ArrowRight' ||
                 e.key === 'ArrowUp' || e.key === 'ArrowLeft')) {
+      // 接続モード中は選択を動かさない。動かすと選択の緑枠が「これを編集中」
+      // と言い、ステータスバーは「相手をクリック」と言う、という食い違いが
+      // 画面に同時に出る
       // 次/前の要素へ。順序は図の宣言順 (オーバーレイの描画順) なので、
       // どの図種でも「上から順に見ていく」動きになる。
       var forward = (e.key === 'ArrowDown' || e.key === 'ArrowRight');
@@ -2438,6 +2467,12 @@ function init() {
         this.value = currentModule ? currentModule.type : this.value;
         return;
       }
+      // Connection mode belongs to the document that started it. Left running
+      // across a type switch, the next click connected an id from the old
+      // diagram to one in the new one: starting from flowchart's `A` and
+      // switching to block-beta produced the line `A --> b`, naming a node that
+      // does not exist in that diagram.
+      window.MA.connectionMode.cancelConnectionMode();
       // The view goes back to what a fresh document shows. Resetting to 'detail'
       // here (as this used to) left the readout saying "100%" while the chart was
       // actually drawn at fit width — no way to tell which mode you were in.

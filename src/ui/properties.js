@@ -5,6 +5,8 @@ window.MA.properties = (function() {
     getMmdText: function() { return ''; },
     setMmdText: function(t) {},
     onUpdate: function() {},
+    onStatus: function() {},
+    elementExists: function(id) { return true; },
     moduleUpdater: function(text, lineNum, field, value) { return text; },
   };
 
@@ -13,6 +15,12 @@ window.MA.properties = (function() {
     state.setMmdText = opts.setMmdText;
     state.onUpdate = opts.onUpdate || function() {};
     state.moduleUpdater = opts.moduleUpdater;
+    // Redraw the status bar. Connection mode is announced there, and the
+    // selection callback does not cover it.
+    state.onStatus = opts.onStatus || function() {};
+    // 「その id はいま図に存在するか」。接続モードは編集をまたいで生き残るので、
+    // 始点が消えていないかを繋ぐ直前に確かめる必要がある。
+    state.elementExists = opts.elementExists || function() { return true; };
   }
 
   // bindTextField: text input の change で moduleUpdater を呼んでテキスト更新
@@ -59,6 +67,15 @@ window.MA.properties = (function() {
     bindEvent(id, 'click', function() {
       window.MA.connectionMode.startConnectionMode(fromType, fromId, function(src, target) {
         if (!target || !target.id || target.id === src.id) return;
+        // The source has to still exist. Connection mode survives editing, so
+        // deleting the start element in the editor and then clicking a target
+        // drew a line from a node that is no longer in the diagram — mermaid
+        // then re-creates it implicitly and a deleted element reappears with no
+        // error anywhere.
+        if (!state.elementExists(src.id)) {
+          state.onStatus();
+          return;
+        }
         window.MA.history.pushHistory();
         state.setMmdText(connect(src.id, target.id));
         window.MA.selection.clearSelection();
@@ -66,8 +83,12 @@ window.MA.properties = (function() {
       });
       // Keeping the source selected would make the highlight say "this is what
       // you are editing" while the next click actually means "connect to this".
+      //
+      // clearSelection fires the selection callback (panel + overlay redraw) but
+      // not the status bar, and the status bar is where the mode is announced.
       window.MA.selection.clearSelection();
       state.onUpdate();
+      if (state.onStatus) state.onStatus();
     });
   }
 
