@@ -28,6 +28,7 @@ test.describe('オーバーレイのクリック選択', () => {
   for (const [type, expectLabel] of [
     ['flowchart', 'Start'], ['block-beta', 'a'], ['classDiagram', 'Animal'],
     ['erDiagram', 'CUSTOMER'], ['stateDiagram', 'Idle'], ['requirementDiagram', 'sample_req'],
+    ['architecture-beta', 'db'], ['C4Context', 'user'],
   ]) {
     test(`${type}: 図の要素をクリックすると選択される`, async ({ page }) => {
       await ready(page, type);
@@ -110,7 +111,8 @@ test.describe('オーバーレイのクリック選択', () => {
 // 枠が永久に出ない。
 test.describe('選択のハイライト', () => {
   for (const type of ['flowchart', 'block-beta', 'classDiagram', 'erDiagram',
-                      'stateDiagram', 'requirementDiagram']) {
+                      'stateDiagram', 'requirementDiagram', 'architecture-beta',
+                      'C4Context']) {
     test(`${type}: クリックした要素だけに枠が出る`, async ({ page }) => {
       await ready(page, type);
       const els = page.locator('#overlay-layer [data-element-id]');
@@ -123,4 +125,41 @@ test.describe('選択のハイライト', () => {
       expect(outlined).toBe(1);
     });
   }
+});
+
+// C4 は要素を識別できる属性を出さない (class は全部同じ、id は無い)。
+// 手がかりはラベルだけなので、同じラベルが2つあると区別できない。
+// 出現順で決め打つと mermaid の実装変更や Boundary のネストで壊れ、
+// **間違った要素を選ぶ**。それは選べないことより悪いので、
+// ラベルが一意な要素だけ当たり判定を作る。
+test.describe('C4: ラベルが重複する要素は当たり判定を作らない', () => {
+  async function overlayIds(page, text) {
+    await page.evaluate((t) => {
+      const ed = document.getElementById('editor');
+      ed.value = t;
+      ed.dispatchEvent(new Event('input'));
+    }, text);
+    await page.waitForTimeout(1800);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+    return page.evaluate(() =>
+      [...document.querySelectorAll('#overlay-layer [data-element-id]')]
+        .map(r => r.getAttribute('data-element-id')));
+  }
+
+  test('ラベルが全部異なれば全要素が対象になる', async ({ page }) => {
+    await ready(page, 'C4Context');
+    const ids = await overlayIds(page,
+      'C4Context\n  Person(u1, "利用者A")\n  Person(u2, "利用者B")\n  System(s, "基幹")\n');
+    expect(ids.sort()).toEqual(['s', 'u1', 'u2']);
+  });
+
+  test('ラベルが重複する要素だけ外れる', async ({ page }) => {
+    await ready(page, 'C4Context');
+    const ids = await overlayIds(page,
+      'C4Context\n  Person(u1, "利用者")\n  Person(u2, "利用者")\n  System(s, "基幹")\n');
+    // 同じ id が2度出る (= 別要素が同じものを指す) ことは決して起きない
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(['s']);
+  });
 });

@@ -128,7 +128,8 @@ window.MA.overlayGeom = (function() {
     var nodes = svgEl.querySelectorAll(opts.selector || '.node');
     for (var n = 0; n < nodes.length; n++) {
       var svgId = nodes[n].getAttribute('id');
-      var key = opts.prefix ? idFromSvgNodeId(svgId, opts.prefix) : svgId;
+      var key = opts.svgIdToKey ? opts.svgIdToKey(svgId)
+        : (opts.prefix ? idFromSvgNodeId(svgId, opts.prefix) : svgId);
       var el = key ? byId[key] : null;
       if (!el) continue;
       var box = boxInSvgSpace(svgEl, nodes[n]);

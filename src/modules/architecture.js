@@ -372,14 +372,17 @@ window.MA.modules.architectureBeta = (function() {
       ].join('\n');
     },
     buildOverlay: function(svgEl, parsedData, overlayEl) {
-      if (!overlayEl) return;
-      while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
-      if (!svgEl) return;
-      var viewBox = svgEl.getAttribute('viewBox');
-      if (viewBox) overlayEl.setAttribute('viewBox', viewBox);
-      var svgW = svgEl.getAttribute('width'); var svgH = svgEl.getAttribute('height');
-      if (svgW) overlayEl.setAttribute('width', svgW);
-      if (svgH) overlayEl.setAttribute('height', svgH);
+      // mermaid は service を <g id="service-<id>" class="architecture-service">
+      // で描く。flowchart 系のような末尾連番は付かないので prefix を自前で外す。
+      // group は <rect id="group-..."> で g ではないため、ここではサービスだけ。
+      window.MA.overlayGeom.buildNodeOverlay(svgEl, parsedData, overlayEl, {
+        selector: '.architecture-service',
+        svgIdToKey: function(svgId) {
+          var m = String(svgId || '').match(/^service-(.+)$/);
+          return m ? m[1] : null;
+        },
+        kindOf: function() { return 'service'; },
+      });
     },
     renderProps: renderProps,
     operations: {

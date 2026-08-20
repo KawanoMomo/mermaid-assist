@@ -571,6 +571,18 @@ window.MA.modules.c4 = (function() {
     return lines.join('\n');
   }
 
+  // The label C4 actually drew for a shape. Its <text> runs start with the
+  // stereotype (`<<person>>`), which is decoration rather than the name.
+  function c4LabelOf(gEl) {
+    if (!gEl || !gEl.querySelectorAll) return null;
+    var texts = gEl.querySelectorAll('text');
+    for (var i = 0; i < texts.length; i++) {
+      var t = (texts[i].textContent || '').trim();
+      if (t && !/^<<.*>>$/.test(t)) return t;
+    }
+    return null;
+  }
+
   function renderProps(selData, parsedData, propsEl, ctx) {
     if (!propsEl) return;
     var escHtml = window.MA.htmlUtils.escHtml;
@@ -827,14 +839,47 @@ window.MA.modules.c4 = (function() {
       ].join('\n');
     },
     buildOverlay: function(svgEl, parsedData, overlayEl) {
-      if (!overlayEl) return;
-      while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
-      if (!svgEl) return;
-      var viewBox = svgEl.getAttribute('viewBox');
-      if (viewBox) overlayEl.setAttribute('viewBox', viewBox);
-      var svgW = svgEl.getAttribute('width'); var svgH = svgEl.getAttribute('height');
-      if (svgW) overlayEl.setAttribute('width', svgW);
-      if (svgH) overlayEl.setAttribute('height', svgH);
+      var geom = window.MA.overlayGeom;
+      geom.syncViewport(svgEl, overlayEl);
+      if (!overlayEl || !svgEl || !parsedData) return;
+
+      // C4 は要素を識別できる属性を何も出さない。実測すると <g> の class は
+      // どの要素も 'person-man' で、id も data-* も無い。手がかりは描画された
+      // ラベルだけで、同じラベルの要素が2つあると区別できない。
+      //
+      // 出現順で決め打つこともできるが、mermaid のレンダラが宣言順を保つ保証は
+      // 無く、Boundary のネストで簡単に崩れる。**間違った要素を選ぶのは、
+      // 選べないより悪い。**
+      //
+      // そこで、図の中でラベルが一意な要素だけ当たり判定を作る。重複している
+      // ラベルの要素はプロパティ一覧から編集する (それは常に正しく引ける)。
+      var count = {};
+      var byLabel = {};
+      for (var i = 0; i < parsedData.elements.length; i++) {
+        var e = parsedData.elements[i];
+        if (!e.label) continue;
+        count[e.label] = (count[e.label] || 0) + 1;
+        byLabel[e.label] = e;
+      }
+
+      var groups = svgEl.querySelectorAll('g');
+      var used = {};
+      for (var g = 0; g < groups.length; g++) {
+        var label = c4LabelOf(groups[g]);
+        if (!label || count[label] !== 1 || used[label]) continue;
+        var el = byLabel[label];
+        if (!el) continue;
+        var box = geom.boxInSvgSpace(svgEl, groups[g]);
+        if (!box) continue;
+        used[label] = true;
+        overlayEl.appendChild(geom.hitRect(document, box, {
+          id: el.id,
+          kind: 'element',
+          line: el.line,
+          selected: window.MA.selection.isSelected(el.id),
+          className: 'overlay-node',
+        }));
+      }
     },
     renderProps: renderProps,
     operations: {
