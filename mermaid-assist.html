@@ -22,6 +22,15 @@
   --font-sans: 'Noto Sans JP', 'Segoe UI', sans-serif;
 }
 
+/* Native date pickers render their own chrome from `color-scheme`. Left unset it
+   defaults to light, so Chrome draws the calendar glyph as a dark icon on our dark
+   input background and it disappears — the control looks like a plain text field.
+   Scoped to date inputs rather than :root so the other 20 diagram types keep the
+   scrollbars and selects they render today. */
+input[type="date"] {
+  color-scheme: dark;
+}
+
 /* ── Reset / Base ──────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -262,7 +271,13 @@ html, body {
 
 #preview-container {
   flex: 1;
-  overflow: auto;
+  /* The vertical gutter is reserved unconditionally so the usable width does not
+     change the moment a chart grows tall enough to need a scrollbar. Gantt's
+     overview mode measures this width before rendering, and with `auto` the
+     measurement was one render stale — the chart came out 6px too wide and grew a
+     horizontal scrollbar it did not need. */
+  overflow-x: auto;
+  overflow-y: scroll;
   position: relative;
   padding: 16px;
 }

@@ -432,24 +432,33 @@ test.describe('シナリオ8: 表示の調整', () => {
     await page.goto(HTML_URL);
     await waitForRender(page);
 
-    // Fitで全体表示
-    await page.locator('#btn-zoom-fit').click();
-    const fitZoom = parseInt(await page.locator('#zoom-display').textContent());
+    // Fit で全体表示。gantt の Fit は拡大率を下げるのではなく
+    // コンテナ幅で描き直す概観モードなので、表示はパーセントではない
+    const widthOf = () => page.evaluate(() =>
+      document.querySelector('#preview-svg svg').getBoundingClientRect().width);
 
-    // ズームイン5回
+    await page.locator('#btn-zoom-fit').click();
+    await page.waitForTimeout(500);
+    await expect(page.locator('#zoom-display')).toHaveText('概観');
+    const fitWidth = await widthOf();
+
+    // ズームイン5回 — 最初の1回で詳細モードに抜ける
     for (let i = 0; i < 5; i++) {
       await page.locator('#btn-zoom-in').click();
     }
+    await page.waitForTimeout(500);
     const zoomedIn = parseInt(await page.locator('#zoom-display').textContent());
-    expect(zoomedIn).toBeGreaterThan(fitZoom);
+    expect(zoomedIn).toBeGreaterThan(100);
+    expect(await widthOf()).toBeGreaterThan(fitWidth);
 
     // SVGがまだ見えている
     await expect(page.locator('#preview-svg svg')).toBeVisible();
 
-    // Fitに戻る
+    // Fitに戻る — 概観モードと幅が元に戻る
     await page.locator('#btn-zoom-fit').click();
-    const backToFit = parseInt(await page.locator('#zoom-display').textContent());
-    expect(backToFit).toBe(fitZoom);
+    await page.waitForTimeout(500);
+    await expect(page.locator('#zoom-display')).toHaveText('概観');
+    expect(Math.abs(await widthOf() - fitWidth)).toBeLessThan(2);
   });
 
   test('ペインリサイザーでプロパティパネルを広げる', async ({ page }) => {

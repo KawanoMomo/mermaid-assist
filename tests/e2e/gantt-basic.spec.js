@@ -287,21 +287,34 @@ test.describe('Zoom', () => {
     await page.goto(HTML_PATH);
     await waitForRender(page);
 
-    const initialZoom = await page.locator('#zoom-display').textContent();
+    // gantt は概観モードで始まる。1回目のズームインで詳細モードへ抜け、
+    // そこから倍率が上がる
+    await expect(page.locator('#zoom-display')).toHaveText('概観');
     await page.locator('#btn-zoom-in').click();
-    const newZoom = await page.locator('#zoom-display').textContent();
-    expect(parseInt(newZoom)).toBeGreaterThan(parseInt(initialZoom));
+    const first = parseInt(await page.locator('#zoom-display').textContent());
+    expect(first).toBeGreaterThan(100);
+    await page.locator('#btn-zoom-in').click();
+    expect(parseInt(await page.locator('#zoom-display').textContent())).toBeGreaterThan(first);
   });
 
-  test('Fit button adjusts zoom to container', async ({ page }) => {
+  // Fit no longer means "scale the drawing down to a percentage" for gantt.
+  // It redraws the chart at the container width and shows the mode name instead
+  // of a percentage, so asserting on parseInt('概観') is meaningless.
+  // What matters is that the chart actually stops overflowing.
+  test('Fit button fits the chart to the container', async ({ page }) => {
     await page.goto(HTML_PATH);
     await waitForRender(page);
 
     await page.locator('#btn-zoom-fit').click();
-    const zoomText = await page.locator('#zoom-display').textContent();
-    const zoomVal = parseInt(zoomText);
-    expect(zoomVal).toBeGreaterThan(10);
-    expect(zoomVal).toBeLessThan(500);
+    await page.waitForTimeout(500);
+
+    await expect(page.locator('#zoom-display')).toHaveText('概観');
+    const fits = await page.evaluate(() => {
+      const svg = document.querySelector('#preview-svg svg');
+      const box = document.getElementById('preview-container');
+      return svg.getBoundingClientRect().width <= box.clientWidth + 1;
+    });
+    expect(fits).toBe(true);
   });
 });
 
@@ -332,5 +345,87 @@ test.describe('Undo/Redo', () => {
 
     text = await getEditorText(page);
     expect(text).toContain(':a1,');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  View mode reset (Major M-5)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test.describe('概観/詳細モードのリセット契機', () => {
+  // 図種を切り替えて戻すと ganttViewMode が 'detail' のまま残り、
+  // 表示は「100%」なのにチャートはフィット幅で描かれる、という
+  // 画面からモードを判別できない状態になっていた。
+  test('図種を切り替えて戻すと概観モードに戻る', async ({ page }) => {
+    await page.goto(HTML_PATH);
+    await waitForRender(page);
+    page.on('dialog', d => d.accept());
+
+    // 詳細モードへ
+    for (let i = 0; i < 3; i++) await page.locator('#btn-zoom-in').click();
+    await page.waitForTimeout(600);
+    expect(parseInt(await page.locator('#zoom-display').textContent())).toBeGreaterThan(100);
+
+    await page.locator('#diagram-type').selectOption('flowchart');
+    await page.waitForTimeout(1200);
+    await page.locator('#diagram-type').selectOption('gantt');
+    await page.waitForTimeout(1500);
+
+    await expect(page.locator('#zoom-display')).toHaveText('概観');
+    const fits = await page.evaluate(() => {
+      const svg = document.querySelector('#preview-svg svg');
+      const box = document.getElementById('preview-container');
+      return svg.getBoundingClientRect().width <= box.clientWidth + 1;
+    });
+    expect(fits).toBe(true);
+  });
+
+  // 逆に、同じ図を編集している間はユーザが選んだモードを保つ。
+  // 1打鍵ごとに概観へ戻されたら詳細モードは使いものにならない。
+  test('編集してもモードは保たれる', async ({ page }) => {
+    await page.goto(HTML_PATH);
+    await waitForRender(page);
+
+    for (let i = 0; i < 3; i++) await page.locator('#btn-zoom-in').click();
+    await page.waitForTimeout(600);
+    const before = await page.locator('#zoom-display').textContent();
+
+    await page.locator('#editor').press('End');
+    await page.locator('#editor').type('\n    追記 :zz, 2026-06-01, 5d');
+    await page.waitForTimeout(1200);
+
+    await expect(page.locator('#zoom-display')).toHaveText(before);
+  });
+});
+
+// axisFormat 行を持たないテンプレートにしたので、「行が無い」状態を
+// プロパティパネルが正しく名乗る必要がある。
+test.describe('axisFormat の自動モード', () => {
+  test('axisFormat 行が無いとき「自動」を選択状態にする', async ({ page }) => {
+    await page.goto(HTML_PATH);
+    await waitForRender(page);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+
+    // 「カスタム…」+ 空欄だと、ユーザが独自指定して書き忘れたように見える
+    await expect(page.locator('#prop-axisformat-preset')).toHaveValue('__auto__');
+    await expect(page.locator('#prop-axisformat-custom')).toBeHidden();
+  });
+
+  test('プリセットを選ぶと行が入り、自動に戻すと消える', async ({ page }) => {
+    await page.goto(HTML_PATH);
+    await waitForRender(page);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+
+    await page.locator('#prop-axisformat-preset').selectOption('%Y/%m/%d');
+    await page.waitForTimeout(800);
+    expect(await getEditorText(page)).toContain('axisFormat %Y/%m/%d');
+
+    await page.locator('#prop-axisformat-preset').selectOption('__auto__');
+    await page.waitForTimeout(800);
+    expect(await getEditorText(page)).not.toContain('axisFormat');
+    // dateFormat を巻き添えにしていないこと
+    expect(await getEditorText(page)).toContain('dateFormat YYYY-MM-DD');
   });
 });

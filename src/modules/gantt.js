@@ -220,7 +220,23 @@ window.MA.modules.gantt = (function() {
     if (field === 'label') {
       parsed.label = value;
     } else if (field === 'status') {
+      var wasMilestone = parsed.status === 'milestone';
       parsed.status = value || null;
+      // status is the single source of truth for "is this a milestone", so the
+      // line shape has to follow it. `0d` is not decoration: without it mermaid
+      // cannot resolve the milestone's extent and drops it (F7), so marking a
+      // task as a milestone would make it vanish. Leaving `0d` behind on the way
+      // out is the same failure mirrored — a zero-width bar.
+      if (parsed.status === 'milestone') {
+        parsed.endDate = '0d';
+      } else if (wasMilestone && parsed.endDate === '0d') {
+        // Not null: `納品 :m1, 2026-04-01` with no third field makes mermaid read
+        // the id as a date and refuse the whole chart ("Invalid date:m1"). The
+        // unit test that only asserted "0d is gone" passed on that output — the
+        // render oracle is what caught it. 1d is the shortest task that is still
+        // a task; 0d would be the milestone we are leaving.
+        parsed.endDate = '1d';
+      }
     } else if (field === 'id') {
       parsed.id = value;
     } else if (field === 'after') {
@@ -264,10 +280,69 @@ window.MA.modules.gantt = (function() {
   // addTask — inserts a new task line at the end of the section identified by
   // sectionIndex (0-based, from parseGantt result). Pass -1 to append at end of
   // the whole diagram.
-  function addTask(text, sectionIndex, label, id, startDate, endDate) {
+  // Next unused auto id.
+  //
+  // The old `'t' + (++addCounter)` counter lived in app.js and knew nothing about
+  // the document: reopening a file, or deleting and re-adding, produced an id
+  // that already existed. Two tasks with the same id make `after <id>` point at
+  // whichever one mermaid saw last, so a dependency silently moves.
+  function nextTaskId(text) {
+    var used = {};
+    var tasks = parseGantt(text).tasks;
+    for (var i = 0; i < tasks.length; i++) {
+      if (tasks[i].id) used[tasks[i].id] = true;
+    }
+    var n = 1;
+    while (used['t' + n]) n++;
+    return 't' + n;
+  }
+
+  // The task the next one should follow on from: the last task of the section
+  // whose start and end are *both* plain dates.
+  //
+  // Anything else (a duration, an `after` reference, a missing value) returns
+  // null and the caller leaves the date fields empty. Guessing a resolved date
+  // and filling it in silently is worse: F9 showed the naive version producing
+  // either an exception or a 1970-01-01, and a wrong date that looks right is
+  // harder to notice than a blank field.
+  function lastResolvedTask(text, sectionIndex) {
+    if (!text) return null;
+    var parsed = parseGantt(text);
+    var sections = parsed.sections || [];
+    var tasks = parsed.tasks || [];
+    var inSection = tasks.filter(function(t) {
+      if (sectionIndex === -1 || sections.length === 0) return true;
+      return t.sectionIndex === sectionIndex;
+    });
+    if (inSection.length === 0) return null;
+    var last = inSection[inSection.length - 1];
+    if (!last.startDate || !last.endDate) return null;
+    if (!DATE_RE.test(last.startDate) || !DATE_RE.test(last.endDate)) return null;
+    return last;
+  }
+
+  function nextStartDate(text, sectionIndex) {
+    var last = lastResolvedTask(text, sectionIndex);
+    return last ? last.endDate : null;
+  }
+
+  function nextDurationDays(text, sectionIndex) {
+    var last = lastResolvedTask(text, sectionIndex);
+    if (!last) return null;
+    var days = window.MA.dateUtils.daysBetween(last.startDate, last.endDate);
+    return (typeof days === 'number' && isFinite(days)) ? days : null;
+  }
+
+  // `0d` is not optional: without it mermaid cannot resolve the milestone's
+  // extent and drops it from the chart (F7).
+  function milestoneMeta(id, date) {
+    return rebuildTaskMeta('milestone', id, date, '0d', null);
+  }
+
+  function addTask(text, sectionIndex, label, id, startDate, endDate, status) {
     var lines = text.split('\n');
     var parsed = parseGantt(text);
-    var newLine = '    ' + label + ' :' + rebuildTaskMeta(null, id, startDate, endDate, null);
+    var newLine = '    ' + label + ' :' + rebuildTaskMeta(status || null, id, startDate, endDate, null);
 
     var insertAt; // index in lines array AFTER which we insert (we splice at insertAt+1)
 
@@ -363,6 +438,111 @@ window.MA.modules.gantt = (function() {
     return lines.join('\n');
   }
 
+  // Days a duration token covers. mermaid accepts d/w/M/y (and h/s, which round to
+  // nothing useful here); anything else is not a duration.
+  function durationDays(token) {
+    if (!isDuration(token)) return null;
+    var n = parseInt(token, 10);
+    var unit = token.slice(String(n).length);
+    if (unit === 'd') return n;
+    if (unit === 'w') return n * 7;
+    if (unit === 'M') return Math.round(n * 30.44);
+    if (unit === 'y') return Math.round(n * 365.25);
+    return 0; // h / s / m — sub-day, contributes nothing to a day-grained span
+  }
+
+  // The real date range a chart covers, with `after` references and durations
+  // resolved the way mermaid resolves them. Reading startDate/endDate directly
+  // does not work: they hold raw tokens, so a chart written as
+  // `A :a1, 2026-01-01, 365d` / `B :a2, after a1, 365d` — the most ordinary way to
+  // write a gantt — exposes exactly one ISO date and looks like a single day.
+  // Returns null when no task has a resolvable anchor date.
+  function resolveSpan(parsedData) {
+    if (!parsedData || !parsedData.tasks || !parsedData.tasks.length) return null;
+    var addDays = window.MA.dateUtils.addDays;
+    var ends = {};   // task id -> resolved end date
+    var prevEnd = null;
+    var min = null, max = null;
+
+    for (var i = 0; i < parsedData.tasks.length; i++) {
+      var t = parsedData.tasks[i];
+      var start = null;
+
+      if (t.startDate && isDate(t.startDate)) {
+        start = t.startDate;
+      } else if (t.after && ends[t.after]) {
+        start = ends[t.after];
+      } else if (prevEnd) {
+        // No anchor of its own (bare duration, or an `after` we could not resolve):
+        // mermaid continues from the previous task.
+        start = prevEnd;
+      }
+      if (!start) continue; // nothing anchors this task yet
+
+      // `A :a1, 5d` puts the duration in startDate, not endDate — the parser fills
+      // positionally and there is no start to fill. Take whichever slot holds it.
+      var lengthToken = (t.endDate && !isDate(t.endDate)) ? t.endDate
+        : (t.startDate && !isDate(t.startDate)) ? t.startDate
+        : null;
+
+      var end = start;
+      if (t.endDate && isDate(t.endDate)) {
+        end = t.endDate;
+      } else if (lengthToken) {
+        var d = durationDays(lengthToken);
+        if (d !== null) end = addDays(start, d);
+      }
+
+      ends[t.id] = end;
+      prevEnd = end;
+      if (!min || start < min) min = start;
+      if (!max || end > max) max = end;
+    }
+
+    if (!min || !max) return null;
+    var days = window.MA.dateUtils.daysBetween(min, max);
+    if (!isFinite(days) || days < 0) return null;
+    return { min: min, max: max, days: Math.max(1, days) };
+  }
+
+  // The lines a section owns: its own `section` line through the line before the
+  // next section, blank lines at the end trimmed off. deleteSection also swallows
+  // the blank line *before* the header; moveSection deliberately does not, because
+  // carrying it along would drift the separators every time a section is moved.
+  function sectionBlock(lines, sections, secIdx) {
+    var start = sections[secIdx].line - 1;
+    var end = (secIdx + 1 < sections.length) ? sections[secIdx + 1].line - 1 : lines.length;
+    while (end > start + 1 && lines[end - 1].trim() === '') end--;
+    return { start: start, end: end };
+  }
+
+  // moveSection — swaps a section, with the tasks it contains, past its neighbour.
+  // direction: -1 = earlier, +1 = later. A move at either edge is a no-op.
+  function moveSection(text, sectionLine, direction) {
+    if (direction !== -1 && direction !== 1) return text;
+    var lines = text.split('\n');
+    var sections = parseGantt(text).sections;
+    var idx = -1;
+    for (var i = 0; i < sections.length; i++) {
+      if (sections[i].line === sectionLine) { idx = i; break; }
+    }
+    if (idx === -1) return text;
+    var other = idx + direction;
+    if (other < 0 || other >= sections.length) return text;
+
+    var a = sectionBlock(lines, sections, Math.min(idx, other));
+    var b = sectionBlock(lines, sections, Math.max(idx, other));
+    var blockA = lines.slice(a.start, a.end);
+    var blockB = lines.slice(b.start, b.end);
+    // Whatever sat between the two blocks (usually one blank line) stays between
+    // them, so the separator does not travel with the section.
+    var between = lines.slice(a.end, b.start);
+
+    var out = lines.slice(0, a.start)
+      .concat(blockB, between, blockA, lines.slice(b.end));
+    return out.join('\n');
+  }
+
   // deleteSection — removes the section and all its tasks.
   function deleteSection(text, sectionLine) {
     var lines = text.split('\n');
@@ -407,6 +587,26 @@ window.MA.modules.gantt = (function() {
       }
     }
     return lines.join('\n');
+  }
+
+  // Drop a global directive line entirely.
+  //
+  // Needed because "no axisFormat line" is a meaningful state, not just an
+  // absence: the app then picks the tick granularity from the project span. The
+  // properties panel offers it as「自動」, so it has to be able to get back there
+  // once the user has chosen a fixed format.
+  //
+  // The key is matched at the start of the trimmed line and must be followed by
+  // whitespace, so removing `Format` cannot take `dateFormat` with it.
+  function removeGlobalSetting(text, key) {
+    var lines = text.split('\n');
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var t = lines[i].trim();
+      if (t.indexOf(key) === 0 && /\s/.test(t.charAt(key.length))) continue;
+      out.push(lines[i]);
+    }
+    return out.join('\n');
   }
 
   // moveTaskWithinSection — moves the task at 1-based lineNum up (-1) or down (+1)
@@ -485,6 +685,18 @@ window.MA.modules.gantt = (function() {
   // ── Calibration (ADR-010) ─────────────────────────────────────────────────
   var calibration = { pxPerDay: 0, originX: 0, baseDate: '', barRects: [] };
 
+  // A milestone rect, identified without relying on getBBox: mermaid marks it with
+  // the `milestone` class, and hand-authored SVG may only carry the rotation. Both
+  // signals mean the box we would measure is not aligned to the timeline.
+  function isMilestoneRect(rect) {
+    if (!rect) return false;
+    var cls = rect.getAttribute && rect.getAttribute('class');
+    if (cls && cls.indexOf('milestone') !== -1) return true;
+    var tr = rect.getAttribute && rect.getAttribute('transform');
+    if (tr && /rotate\s*\(/.test(tr)) return true;
+    return false;
+  }
+
   function calibrateScale(svgEl, parsedData) {
     calibration = { pxPerDay: 0, originX: 0, baseDate: '', barRects: [] };
     if (!svgEl || !parsedData || !parsedData.tasks || parsedData.tasks.length === 0) return;
@@ -504,15 +716,65 @@ window.MA.modules.gantt = (function() {
     var vb = svgEl.viewBox.baseVal;
     var chartWidth = vb ? vb.width : 2000;
     var allRects = svgEl.querySelectorAll('rect');
+    // mermaid labels its bars `class="task ..."` and its row backgrounds
+    // `class="section ..."`, so ask it directly instead of guessing from size.
+    //
+    // The old test was "narrower than 95% of the chart". A section background
+    // sits at exactly the same yCenter as the bar on its row, so once it becomes
+    // a candidate the two tie on distance and DOM order decides — and the
+    // background comes first. In detail mode the background happened to be wider
+    // than the threshold and got dropped; in overview mode, where the chart is
+    // redrawn at the container width, it is not. Measured at 718px wide: the
+    // background is 680.5px against a 682.1px threshold, so the first task's
+    // grab area became x=0 w=680.5 instead of x=75 w=181 and dragging moved
+    // nothing at all.
+    var classed = [];
+    for (var cli = 0; cli < allRects.length; cli++) {
+      var cls = allRects[cli].getAttribute && allRects[cli].getAttribute('class');
+      if (cls && /(^|\s)task(\s|$)/.test(cls)) classed.push(allRects[cli]);
+    }
+    // Fall back to the geometric guess only when nothing carries the class at
+    // all — a mermaid upgrade that renames it should degrade to the old
+    // behaviour rather than silently disabling drag everywhere.
+    var pool = classed.length > 0 ? classed : allRects;
+    var byClass = classed.length > 0;
     var candidateRects = []; // {x, y, width, height, yCenter}
-    for (var cri = 0; cri < allRects.length; cri++) {
+    for (var cri = 0; cri < pool.length; cri++) {
       try {
-        var rbb = allRects[cri].getBBox();
+        // Milestones are drawn as a 20x20 rect rotated 45deg. getBBox() reports the
+        // un-rotated box, so its x is the corner of a square that has nothing to do
+        // with the milestone's date — feeding it to the fit makes pxPerDay wrong for
+        // every other task. Measured: one milestone moved pxPerDay 19.267 -> 18.571
+        // and shifted an unrelated task's computed date by a day.
+        if (isMilestoneRect(pool[cri])) continue;
+        var rbb = pool[cri].getBBox();
+        if (byClass) {
+          candidateRects.push({ x: rbb.x, y: rbb.y, width: rbb.width, height: rbb.height, yCenter: rbb.y + rbb.height / 2, used: false });
+          continue;
+        }
         // Task bars: reasonable height (8-40px), not too wide (< 95% of chart), minimum width
-        if (rbb.height >= 8 && rbb.height <= 40 && rbb.width >= 3 && rbb.width < chartWidth * 0.95) {
+        if (rbb.height >= 8 && rbb.height <= 40 && rbb.width >= 1 && rbb.width < chartWidth * 0.95) {
           candidateRects.push({ x: rbb.x, y: rbb.y, width: rbb.width, height: rbb.height, yCenter: rbb.y + rbb.height / 2, used: false });
         }
       } catch (e) { /* skip */ }
+    }
+
+    // How far a rect may sit from its label before it belongs to a different row.
+    // A fixed 30px threshold exceeded the 24px row pitch, so whenever a task's own
+    // bar was missing the search happily took the next row's — and dragging that
+    // bar rewrote a different task's dates. Derive the tolerance from the observed
+    // pitch instead, and never let it reach a full row.
+    var rowTolerance = 12;
+    var ys = labelInfos.map(function(l) { return l.yCenter; }).sort(function(a, b) { return a - b; });
+    var gaps = [];
+    for (var gi = 1; gi < ys.length; gi++) {
+      var gap = ys[gi] - ys[gi - 1];
+      if (gap > 0.5) gaps.push(gap);
+    }
+    if (gaps.length) {
+      gaps.sort(function(a, b) { return a - b; });
+      var pitch = gaps[Math.floor(gaps.length / 2)]; // median, so one odd row cannot skew it
+      rowTolerance = Math.max(4, pitch * 0.45);
     }
 
     // Step 3: For each task, find its text label, then find the closest candidate rect
@@ -548,7 +810,7 @@ window.MA.modules.gantt = (function() {
         }
       }
 
-      if (closest !== null && closestDist < 30) {
+      if (closest !== null && closestDist <= rowTolerance) {
         candidateRects[closest].used = true;
         var cr = candidateRects[closest];
         barRects.push({ x: cr.x, y: cr.y, width: cr.width, height: cr.height });
@@ -617,7 +879,11 @@ window.MA.modules.gantt = (function() {
         'gantt',
         '    title プロジェクト計画',
         '    dateFormat YYYY-MM-DD',
-        '    axisFormat %m/%d',
+        // axisFormat はあえて書かない。DSL の axisFormat 行は mermaid の
+        // config より優先するので、ここで %m/%d を固定すると
+        // チャートが伸びても年が出ない。実測で 3 年の計画に
+        // 04/01 が 4 回、07/01 が 3 回並ぶ。app.js の ganttAxisFor に
+        // 任せれば短い間は %m/%d、長くなれば %Y/%m に切り替わる。
         '',
         '    section 要件定義',
         '    要件分析           :a1, 2026-04-01, 2026-04-15',
@@ -630,14 +896,20 @@ window.MA.modules.gantt = (function() {
     updateTaskDates: updateTaskDates,
     updateTaskField: updateTaskField,
     addTask: addTask,
+    nextTaskId: nextTaskId,
+    nextStartDate: nextStartDate,
+    nextDurationDays: nextDurationDays,
+    milestoneMeta: milestoneMeta,
     deleteTask: deleteTask,
     sanitizeAfterDependencies: sanitizeAfterDependencies,
-    addSection: addSection,
+    addSection: addSection, moveSection: moveSection, resolveSpan: resolveSpan,
     deleteSection: deleteSection,
     updateGlobalSetting: updateGlobalSetting,
+    removeGlobalSetting: removeGlobalSetting,
     moveTaskWithinSection: moveTaskWithinSection,
     moveTaskToSection: moveTaskToSection,
     calibrateScale: calibrateScale,
+    isMilestoneRect: isMilestoneRect,
     pxToDate: pxToDate,
     dateToPx: dateToPx,
     getCalibration: function() { return calibration; },

@@ -120,6 +120,32 @@ function pruneStaleSelection(parsedData) {
   // inside refresh() is safe because it does not schedule another refresh.
   window.MA.selection.setSelected(kept);
 }
+
+// Add-form state, held outside the DOM.
+//
+// renderProps rebuilds the panel with innerHTML on every keystroke in the editor
+// and on every selection change, and the date fields were hardcoded
+// (value="2026-04-01" / "2026-04-15"). A date the user typed for a parallel
+// task was overwritten by the next refresh, so "adjust the date only when the
+// work is parallel" was not a workflow the panel could support.
+//
+// Cleared on a successful add and on a diagram-type switch, nowhere else.
+var addForm = { label: '', id: '', start: '', end: '', kind: 'task', focus: null };
+
+// Which field to focus after the panel is rebuilt, so a continuous run of adds
+// does not need a click between each one.
+function setAddFormFocus(field) { addForm.focus = field; }
+
+// The section the add form should be pointing at. Falls back to the first
+// section when the remembered one no longer exists (the user deleted it), and to
+// -1 when there are no sections at all.
+function addFormSectionIndex(parsedData) {
+  var count = (parsedData && parsedData.sections) ? parsedData.sections.length : 0;
+  if (count === 0) return -1;
+  var want = parseInt(addForm.section, 10);
+  if (isNaN(want) || want < 0 || want >= count) return 0;
+  return want;
+}
 var modules = {};
 var currentModule = null;
 
@@ -253,8 +279,12 @@ modules.gantt = {
     if (!selData || selData.length === 0) {
       var sectionOptions = '';
       if (parsedData && parsedData.sections) {
+        var keepSec = addFormSectionIndex(parsedData);
         for (var si = 0; si < parsedData.sections.length; si++) {
-          sectionOptions += '<option value="' + si + '">' + window.MA.htmlUtils.escHtml(parsedData.sections[si].name) + '</option>';
+          // The chosen section has to survive the rebuild too, otherwise every
+          // keystroke drops the user back to the first section.
+          var selAttr = (String(si) === String(keepSec)) ? ' selected' : '';
+          sectionOptions += '<option value="' + si + '"' + selAttr + '>' + window.MA.htmlUtils.escHtml(parsedData.sections[si].name) + '</option>';
         }
       }
       if (!sectionOptions) {
@@ -274,6 +304,8 @@ modules.gantt = {
           sectionListHtml +=
             '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;">' +
               '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + window.MA.htmlUtils.escHtml(sec.name) + '">' + window.MA.htmlUtils.escHtml(sec.name) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + taskCount + ')</span></div>' +
+              '<button class="prop-section-up" data-section-line="' + sec.line + '" title="上のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:10px;padding:0;">↑</button>' +
+              '<button class="prop-section-down" data-section-line="' + sec.line + '" title="下のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:10px;padding:0;">↓</button>' +
               '<button class="prop-section-delete" data-section-name="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-line="' + sec.line + '" title="セクションごと削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
             '</div>';
         }
@@ -285,24 +317,47 @@ modules.gantt = {
         '</div>';
       }
 
+      var G = window.MA.modules.gantt;
+      var addSecIdx = parseInt(addFormSectionIndex(parsedData), 10);
+      var isMilestone = addForm.kind === 'milestone';
+      // Only used to prefill an empty field: a value the user typed wins.
+      var autoStart = G.nextStartDate(mmdText, addSecIdx);
+      var autoDays = G.nextDurationDays(mmdText, addSecIdx);
+      var autoEnd = (autoStart && autoDays !== null)
+        ? window.MA.dateUtils.addDays(autoStart, autoDays) : '';
+      var fStart = addForm.start || autoStart || '';
+      var fEnd = addForm.end || autoEnd || '';
+      var inputStyle = 'width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;';
+      var esc = window.MA.htmlUtils.escHtml;
+
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">タスクを選択するか、新規追加</div>' +
+        // 種別トグル。status を唯一の真とし、これはその入力手段でしかない。
+        '<div style="margin-bottom:8px;display:flex;gap:2px;">' +
+          '<button id="prop-add-kind-task" style="flex:1;background:' + (isMilestone ? 'var(--bg-tertiary)' : 'var(--accent)') + ';color:' + (isMilestone ? 'var(--text-primary)' : '#fff') + ';border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">タスク</button>' +
+          '<button id="prop-add-kind-milestone" style="flex:1;background:' + (isMilestone ? 'var(--accent)' : 'var(--bg-tertiary)') + ';color:' + (isMilestone ? '#fff' : 'var(--text-primary)') + ';border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">マイルストーン</button>' +
+        '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label>' +
-          '<input id="prop-add-label" type="text" value="新規タスク" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+          '<input id="prop-add-label" type="text" value="' + esc(addForm.label || '新規タスク') + '" style="' + inputStyle + '">' +
         '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ID</label>' +
-          '<input id="prop-add-id" type="text" placeholder="t' + (addCounter + 1) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+          '<input id="prop-add-id" type="text" value="' + esc(addForm.id) + '" placeholder="' + esc(G.nextTaskId(mmdText)) + '" style="' + inputStyle + '">' +
         '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
-          '<input id="prop-add-start" type="date" value="2026-04-01" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
-          '<input id="prop-add-end" type="date" value="2026-04-15" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' +
+        (isMilestone
+          ? '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">日付</label>' +
+              '<input id="prop-add-start" type="date" value="' + esc(fStart) + '" style="' + inputStyle + '">' +
+            '</div>'
+          : '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
+              '<input id="prop-add-start" type="date" value="' + esc(fStart) + '" style="' + inputStyle + '">' +
+            '</div>' +
+            '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
+              '<input id="prop-add-end" type="date" value="' + esc(fEnd) + '" style="' + inputStyle + '">' +
+            '</div>') +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション</label>' +
           '<select id="prop-add-section" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + sectionOptions + '</select>' +
@@ -334,41 +389,114 @@ modules.gantt = {
               { v: '%a',       label: 'Tue (曜日)' }
             ];
             var current = parsedData.axisFormat || '';
+            // No axisFormat line means the app picks the granularity from the
+            // project span (ganttAxisFor). That is a real, named state — showing
+            // "カスタム…" with an empty box says the user chose something custom
+            // and then failed to type it, which is the opposite of what is
+            // happening.
+            var auto = !current;
             var matched = false;
-            var opts = '';
+            var opts = '<option value="__auto__"' + (auto ? ' selected' : '') +
+              '>自動 (期間に合わせる)</option>';
             for (var pi = 0; pi < presets.length; pi++) {
               var sel = (presets[pi].v === current) ? ' selected' : '';
               if (sel) matched = true;
               opts += '<option value="' + window.MA.htmlUtils.escHtml(presets[pi].v) + '"' + sel + '>' + window.MA.htmlUtils.escHtml(presets[pi].label + '  (' + presets[pi].v + ')') + '</option>';
             }
-            var customSel = matched ? '' : ' selected';
+            var customSel = (matched || auto) ? '' : ' selected';
             opts += '<option value="__custom__"' + customSel + '>カスタム…</option>';
-            var customDisplay = matched ? 'none' : 'block';
+            var customDisplay = (matched || auto) ? 'none' : 'block';
             return '<select id="prop-axisformat-preset" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:4px;">' + opts + '</select>' +
               '<input id="prop-axisformat-custom" type="text" value="' + window.MA.htmlUtils.escHtml(current) + '" placeholder="%m/%d" style="display:' + customDisplay + ';width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">';
           })() +
         '</div>';
 
-      // Bind add task button
-      var addBtn = document.getElementById('prop-add-btn');
-      if (addBtn) {
-        addBtn.addEventListener('click', function() {
-          var label = document.getElementById('prop-add-label').value || '新規タスク';
-          var idEl = document.getElementById('prop-add-id');
-          var id = (idEl && idEl.value) ? idEl.value : ('t' + (++addCounter));
-          var start = document.getElementById('prop-add-start').value || '2026-04-01';
-          var end = document.getElementById('prop-add-end').value || '2026-04-15';
-          var secIdx = parseInt(document.getElementById('prop-add-section').value, 10);
-          window.MA.history.pushHistory();
-          mmdText = addTask(mmdText, secIdx, label, id, start, end);
-          window.MA.selection.setSelected([{ type: 'task', id: id }]); // 追加したタスクを自動選択
-          suppressSync = true;
-          editorEl.value = mmdText;
-          suppressSync = false;
-          syncLineNumbers();
-          scheduleRefresh();
-          // renderPropsは scheduleRefresh → refresh → renderProps で自動的に呼ばれるので、追加呼び出しは不要
+      // Keep every field in addForm as it is typed, so the next rebuild restores
+      // it instead of resetting to the hardcoded defaults.
+      ['label', 'id', 'start', 'end'].forEach(function(field) {
+        var el = document.getElementById('prop-add-' + field);
+        if (!el) return;
+        el.addEventListener('input', function() { addForm[field] = this.value; });
+        // Enter anywhere in the form adds the task — the add button is below the
+        // fold on a short panel and the round trip to it is the whole friction.
+        el.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') { e.preventDefault(); doAddTask(); }
         });
+      });
+      var secSel = document.getElementById('prop-add-section');
+      if (secSel) {
+        secSel.addEventListener('change', function() { addForm.section = this.value; });
+      }
+
+      window.MA.properties.bindEvent('prop-add-kind-task', 'click', function() {
+        addForm.kind = 'task';
+        setAddFormFocus('label');
+        renderProps();
+      });
+      window.MA.properties.bindEvent('prop-add-kind-milestone', 'click', function() {
+        addForm.kind = 'milestone';
+        setAddFormFocus('label');
+        renderProps();
+      });
+
+      function doAddTask() {
+        var labelEl = document.getElementById('prop-add-label');
+        var idEl = document.getElementById('prop-add-id');
+        var startEl = document.getElementById('prop-add-start');
+        var endEl = document.getElementById('prop-add-end');
+        var secEl = document.getElementById('prop-add-section');
+        var label = (labelEl && labelEl.value) || '新規タスク';
+        var id = (idEl && idEl.value) ? idEl.value : window.MA.modules.gantt.nextTaskId(mmdText);
+        var start = startEl ? startEl.value : '';
+        var secIdx = secEl ? parseInt(secEl.value, 10) : -1;
+        var milestone = addForm.kind === 'milestone';
+        // Without a date there is nothing to place the bar at; mermaid resolves a
+        // missing start to the chart origin, which reads as a task that silently
+        // jumped to the beginning of the project.
+        if (!start) {
+          if (startEl) startEl.focus();
+          return;
+        }
+        var end = milestone ? '0d' : ((endEl && endEl.value) || start);
+        window.MA.history.pushHistory();
+        mmdText = addTask(mmdText, secIdx, label, id, start, end, milestone ? 'milestone' : null);
+        // 追加したタスクを自動選択しない。
+        //
+        // 選択するとプロパティパネルが詳細表示に切り替わり、**追加フォームごと
+        // 消える**。「ラベル欄へフォーカスを戻して連続入力」と真正面から
+        // 矛盾していて、実測でも追加直後のパネルは詳細表示になり
+        // prop-add-label が存在しなかった。5本続けて足したいときに毎回
+        // Escape を押して戻る必要がある。
+        //
+        // 追加した結果は図とエディタに出るので、確認手段は失われない。
+        window.MA.selection.clearSelection();
+        // Clear only what identifies this task. The section and the kind are the
+        // user's current context and carry over to the next add; the dates are
+        // recomputed from the task just added.
+        addForm.label = '';
+        addForm.id = '';
+        addForm.start = '';
+        addForm.end = '';
+        addForm.section = secEl ? secEl.value : addForm.section;
+        setAddFormFocus('label');
+        suppressSync = true;
+        editorEl.value = mmdText;
+        suppressSync = false;
+        syncLineNumbers();
+        scheduleRefresh();
+        // renderPropsは scheduleRefresh → refresh → renderProps で自動的に呼ばれるので、追加呼び出しは不要
+      }
+
+      window.MA.properties.bindEvent('prop-add-btn', 'click', doAddTask);
+
+      // Restore focus after the rebuild that follows an add or a kind switch.
+      if (addForm.focus) {
+        var focusEl = document.getElementById('prop-add-' + addForm.focus);
+        addForm.focus = null;
+        if (focusEl) {
+          focusEl.focus();
+          if (focusEl.select) focusEl.select();
+        }
       }
 
       // Bind add section button
@@ -386,6 +514,28 @@ modules.gantt = {
           scheduleRefresh();
         });
       }
+
+      // Bind section move buttons. Sections own the tasks between their header and
+      // the next one, so moving a section carries its tasks along — the task-level
+      // ↑↓ only reorders within a section.
+      ['up', 'down'].forEach(function(dir) {
+        var btns = propsEl.querySelectorAll('.prop-section-' + dir);
+        for (var mi = 0; mi < btns.length; mi++) {
+          btns[mi].addEventListener('click', function() {
+            var ln = parseInt(this.getAttribute('data-section-line'), 10);
+            if (isNaN(ln)) return;
+            var moved = window.MA.modules.gantt.moveSection(mmdText, ln, dir === 'up' ? -1 : 1);
+            if (moved === mmdText) return; // at the edge — nothing to do
+            window.MA.history.pushHistory();
+            mmdText = moved;
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            syncLineNumbers();
+            scheduleRefresh();
+          });
+        }
+      });
 
       // Bind section delete buttons
       var sectionDeleteBtns = propsEl.querySelectorAll('.prop-section-delete');
@@ -439,6 +589,18 @@ modules.gantt = {
           }
           if (afCustom) afCustom.style.display = 'none';
           window.MA.history.pushHistory();
+          // 自動 = the axisFormat line is absent, so the app derives the tick
+          // granularity from the project span. Writing a value here would pin it
+          // again, because the DSL line beats the config.
+          if (v === '__auto__') {
+            mmdText = window.MA.modules.gantt.removeGlobalSetting(mmdText, 'axisFormat');
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            syncLineNumbers();
+            scheduleRefresh();
+            return;
+          }
           mmdText = updateGlobalSetting(mmdText, 'axisFormat', v);
           suppressSync = true;
           editorEl.value = mmdText;
@@ -507,14 +669,23 @@ modules.gantt = {
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ID</label>' +
           '<input id="prop-id" type="text" value="' + window.MA.htmlUtils.escHtml(window.MA.parserUtils.isAutoId(task.id) ? '' : task.id) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
         '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
-          '<input id="prop-start" type="date" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
-          '<input id="prop-end" type="date" value="' + window.MA.htmlUtils.escHtml(task.endDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' +
+        // A milestone is a point in time; the second date field has nothing to
+        // hold. status is the single source of truth for what a task is, so the
+        // panel folds purely on it — the add form's kind toggle only ever writes
+        // status, it never gets its own opinion.
+        (task.status === 'milestone'
+          ? '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">日付</label>' +
+              '<input id="prop-start" type="date" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '</div>'
+          : '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
+              '<input id="prop-start" type="date" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '</div>' +
+            '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
+              '<input id="prop-end" type="date" value="' + window.MA.htmlUtils.escHtml(task.endDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '</div>') +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ステータス</label>' +
           '<div style="display:flex;gap:2px;">' + statusBtns + '</div>' +
@@ -796,14 +967,6 @@ modules.gantt = {
     // Default fallback
     propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">タスクを選択してください</p>';
   },
-  updateText: function(text, change) {
-    if (change.type === 'dates')  return updateTaskDates(text, change.line, change.startDate, change.endDate);
-    if (change.type === 'field')  return updateTaskField(text, change.line, change.field, change.value);
-    if (change.type === 'add')    return addTask(text, change.sectionIndex, change.label, change.id, change.startDate, change.endDate);
-    if (change.type === 'delete') return deleteTask(text, change.line);
-    return text;
-  },
-  exportMmd: function(parsedData) { return mmdText; },
 };
 
 // Register window.MA.modules (sequence, etc.) into local modules dict
@@ -867,6 +1030,12 @@ async function refresh(skipRender) {
     return;
   }
 
+  // Rebuild the whole mermaid config before every render. In detail mode the
+  // gantt width follows the project span, so it changes with each edit — and
+  // because initialize() replaces rather than merges, this has to be the single
+  // place that calls it.
+  applyMermaidConfig(parsed);
+
   // Render via mermaid.js
   var svgId = 'mermaid-svg-' + thisRender;
   try {
@@ -899,17 +1068,25 @@ async function refresh(skipRender) {
         overlayEl.setAttribute('viewBox', svgEl.getAttribute('viewBox'));
       }
 
-      // Fit the zoom to the container on the first render, and again whenever the
-      // document is replaced by a different diagram type.
+      // Fit the drawing to the container on the first render, and again whenever
+      // the document is replaced (diagram-type switch, file open).
       //
-      // Without the second case the previous diagram's zoom carried over to the
-      // new one, and diagram types differ in natural size by more than an order
-      // of magnitude. Measured after switching from the startup gantt (fitted to
-      // 51%) in a 1400px window: stateDiagram came out 51px wide in a 750px pane
-      // — a thumbnail in an empty page — while timeline overflowed at 1190px.
-      // Neither is a state the user asked for; both cost a trip to the zoom
-      // controls before the diagram can even be read.
-      if (thisRender === 1 || pendingAutoFit) {
+      // Two separate reasons, both measured on a 1400px window:
+      //
+      // - Without the "document replaced" case the previous diagram's zoom
+      //   carried over, and natural sizes differ by more than an order of
+      //   magnitude: after switching away from the startup gantt, stateDiagram
+      //   came out 51px wide in a 750px pane while timeline overflowed at 1190px.
+      // - gantt must not be scaled at all. Shrinking the drawing is exactly what
+      //   overview mode exists to avoid: the startup chart came up at 68% via a
+      //   CSS transform, putting the axis labels on screen at 6.8px. Overview
+      //   mode reaches the same fit by redrawing at the container width, so the
+      //   labels keep their real size.
+      if ((thisRender === 1 || pendingAutoFit) && currentModule && currentModule.type === 'gantt') {
+        pendingAutoFit = false;
+        zoom = 1.0;
+        updateZoomLabel();
+      } else if (thisRender === 1 || pendingAutoFit) {
         pendingAutoFit = false;
         var previewContainer = document.getElementById('preview-container');
         var containerW = previewContainer.clientWidth - 32;
@@ -931,7 +1108,7 @@ async function refresh(skipRender) {
       overlayEl.style.transform = 'scale(' + zoom + ')';
       overlayEl.style.transformOrigin = 'top left';
     }
-    if (zoomDisplayEl) zoomDisplayEl.textContent = Math.round(zoom * 100) + '%';
+    updateZoomLabel();
 
     // Build overlay (skip during drag to prevent jitter)
     if (currentModule && svgEl && !dragState) {
@@ -1035,9 +1212,27 @@ function renderProps() {
 }
 
 // ── Zoom ───────────────────────────────────────────────────────────────────
+// Any deliberate zoom leaves overview mode. There are six entry points into zoom
+// (the two buttons, fit, Ctrl+wheel, init, diagram switch); guarding only the
+// buttons left Ctrl+wheel — the primary gesture — stacking a CSS transform on top
+// of an already-fitted redraw, which is the double-shrink F4 warned about.
+// `setZoomFromUser` is that single guard; `setZoom` stays mechanical so fit and
+// init can set a value without changing the mode.
+function setZoomFromUser(z) {
+  if (currentModule && currentModule.type === 'gantt' && ganttViewMode === 'overview') {
+    setGanttViewMode('detail');
+    // Step off 100% in the direction asked for, rather than landing on it — the
+    // first click after leaving overview should visibly do something.
+    setZoom(z > zoom ? 1.1 : 0.9);
+    scheduleRefresh();
+    return;
+  }
+  setZoom(z);
+}
+
 function setZoom(z) {
   zoom = Math.max(0.25, Math.min(3.0, z));
-  if (zoomDisplayEl) zoomDisplayEl.textContent = Math.round(zoom * 100) + '%';
+  updateZoomLabel();
 
   if (previewSvgEl) {
     previewSvgEl.style.transform = 'scale(' + zoom + ')';
@@ -1049,7 +1244,107 @@ function setZoom(z) {
   }
 }
 
+// ── Gantt overview / detail mode ───────────────────────────────────────────
+// Gantt is the one diagram type mermaid lays out on a fixed-width canvas
+// (gantt.useWidth, default 1600) while keeping the font at 11px. Scaling that
+// down with CSS to make it fit shrinks the text too, so "fits on screen" and
+// "readable" were mutually exclusive. Controlling useWidth instead keeps the
+// font fixed and only changes how many pixels a day gets.
+var DETAIL_PX_PER_DAY = 24;
+// Chrome's maximum canvas dimension is 65,535px; stay clear of it so PNG export
+// and clipboard copy keep working on very long projects.
+var GANTT_MAX_WIDTH = 60000;
+// Gantt starts in overview: the chart is drawn at the container width instead of
+// being scaled down to fit, so the labels keep their size on first paint.
+var ganttViewMode = 'overview'; // 'detail' | 'overview' 
+
+// The available width for a chart, minus padding and the vertical scrollbar. A
+// tall chart makes the scrollbar appear, which would otherwise push the chart
+// 6px past the edge and produce a horizontal scrollbar in "overview".
+function previewContentWidth() {
+  var c = document.getElementById('preview-container');
+  if (!c) return 800;
+  // clientWidth already excludes the scrollbar, so subtracting it again left a
+  // permanent 6px gap. The real hazard is measuring before the render that first
+  // introduces the scrollbar; `overflow-y: scroll` on the container removes that
+  // by reserving the gutter unconditionally.
+  return Math.max(200, c.clientWidth - 32);
+}
+
+// Axis granularity has to move with the width: mermaid draws 10-12 ticks
+// regardless of how wide the canvas is, so a ten-year chart at 24px/day spaces
+// them ~8700px apart and prints every one of them as "01/01".
+function ganttAxisFor(days) {
+  if (days <= 92) return { tickInterval: '1week', axisFormat: '%m/%d' };
+  if (days <= 730) return { tickInterval: '1month', axisFormat: '%Y/%m' };
+  return { tickInterval: '3month', axisFormat: '%Y/%m' };
+}
+
+function ganttSpanDays(parsedData) {
+  // Resolving `after` references and durations is the module's job — reading the
+  // raw startDate/endDate tokens here made the most ordinary gantt (a chain of
+  // `after X, Nd`) look like a single day.
+  var r = window.MA.modules.gantt.resolveSpan(parsedData);
+  return r ? r.days : 0;
+}
+
+// mermaid.initialize replaces the config rather than merging into it: passing
+// only {gantt:{...}} silently resets theme to default and securityLevel to
+// strict. Every call goes through here so the full object is always supplied,
+// and the mode lives in ganttViewMode rather than in mermaid's config — config
+// is derived state, so another initialize() elsewhere cannot lose it.
+function applyMermaidConfig(parsedData) {
+  var cfg = { startOnLoad: false, theme: 'dark', securityLevel: 'loose' };
+  if (currentModule && currentModule.type === 'gantt') {
+    var fitW = previewContentWidth();
+    var days = ganttSpanDays(parsedData);
+    var width = fitW;
+    if (ganttViewMode === 'detail' && days > 0) {
+      // Chrome refuses a canvas wider than 65,535px, and PNG/clipboard export
+      // sizes its canvas from the SVG. Past that the export throws instead of
+      // producing a file, so the chart is capped even if that means fewer px/day.
+      width = Math.min(GANTT_MAX_WIDTH, Math.max(fitW, Math.round(days * DETAIL_PX_PER_DAY)));
+    }
+    cfg.gantt = { useWidth: width };
+    // Only pin the axis when the span is actually known. Guessing a granularity
+    // from an unknown span is worse than leaving it out: d3 picks 10-12 ticks on
+    // its own, whereas a wrong '1week' on a decade-long chart draws 500+ of them.
+    if (days > 0) {
+      var axis = ganttAxisFor(days);
+      cfg.gantt.tickInterval = axis.tickInterval;
+      // The DSL's own `axisFormat` line wins over this (verified against
+      // mermaid's gantt renderer), so this only fills in for charts that omit it.
+      cfg.gantt.axisFormat = axis.axisFormat;
+    }
+  }
+  mermaid.initialize(cfg);
+}
+
+// One place decides what the zoom readout says. It used to be written from three
+// separate spots, and refresh() ran last — so pressing "fit" showed 概観 for a
+// frame and then reverted to 100%, leaving no indication of the mode at all.
+function updateZoomLabel() {
+  if (!zoomDisplayEl) return;
+  var isGantt = currentModule && currentModule.type === 'gantt';
+  zoomDisplayEl.textContent = (isGantt && ganttViewMode === 'overview')
+    ? '概観'
+    : Math.round(zoom * 100) + '%';
+}
+
+function setGanttViewMode(mode) {
+  ganttViewMode = mode;
+  updateZoomLabel();
+}
+
 function zoomToFit() {
+  // For gantt, "fit" means redraw at the container width so the labels stay
+  // 11px, not scale the drawing (and its text) down to 54%.
+  if (currentModule && currentModule.type === 'gantt') {
+    setZoom(1.0);
+    setGanttViewMode('overview');
+    scheduleRefresh();
+    return;
+  }
   var svgEl = previewSvgEl ? previewSvgEl.querySelector('svg') : null;
   var previewContainer = document.getElementById('preview-container');
   if (!svgEl || !previewContainer) return;
@@ -1199,18 +1494,14 @@ function init() {
   zoomDisplayEl = document.getElementById('zoom-display');
 
   // Init mermaid.js
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: 'dark',
-    securityLevel: 'loose',
-  });
+  applyMermaidConfig(null);
 
   // Default content
   mmdText = [
     'gantt',
     '    title プロジェクト計画',
     '    dateFormat YYYY-MM-DD',
-    '    axisFormat %m/%d',
+    // axisFormat はあえて書かない (gantt.template() と同じ理由)
     '',
     '    section 要件定義',
     '    要件分析           :a1, 2026-04-01, 2026-04-15',
@@ -1321,10 +1612,10 @@ function init() {
   document.getElementById('btn-redo').addEventListener('click', function() { window.MA.history.redo(); });
 
   document.getElementById('btn-zoom-in').addEventListener('click', function() {
-    setZoom(zoom + 0.1);
+    setZoomFromUser(zoom + 0.1);
   });
   document.getElementById('btn-zoom-out').addEventListener('click', function() {
-    setZoom(zoom - 0.1);
+    setZoomFromUser(zoom - 0.1);
   });
   document.getElementById('btn-zoom-fit').addEventListener('click', function() {
     zoomToFit();
@@ -1338,9 +1629,13 @@ function init() {
     var openedName = String(file.name || '').replace(/\.[^.]+$/, '');
     reader.onload = function(ev) {
       window.MA.history.pushHistory();
-      // Opening a file is a new drawing too, and its size is unrelated to
-      // whatever was on screen a moment ago.
+      // Opening a file is a new document: its size is unrelated to whatever was
+      // on screen a moment ago, and the view mode resets the same way a type
+      // switch does. Editing and undo deliberately do not reset the mode — the
+      // one the user picked is theirs to keep while they work on the same diagram.
       pendingAutoFit = true;
+      setGanttViewMode('overview');
+      setZoom(1.0);
       mmdText = ev.target.result;
       loadedFileName = openedName;
       markSaved();
@@ -1518,7 +1813,7 @@ function init() {
     if (e.ctrlKey) {
       e.preventDefault();
       var delta = e.deltaY < 0 ? 0.1 : -0.1;
-      setZoom(zoom + delta);
+      setZoomFromUser(zoom + delta);
     } else if (e.shiftKey && !e.ctrlKey) {
       // Shift+Wheel → horizontal scroll
       previewContainer.scrollLeft += e.deltaY;
@@ -2135,12 +2430,19 @@ function init() {
       // Switching type replaces the whole document with a template. Undo does
       // bring it back, but nothing on screen says so, and the dropdown sits in
       // the toolbar where a mis-click costs the entire diagram.
+      //
+      // The confirm comes first: bailing out must leave the view untouched.
       var currentTemplate = currentModule && currentModule.template ? currentModule.template() : null;
       if (hasUnsavedWork(mmdText, savedText, currentTemplate) &&
           !confirm('図の種類を変えると、いま書いている内容は ' + targetType + ' のひな形に置き換わります。続けますか？')) {
         this.value = currentModule ? currentModule.type : this.value;
         return;
       }
+      // The view goes back to what a fresh document shows. Resetting to 'detail'
+      // here (as this used to) left the readout saying "100%" while the chart was
+      // actually drawn at fit width — no way to tell which mode you were in.
+      setGanttViewMode('overview');
+      setZoom(1.0);
       window.MA.history.pushHistory();
       pendingAutoFit = true;
       mmdText = mod.template();
@@ -2187,5 +2489,8 @@ if (typeof __exportForTest === 'function') {
     deleteTask: deleteTask,
     daysBetween: window.MA.dateUtils.daysBetween,
     addDays: window.MA.dateUtils.addDays,
+    ganttAxisFor: ganttAxisFor,
+    ganttSpanDays: ganttSpanDays,
+    DETAIL_PX_PER_DAY: DETAIL_PX_PER_DAY,
   });
 }
