@@ -13,9 +13,10 @@ const path = require('path');
 const ROOT = process.argv[2] || process.cwd();
 
 // 下限。既存の件数を割り込んだら、テストが消されたということ。
-const MIN_UNIT = 742;
+const MIN_UNIT = 750;
 const MIN_E2E = 357;
-const MIN_RENDER = 22;
+const MIN_RENDER = 30;          // rename 22 + delete 8
+const MIN_RENDER_SUITES = 2;    // case ファイルの本数。1本消されても気付けるように
 
 const results = [];
 function check(id, label, ok, detail) {
@@ -39,10 +40,15 @@ check('G1/G3', 'ユニット', uFail === 0 && uPass >= MIN_UNIT,
   uPass + ' passed / ' + uFail + ' failed (下限 ' + MIN_UNIT + ')');
 
 // G2: 実描画オラクル。描画差分ゼロ。
+// オラクルは複数の case ファイルを続けて回すので、集計行も複数出る。
+// exec だと最初の1本しか読まず、2本目が全滅していても気付かない。全部足す。
 const renderOut = run('npm', ['run', '--silent', 'test:render'], { shell: true });
-const rOk = /描画差分なし \((\d+) ケース\)/.exec(renderOut);
-check('G2', '実描画オラクル', !!rOk && +rOk[1] >= MIN_RENDER,
-  rOk ? (rOk[1] + ' ケースで差分なし (下限 ' + MIN_RENDER + ')') : '差分あり または実行失敗');
+const rAll = [...renderOut.matchAll(/描画差分なし \((\d+) ケース\)/g)];
+const rSum = rAll.reduce((n, m) => n + (+m[1]), 0);
+const rSuites = rAll.length;
+check('G2', '実描画オラクル', rSuites >= MIN_RENDER_SUITES && rSum >= MIN_RENDER,
+  rSum + ' ケース / ' + rSuites + ' 本で差分なし (下限 ' + MIN_RENDER + ' ケース・' +
+  MIN_RENDER_SUITES + ' 本)');
 
 // G4/G5: e2e。実ブラウザでの操作を通す。
 const e2eOut = run('npx', ['playwright', 'test', '--reporter=line'], { shell: true });
@@ -55,7 +61,7 @@ check('G4/G5', 'e2e', (!eFail || +eFail[1] === 0) && ePass >= MIN_E2E,
 // 並行レビュー。4観点すべてで指摘ゼロ。
 // 実行済みの結果を読む (gate から起動すると2重に走って遅い)。
 const outDir = path.join(__dirname, 'out');
-const reviewers = ['r1-destructive', 'r2-delete', 'r3-render', 'r4-ui', 'r5-user', 'r6-move'];
+const reviewers = ['r1-destructive', 'r2-delete', 'r3-render', 'r4-ui', 'r5-user', 'r6-move', 'r7-consistency', 'r8-scale'];
 //
 // 出力の**鮮度**も見る。ここを見ていなかったせいで、変異注入したときの
 // 結果ファイルがそのまま残り、ゲートが古いソースへの指摘を読んでいた。

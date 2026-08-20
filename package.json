@@ -11,7 +11,7 @@
   "scripts": {
     "test": "node tests/run-tests.js",
     "test:e2e": "npx playwright test",
-    "test:render": "node tests/gen-rename-cases.js && node tests/render-oracle.js tests/render-cases/rename-cascade.json",
+    "test:render": "node tests/gen-rename-cases.js && node tests/gen-delete-cases.js && node tests/render-oracle.js tests/render-cases/rename-cascade.json && node tests/render-oracle.js tests/render-cases/delete-cascade.json",
     "test:all": "node tests/run-tests.js && npm run test:render && npx playwright test"
   },
   "keywords": [],

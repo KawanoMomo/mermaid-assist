@@ -172,7 +172,11 @@ window.MA.properties = (function() {
     // button itself. The row's text is ellipsised at the panel width, so a warning
     // placed in the label is frequently invisible.
     var delLabel = opts.deleteLabel ? escHtml(opts.deleteLabel) : '✕';
-    var delTitle = opts.deleteTitle ? ' title="' + escHtml(opts.deleteTitle) + '"' : '';
+    // 記号だけのボタンは、何を消すのか読み取れない。deleteTitle を渡していない
+    // モジュールにも行のラベルから既定の説明を与える。ホバーとスクリーンリーダの
+    // 両方でここが唯一の手がかりになる。
+    var delTitleText = opts.deleteTitle || ('「' + String(opts.label) + '」を削除');
+    var delTitle = ' title="' + escHtml(delTitleText) + '"';
     var deleteBtn = opts.deleteClass ?
       '<button class="' + opts.deleteClass + '"' + dataAttrs + delTitle + ' style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">' + delLabel + '</button>' : '';
     return '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +

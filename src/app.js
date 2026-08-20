@@ -310,6 +310,25 @@ modules.gantt = {
               '<button class="prop-section-down" data-section-line="' + sec.line + '" title="下のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:10px;padding:0;">↓</button>' +
               '<button class="prop-section-delete" data-section-name="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-line="' + sec.line + '" title="セクションごと削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
             '</div>';
+
+          // セクションの下にタスクを並べる。
+          //
+          // gantt だけプロパティ欄にタスク一覧が無く、タスクを選ぶ手段が
+          // 「チャート上のバーをクリックする」しか無かった。他の20図種には一覧がある。
+          // 4件なら困らないが、100件になるとバーを目で探すしかなくなり、
+          // 一覧を持つ他の図種との差が実務で効いてくる (R8 スケール耐性)。
+          for (var tli = 0; tli < parsedData.tasks.length; tli++) {
+            var tk = parsedData.tasks[tli];
+            if (tk.sectionIndex !== sli) continue;
+            var tkLabel = window.MA.htmlUtils.escHtml(tk.label || tk.id || '');
+            var tkId = window.MA.htmlUtils.escHtml(tk.id || '');
+            sectionListHtml +=
+              '<div style="display:flex;align-items:center;gap:4px;margin:0 0 3px 14px;padding:2px 4px;background:var(--bg-primary);border-radius:3px;">' +
+                '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + tkLabel + '">' + tkLabel + '</div>' +
+                '<button class="prop-task-select" data-element-id="' + tkId + '" data-line="' + tk.line + '" title="「' + tkLabel + '」を選択" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' +
+                '<button class="prop-task-delete" data-element-id="' + tkId + '" data-line="' + tk.line + '" title="「' + tkLabel + '」を削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
+              '</div>';
+          }
         }
         sectionListHtml += '</div>';
       } else {
@@ -559,6 +578,39 @@ modules.gantt = {
         })(sectionDeleteBtns[sdbi]);
       }
 
+      // Bind task list (select / delete)
+      //
+      // 選択は他の図種と同じく selection に載せるだけ。バーをクリックした場合と
+      // 同じ状態にしたいので、id で選ぶ (行番号は編集で動く)。
+      var taskSelBtns = propsEl.querySelectorAll('.prop-task-select');
+      for (var tsi = 0; tsi < taskSelBtns.length; tsi++) {
+        (function(btn) {
+          btn.addEventListener('click', function() {
+            var id = btn.getAttribute('data-element-id');
+            if (!id) return;
+            window.MA.selection.setSelected([{ type: 'task', id: id }]);
+            scheduleRefresh();
+          });
+        })(taskSelBtns[tsi]);
+      }
+      var taskDelBtns = propsEl.querySelectorAll('.prop-task-delete');
+      for (var tdi = 0; tdi < taskDelBtns.length; tdi++) {
+        (function(btn) {
+          btn.addEventListener('click', function() {
+            var ln = parseInt(btn.getAttribute('data-line'), 10);
+            if (isNaN(ln)) return;
+            window.MA.history.pushHistory();
+            mmdText = deleteTask(mmdText, ln);
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            window.MA.selection.setSelected([]);
+            syncLineNumbers();
+            scheduleRefresh();
+          });
+        })(taskDelBtns[tdi]);
+      }
+
       // Bind global settings
       function bindGlobal(elId, key) {
         var el = document.getElementById(elId);
@@ -660,8 +712,8 @@ modules.gantt = {
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;">' +
           '<div style="flex:1;font-weight:bold;color:var(--text-primary);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + window.MA.htmlUtils.escHtml(task.label) + '</div>' +
-          '<button id="prop-move-up" title="同一セクション内で上に移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↑</button>' +
-          '<button id="prop-move-down" title="同一セクション内で下に移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↓</button>' +
+          '<button id="prop-move-up" title="同一セクション内で上へ移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↑</button>' +
+          '<button id="prop-move-down" title="同一セクション内で下へ移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↓</button>' +
         '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label>' +

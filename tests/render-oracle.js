@@ -124,9 +124,26 @@ function comparePairs(results, cases) {
         if (a.text !== o.expectText) {
           failures.push(name + ': 描画テキストが期待と違う\n      期待: ' + o.expectText + '\n      実際: ' + a.text);
         }
-      } else if (!o.allowTextChange && a.text !== b.text) {
+      } else if (!o.allowTextChange && !o.expectAbsent && !o.expectPresent && a.text !== b.text) {
+        // expectAbsent / expectPresent を書いたケースは「変わるのが正しい」ので、
+        // 全文一致は見ない。allowTextChange を書かせると比較を丸ごと外す癖がつく。
         failures.push(name + ': 描画テキストが変わった\n      before: ' + b.text + '\n      after : ' + a.text);
       }
+      // 削除のケースはテキストが変わって当然なので、「何が消えたか」を直接見る。
+      // expectAbsent  : 描画テキストから消えていること。
+      //                 一覧からは消えたのに図には残る、という欠陥をここで捕まえる
+      //                 (mermaid は参照だけで要素を作るので、宣言行を消しても残る)
+      // expectPresent : 巻き添えを食っていないこと
+      (o.expectAbsent || []).forEach((w) => {
+        if (a.text.indexOf(w) >= 0) {
+          failures.push(name + ': 消したはずの ' + w + ' が図に残っている\n      実際: ' + a.text);
+        }
+      });
+      (o.expectPresent || []).forEach((w) => {
+        if (a.text.indexOf(w) < 0) {
+          failures.push(name + ': 巻き添えで ' + w + ' が消えた\n      実際: ' + a.text);
+        }
+      });
       if (!o.allowRectChange && stripIds(a.rects) !== stripIds(b.rects)) {
         failures.push(name + ': ガントのバー位置が変わった\n      before: ' + b.rects + '\n      after : ' + a.rects);
       }

@@ -163,8 +163,61 @@ window.MA.modules.sequence = (function() {
     return window.MA.textUpdater.insertAfter(text, insertAfterLine, newLine);
   }
 
-  function deleteParticipant(text, lineNum) {
-    return window.MA.textUpdater.deleteLine(text, lineNum);
+  // _msgEnds: メッセージ行の両端を返す。メッセージでなければ null。
+  // `A->>+B: text` の活性化マーカー (+ / -) は id ではないので落とす。
+  function _msgEnds(trimmed) {
+    for (var ai = 0; ai < ARROW_TYPES.length; ai++) {
+      var pos = trimmed.indexOf(ARROW_TYPES[ai]);
+      if (pos <= 0) continue;
+      var from = trimmed.slice(0, pos).trim();
+      var rest = trimmed.slice(pos + ARROW_TYPES[ai].length);
+      var ci = rest.indexOf(':');
+      var to = (ci >= 0 ? rest.slice(0, ci) : rest).trim();
+      return { from: from.replace(/^[+-]/, '').trim(), to: to.replace(/^[+-]/, '').trim() };
+    }
+    return null;
+  }
+
+  // deleteParticipant: participantId を渡すと、その participant を**図から**消す。
+  //
+  // 宣言行だけ消しても意味がない。mermaid は `A->>B` の参照だけで B を作るので、
+  // 一覧からは消えたのに図には残り続ける。パーサ (宣言行を見る) と mermaid
+  // (参照を見る) で「存在する」の述語が食い違っていた。
+  // class / er / state で先に直したのと同じ形に揃える。
+  //
+  // 巻き添えを最小にするため、消すのは「その participant を端に持つ行」だけ。
+  // Note の対象が複数あるときは、対象から外すだけで note 自体は残す。
+  function deleteParticipant(text, lineNum, participantId) {
+    if (!participantId) return window.MA.textUpdater.deleteLine(text, lineNum);
+    var lines = text.split('\n');
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var trimmed = lines[i].trim();
+
+      var decl = trimmed.match(/^(participant|actor)\s+(\S+)/);
+      if (decl && decl[2] === participantId) continue;
+
+      var ends = _msgEnds(trimmed);
+      if (ends && (ends.from === participantId || ends.to === participantId)) continue;
+
+      var act = trimmed.match(/^(activate|deactivate)\s+(\S+)\s*$/);
+      if (act && act[2] === participantId) continue;
+
+      var note = trimmed.match(/^(Note\s+(?:over|left of|right of)\s+)([^:]+)(:.*)$/i);
+      if (note) {
+        var targets = note[2].split(',').map(function(x) { return x.trim(); });
+        var kept = targets.filter(function(x) { return x !== participantId; });
+        if (kept.length === 0) continue;
+        if (kept.length !== targets.length) {
+          var indent = lines[i].slice(0, lines[i].length - lines[i].trimStart().length);
+          out.push(indent + note[1] + kept.join(',') + note[3]);
+          continue;
+        }
+      }
+
+      out.push(lines[i]);
+    }
+    return out.join('\n');
   }
 
   function moveParticipantUp(text, lineNum) {

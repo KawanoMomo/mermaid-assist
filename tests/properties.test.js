@@ -179,9 +179,14 @@ describe('listItemHtml: 削除ボタンの警告表示', function() {
     expect(html).toContain('title="2要素が消えます"');
   });
 
-  test('deleteTitle を省略すると title 属性は出ない', function() {
+  // 以前はここで「省略すると title は出ない」を固定していた。
+  // 一覧行の削除ボタンは記号 (✕) だけなので、title が無いと何が消えるのか
+  // 読み取れない。R7 (一貫性) がこれを発見可能性の欠陥として指摘したため、
+  // 省略時はラベルから既定の説明を作る仕様に変えた。
+  test('deleteTitle を省略するとラベルから既定の説明が入る', function() {
     var html = P.listItemHtml({ label: 'a', deleteClass: 'x-del' });
-    expect(html).not.toContain('title=');
+    expect(html).toContain('title=');
+    expect(html).toContain('「a」を削除');
   });
 
   test('deleteLabel / deleteTitle はエスケープされる', function() {
