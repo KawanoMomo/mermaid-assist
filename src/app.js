@@ -1550,6 +1550,23 @@ function init() {
       e.stopPropagation();
       return;
     }
+    // Connection mode: the click after "ここから線" picks the target and the
+    // module's own connect() writes the edge.
+    //
+    // `core/connection-mode.js` has existed since the Tier-1 refactor and the
+    // design says edges are drawn by "クリック2回でエッジ作成 共通機構 / 全
+    // モジュールから利用" — but nothing ever called it. All 20 modules expose
+    // operations.connect(text, from, to, props) and every one of them was
+    // unreachable from the canvas. Drawing an edge meant picking both ends out
+    // of two dropdowns in the properties panel, which is five interactions and
+    // gets worse the more elements the diagram has.
+    if (seqKind && seqId && window.MA.connectionMode.isInConnectionMode()) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.MA.connectionMode.notifyTarget(seqKind, seqId);
+      return;
+    }
+
     // Any other overlay element that names what it is and which element it
     // stands for — commit selection synchronously. selectItem handles toggle-off
     // on re-click.

@@ -562,9 +562,12 @@ window.MA.modules.blockBeta = (function() {
             '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">種別: ' + escHtml(el.kind) + (el.parentId ? ' (親: ' + escHtml(el.parentId) + ')' : '') + '</div>' +
             P.fieldHtml('ID', 'block-edit-id', el.id) +
             (el.kind === 'block' ? P.fieldHtml('Label', 'block-edit-label', el.label !== el.id ? el.label : '') : '') +
+            P.connectButtonHtml('block-edit-connect') +
             P.dangerButtonHtml('block-edit-delete', '削除');
 
           var elLine = el.line, elId = el.id, elKind = el.kind;
+          P.bindConnectButton('block-edit-connect', el.kind === 'group' ? 'group' : 'block', el.id,
+            function(fromId, toId) { return addLink(ctx.getMmdText(), fromId, toId, ''); });
           // The ID field used to be rendered without a handler: it looked
           // editable, accepted typing, and threw the value away on blur.
           var idInput = document.getElementById('block-edit-id');

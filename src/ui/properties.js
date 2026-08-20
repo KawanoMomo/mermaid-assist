@@ -39,6 +39,38 @@ window.MA.properties = (function() {
     window.MA.selection.setSelected([{ type: sel[0].type, id: newId }]);
   }
 
+  // "Draw an edge from here" — starts connection mode. The next click on the
+  // canvas picks the target.
+  //
+  // Without this the only way to add an edge was two dropdowns and a button in
+  // the properties panel: five interactions, and the dropdowns get unusable once
+  // the diagram has thirty elements. `connection-mode.js` and every module's
+  // operations.connect() were already there, just never wired to anything.
+  function connectButtonHtml(id) {
+    return '<button id="' + id + '" style="width:100%;background:var(--bg-tertiary);' +
+      'color:var(--text-primary);border:1px solid var(--accent);padding:5px 8px;' +
+      'border-radius:4px;cursor:pointer;font-size:12px;margin-bottom:8px;">' +
+      'ここから線を引く</button>';
+  }
+
+  // Wire the button to connection mode. `connect` receives (fromId, toId) and
+  // is expected to return the new text.
+  function bindConnectButton(id, fromType, fromId, connect) {
+    bindEvent(id, 'click', function() {
+      window.MA.connectionMode.startConnectionMode(fromType, fromId, function(src, target) {
+        if (!target || !target.id || target.id === src.id) return;
+        window.MA.history.pushHistory();
+        state.setMmdText(connect(src.id, target.id));
+        window.MA.selection.clearSelection();
+        state.onUpdate();
+      });
+      // Keeping the source selected would make the highlight say "this is what
+      // you are editing" while the next click actually means "connect to this".
+      window.MA.selection.clearSelection();
+      state.onUpdate();
+    });
+  }
+
   // bindDateField: 開始日/終了日 ペアのバインド (datesUpdater は外部から注入)
   function bindDateField(startId, endId, lineNum, datesUpdater) {
     var startEl = document.getElementById(startId);
@@ -318,6 +350,8 @@ window.MA.properties = (function() {
     actionBarHtml: actionBarHtml,
     // Event helpers
     bindEvent: bindEvent,
+    connectButtonHtml: connectButtonHtml,
+    bindConnectButton: bindConnectButton,
     bindActionBar: bindActionBar,
     bindAllByClass: bindAllByClass,
     bindSelectButtons: bindSelectButtons,

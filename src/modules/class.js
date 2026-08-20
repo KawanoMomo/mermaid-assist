@@ -527,6 +527,7 @@ window.MA.modules.classDiagram = (function() {
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">メンバ一覧</label>' +
           '<div>' + membersList + '</div>' +
         '</div>' +
+        props.connectButtonHtml('sel-class-connect') +
         props.actionBarHtml('sel-class', {
           insertBefore: false, insertAfter: false,
           // move は無効。_is*Line が「宣言行か」で判定しており、ブロック形式のクラス (`class Dog {`) を宣言行と誤判定し、他クラスの本体に飲み込ませる。
@@ -535,6 +536,10 @@ window.MA.modules.classDiagram = (function() {
           move: false, delete: true,
           labels: { delete: 'クラス削除' },
         });
+
+      // 図の上でクリック2回で関係を引く
+      props.bindConnectButton('sel-class-connect', 'class', cls.id,
+        function(fromId, toId) { return addRelation(ctx.getMmdText(), fromId, toId); });
 
       props.bindActionBar('sel-class', {
         up: function() {

@@ -215,7 +215,11 @@ window.MA.modules.erDiagram = (function() {
     leftCard = leftCard || '||';
     rightCard = rightCard || 'o{';
     dashStyle = dashStyle || '--';
-    var newLine = '    ' + from + ' ' + leftCard + dashStyle + rightCard + ' ' + to + (label ? ' : ' + label : '');
+    // mermaid の erDiagram はラベルを省略できない。`A ||--o{ B` は
+    // `Parse error on line 2` になり、**追加した瞬間に図全体が壊れる**。
+    // 空の引用符なら通るので、ラベル未指定はそれを置く (実測で確認)。
+    var labelPart = label ? ' : ' + label : ' : ""';
+    var newLine = '    ' + from + ' ' + leftCard + dashStyle + rightCard + ' ' + to + labelPart;
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
@@ -393,6 +397,7 @@ window.MA.modules.erDiagram = (function() {
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">属性一覧</label>' +
           '<div>' + attrsList + '</div>' +
         '</div>' +
+        P.connectButtonHtml('sel-ent-connect') +
         P.actionBarHtml('sel-ent', {
           insertBefore: false, insertAfter: false,
           // move は無効。_is*Line が「宣言行か」で判定しており、属性行 (`string name`) をエンティティ行と誤判定し、ブロック構造を破壊する。
@@ -401,6 +406,9 @@ window.MA.modules.erDiagram = (function() {
           move: false, delete: true,
           labels: { delete: 'エンティティ削除' },
         });
+
+      P.bindConnectButton('sel-ent-connect', 'entity', ent.id,
+        function(fromId, toId) { return addRelationship(ctx.getMmdText(), fromId, toId); });
 
       P.bindActionBar('sel-ent', {
         up: function() {

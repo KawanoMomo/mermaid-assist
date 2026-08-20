@@ -905,11 +905,17 @@ window.MA.modules.flowchart = (function() {
         fieldHtml('ID', 'sel-node-id', node.id) +
         fieldHtml('ラベル', 'sel-node-label', node.label) +
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">形状</label><select id="sel-node-shape" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + shapeOpts + '</select></div>' +
+        window.MA.properties.connectButtonHtml('sel-node-connect') +
         window.MA.properties.actionBarHtml('sel-node', {
           insertBefore: false, insertAfter: false,
           move: true, delete: true,
           labels: { delete: 'ノード削除' },
         });
+
+      // 図の上でクリック2回でエッジを引く。From/To のドロップダウンから
+      // 両端を探す必要がなくなる (ノードが増えるほど効く)
+      window.MA.properties.bindConnectButton('sel-node-connect', 'node', node.id,
+        function(fromId, toId) { return addEdge(ctx.getMmdText(), fromId, toId); });
 
       document.getElementById('sel-node-id').addEventListener('change', function() {
         window.MA.history.pushHistory();

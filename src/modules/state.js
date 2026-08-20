@@ -449,6 +449,7 @@ window.MA.modules.state = (function() {
         fieldHtml('ID', 'sel-state-id', st.id) +
         fieldHtml('ラベル', 'sel-state-label', st.label) +
         '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">種別: ' + escHtml(st.type || 'simple') + '</div>' +
+        P.connectButtonHtml('sel-state-connect') +
         P.actionBarHtml('sel-state', {
           insertBefore: false, insertAfter: false,
           // move は無効。_is*Line が「宣言行か」で判定しており、コンポジット状態 (`state Active {`) を宣言行と誤判定し、他状態の子に吸い込む。
@@ -457,6 +458,9 @@ window.MA.modules.state = (function() {
           move: false, delete: true,
           labels: { delete: '状態削除' },
         });
+
+      P.bindConnectButton('sel-state-connect', 'state', st.id,
+        function(fromId, toId) { return addTransition(ctx.getMmdText(), fromId, toId); });
 
       document.getElementById('sel-state-label').addEventListener('change', function() {
         window.MA.history.pushHistory();
