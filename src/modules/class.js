@@ -235,8 +235,46 @@ window.MA.modules.classDiagram = (function() {
   function moveClassUp(text, lineNum) { return _moveClassStep(text, lineNum, -1); }
   function moveClassDown(text, lineNum) { return _moveClassStep(text, lineNum, 1); }
 
-  function deleteClass(text, lineNum) {
-    return window.MA.textUpdater.deleteLine(text, lineNum);
+  // Delete a class and everything that only existed because of it.
+  //
+  // Deleting the line the class was first seen on removed `class Animal {` and
+  // left `+String name`, `+makeSound() void` and the closing `}` behind — the
+  // members floated free and mermaid refused the whole diagram. The relations
+  // naming the class also stayed, so it came back as an implicitly declared,
+  // memberless class.
+  //
+  // `classId` is optional so the older single-argument callers keep working.
+  function deleteClass(text, lineNum, classId) {
+    if (!classId) return window.MA.textUpdater.deleteLine(text, lineNum);
+    var lines = text.split('\n');
+    var out = [];
+    var skipToBrace = false;
+    for (var i = 0; i < lines.length; i++) {
+      var trimmed = lines[i].trim();
+      if (skipToBrace) {
+        if (trimmed === '}') skipToBrace = false;
+        continue;
+      }
+      var block = trimmed.match(/^class\s+(\S+)\s*\{\s*$/);
+      if (block && block[1] === classId) { skipToBrace = true; continue; }
+      var decl = trimmed.match(/^class\s+(\S+)\s*$/);
+      if (decl && decl[1] === classId) continue;
+      if (classRelTouches(trimmed, classId)) continue;
+      // `X : +member` form
+      var mem = trimmed.match(/^(\S+)\s+:\s+/);
+      if (mem && mem[1] === classId) continue;
+      out.push(lines[i]);
+    }
+    return out.join('\n');
+  }
+
+  // Whether the line is a relation with classId at either end.
+  // Exact match, not prefix: deleting `Ani` must not take `Animal`'s relations
+  // with it.
+  function classRelTouches(trimmed, classId) {
+    var m = trimmed.match(/^(\S+)\s+([<>|*o.\-]{2,})\s+(\S+?)(?:\s*:\s*.*)?$/);
+    if (!m) return false;
+    return m[1] === classId || m[3] === classId;
   }
 
   function addMember(text, classId, visibility, name, type, isMethod) {
@@ -315,15 +353,13 @@ window.MA.modules.classDiagram = (function() {
 
   // ── UI ──
   function buildOverlay(svgEl, parsedData, overlayEl) {
-    if (!overlayEl) return;
-    while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
-    if (!svgEl) return;
-    var viewBox = svgEl.getAttribute('viewBox');
-    if (viewBox) overlayEl.setAttribute('viewBox', viewBox);
-    var svgW = svgEl.getAttribute('width');
-    var svgH = svgEl.getAttribute('height');
-    if (svgW) overlayEl.setAttribute('width', svgW);
-    if (svgH) overlayEl.setAttribute('height', svgH);
+    // mermaid のクラスノードは id="classId-<クラス名>-<連番>"。
+    // クリックで選択できるようにする (プロパティ一覧だけだとクラスが増えたとき
+    // 目的のクラスを探すのに一覧をスクロールし続けることになる)。
+    window.MA.overlayGeom.buildNodeOverlay(svgEl, parsedData, overlayEl, {
+      prefix: 'classId',
+      kindOf: function() { return 'class'; },
+    });
   }
 
   function renderProps(selData, parsedData, propsEl, ctx) {
@@ -459,7 +495,11 @@ window.MA.modules.classDiagram = (function() {
       });
 
       props.bindSelectButtons(propsEl, 'cl-select-class', 'class');
-      props.bindDeleteButtons(propsEl, 'cl-delete-class', ctx, deleteClass);
+      // 3引数目は data-element-id。クラスは行を共有する (関係行が両端を宣言する)
+      // ので、id が無いと押した行の別クラスまで巻き込む
+      props.bindDeleteButtons(propsEl, 'cl-delete-class', ctx, function(t, ln, elId) {
+        return deleteClass(t, ln, elId);
+      });
       props.bindSelectButtons(propsEl, 'cl-select-rel', 'relation');
       props.bindDeleteButtons(propsEl, 'cl-delete-rel', ctx, deleteRelation);
       props.bindDeleteButtons(propsEl, 'cl-delete-ns', ctx, deleteNamespace, true);
@@ -487,6 +527,7 @@ window.MA.modules.classDiagram = (function() {
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">メンバ一覧</label>' +
           '<div>' + membersList + '</div>' +
         '</div>' +
+        props.connectButtonHtml('sel-class-connect') +
         props.actionBarHtml('sel-class', {
           insertBefore: false, insertAfter: false,
           // move は無効。_is*Line が「宣言行か」で判定しており、ブロック形式のクラス (`class Dog {`) を宣言行と誤判定し、他クラスの本体に飲み込ませる。
@@ -495,6 +536,10 @@ window.MA.modules.classDiagram = (function() {
           move: false, delete: true,
           labels: { delete: 'クラス削除' },
         });
+
+      // 図の上でクリック2回で関係を引く
+      props.bindConnectButton('sel-class-connect', 'class', cls.id,
+        function(fromId, toId) { return addRelation(ctx.getMmdText(), fromId, toId); });
 
       props.bindActionBar('sel-class', {
         up: function() {
@@ -515,7 +560,7 @@ window.MA.modules.classDiagram = (function() {
         },
         'delete': function() {
           window.MA.history.pushHistory();
-          ctx.setMmdText(deleteClass(ctx.getMmdText(), cls.line));
+          ctx.setMmdText(deleteClass(ctx.getMmdText(), cls.line, cls.id));
           window.MA.selection.clearSelection();
           ctx.onUpdate();
         },

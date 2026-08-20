@@ -49,6 +49,8 @@ function rebuildOverlay() {
 
 // ── Drag State ────────────────────────────────────────────────────────────
 var dragState = null;
+// 直近のドラッグ拒否理由。ステータスバーに出し、次の描画で消える。
+var dragBlockedMsg = '';
 // Sequence-specific drag state (participant reorder via gap drop).
 // Kept separate from the Gantt date-drag state above since the two handlers
 // run on the same overlay element but track fundamentally different motion.
@@ -58,6 +60,8 @@ var seqDragState = null;
 // 観点 C ("click が drag の残響で発火して popup が暴発する" の対策).
 var seqJustDraggedAt = 0;
 var SEQ_DRAG_CLICK_SUPPRESS_MS = 300;
+// 連続したタイプを1つの undo にまとめる窓。手が止まったら次のまとまりになる。
+var EDITOR_UNDO_COALESCE_MS = 600;
 
 // ── Application State ──────────────────────────────────────────────────────
 var mmdText = '';
@@ -71,6 +75,79 @@ var dragRenderTimer = null;
 var renderCounter = 0;
 var clipboard = null;
 var addCounter = 0;
+
+// Set when the document is replaced by a different diagram type, so the next
+// render fits the new drawing to the pane instead of inheriting the old zoom.
+var pendingAutoFit = false;
+
+// Every value a selection could legitimately point at, taken from the parse.
+//
+// Modules disagree about which field carries the identity: most use `id`, but a
+// gantt section is selected by its `name` and has no `id` at all. Collecting
+// both is what lets one guard serve every diagram type without a per-module
+// list that would drift.
+function knownSelectionIds(parsedData) {
+  var out = {};
+  if (!parsedData) return out;
+  Object.keys(parsedData).forEach(function(key) {
+    var arr = parsedData[key];
+    if (!Array.isArray(arr)) return;
+    arr.forEach(function(x) {
+      if (!x) return;
+      if (x.id !== undefined && x.id !== null) out[String(x.id)] = true;
+      if (x.name !== undefined && x.name !== null) out[String(x.name)] = true;
+    });
+  });
+  return out;
+}
+
+// Drop selections that no longer point at anything.
+//
+// Deleting the selected task from the editor left the selection on its id, so
+// the properties panel sat on 「タスクが見つかりません」 and stayed there — the
+// user had removed the row and the panel kept reporting an error about it.
+// Renaming the selected element did the same: the selection still named the old
+// id, so editing your own rename cost you the panel.
+//
+// Guarded on a non-empty id set: if a module's parse yields nothing we know
+// about, clearing every selection would be worse than leaving it alone.
+function pruneStaleSelection(parsedData) {
+  var current = window.MA.selection.getSelected();
+  if (!current.length) return;
+  var known = knownSelectionIds(parsedData);
+  if (!Object.keys(known).length) return;
+  var kept = current.filter(function(s) { return known[String(s.id)]; });
+  if (kept.length === current.length) return;
+  // setSelected fires onChange → renderProps + rebuildOverlay. Calling it from
+  // inside refresh() is safe because it does not schedule another refresh.
+  window.MA.selection.setSelected(kept);
+}
+
+// Add-form state, held outside the DOM.
+//
+// renderProps rebuilds the panel with innerHTML on every keystroke in the editor
+// and on every selection change, and the date fields were hardcoded
+// (value="2026-04-01" / "2026-04-15"). A date the user typed for a parallel
+// task was overwritten by the next refresh, so "adjust the date only when the
+// work is parallel" was not a workflow the panel could support.
+//
+// Cleared on a successful add and on a diagram-type switch, nowhere else.
+var addForm = { label: '', id: '', start: '', end: '', kind: 'task', focus: null };
+
+// Which field to focus after the panel is rebuilt, so a continuous run of adds
+// does not need a click between each one.
+function setAddFormFocus(field) { addForm.focus = field; }
+
+// The section the add form should be pointing at. Falls back to the first
+// section when the remembered one no longer exists (the user deleted it), and to
+// -1 when there are no sections at all.
+function addFormSectionIndex(parsedData) {
+  var count = (parsedData && parsedData.sections) ? parsedData.sections.length : 0;
+  if (count === 0) return -1;
+  var want = parseInt(addForm.section, 10);
+  if (isNaN(want) || want < 0 || want >= count) return 0;
+  return want;
+}
 var modules = {};
 var currentModule = null;
 
@@ -204,8 +281,12 @@ modules.gantt = {
     if (!selData || selData.length === 0) {
       var sectionOptions = '';
       if (parsedData && parsedData.sections) {
+        var keepSec = addFormSectionIndex(parsedData);
         for (var si = 0; si < parsedData.sections.length; si++) {
-          sectionOptions += '<option value="' + si + '">' + window.MA.htmlUtils.escHtml(parsedData.sections[si].name) + '</option>';
+          // The chosen section has to survive the rebuild too, otherwise every
+          // keystroke drops the user back to the first section.
+          var selAttr = (String(si) === String(keepSec)) ? ' selected' : '';
+          sectionOptions += '<option value="' + si + '"' + selAttr + '>' + window.MA.htmlUtils.escHtml(parsedData.sections[si].name) + '</option>';
         }
       }
       if (!sectionOptions) {
@@ -225,8 +306,33 @@ modules.gantt = {
           sectionListHtml +=
             '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;">' +
               '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + window.MA.htmlUtils.escHtml(sec.name) + '">' + window.MA.htmlUtils.escHtml(sec.name) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + taskCount + ')</span></div>' +
-              '<button class="prop-section-delete" data-section-name="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-line="' + sec.line + '" title="セクションごと削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
+              '<button class="prop-section-up" data-section-line="' + sec.line + '" title="上のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:10px;padding:0;">↑</button>' +
+              '<button class="prop-section-down" data-section-line="' + sec.line + '" title="下のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:10px;padding:0;">↓</button>' +
+              // 巻き添えの件数をボタン自体に出す (block と同じ手)。
+              // 以前はここだけ confirm を出していて、同じ画面のタスク ✕ は無言、
+              // block は件数表示と、3通りの作法が混在していた。押す前に何が起きるかを
+              // ボタンの文字で示し、確認は出さない (Undo で戻せる)。
+              '<button class="prop-section-delete" data-section-name="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-line="' + sec.line + '" data-task-count="' + taskCount + '" title="セクション「' + window.MA.htmlUtils.escHtml(sec.name) + '」と含まれるタスク' + taskCount + '件を削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">✕' + (taskCount > 0 ? taskCount : '') + '</button>' +
             '</div>';
+
+          // セクションの下にタスクを並べる。
+          //
+          // gantt だけプロパティ欄にタスク一覧が無く、タスクを選ぶ手段が
+          // 「チャート上のバーをクリックする」しか無かった。他の20図種には一覧がある。
+          // 4件なら困らないが、100件になるとバーを目で探すしかなくなり、
+          // 一覧を持つ他の図種との差が実務で効いてくる (R8 スケール耐性)。
+          for (var tli = 0; tli < parsedData.tasks.length; tli++) {
+            var tk = parsedData.tasks[tli];
+            if (tk.sectionIndex !== sli) continue;
+            var tkLabel = window.MA.htmlUtils.escHtml(tk.label || tk.id || '');
+            var tkId = window.MA.htmlUtils.escHtml(tk.id || '');
+            sectionListHtml +=
+              '<div class="ma-list-row" style="display:flex;align-items:center;gap:4px;margin:0 0 3px 14px;padding:2px 4px;background:var(--bg-primary);border-radius:3px;">' +
+                '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + tkLabel + '">' + tkLabel + '</div>' +
+                '<button class="prop-task-select" data-element-id="' + tkId + '" data-line="' + tk.line + '" title="「' + tkLabel + '」を選択" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' +
+                '<button class="prop-task-delete" data-element-id="' + tkId + '" data-line="' + tk.line + '" title="「' + tkLabel + '」を削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
+              '</div>';
+          }
         }
         sectionListHtml += '</div>';
       } else {
@@ -236,24 +342,47 @@ modules.gantt = {
         '</div>';
       }
 
+      var G = window.MA.modules.gantt;
+      var addSecIdx = parseInt(addFormSectionIndex(parsedData), 10);
+      var isMilestone = addForm.kind === 'milestone';
+      // Only used to prefill an empty field: a value the user typed wins.
+      var autoStart = G.nextStartDate(mmdText, addSecIdx);
+      var autoDays = G.nextDurationDays(mmdText, addSecIdx);
+      var autoEnd = (autoStart && autoDays !== null)
+        ? window.MA.dateUtils.addDays(autoStart, autoDays) : '';
+      var fStart = addForm.start || autoStart || '';
+      var fEnd = addForm.end || autoEnd || '';
+      var inputStyle = 'width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;';
+      var esc = window.MA.htmlUtils.escHtml;
+
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">タスクを選択するか、新規追加</div>' +
+        // 種別トグル。status を唯一の真とし、これはその入力手段でしかない。
+        '<div style="margin-bottom:8px;display:flex;gap:2px;">' +
+          '<button id="prop-add-kind-task" style="flex:1;background:' + (isMilestone ? 'var(--bg-tertiary)' : 'var(--accent)') + ';color:' + (isMilestone ? 'var(--text-primary)' : '#fff') + ';border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">タスク</button>' +
+          '<button id="prop-add-kind-milestone" style="flex:1;background:' + (isMilestone ? 'var(--accent)' : 'var(--bg-tertiary)') + ';color:' + (isMilestone ? '#fff' : 'var(--text-primary)') + ';border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">マイルストーン</button>' +
+        '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label>' +
-          '<input id="prop-add-label" type="text" value="新規タスク" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+          '<input id="prop-add-label" type="text" value="' + esc(addForm.label || '新規タスク') + '" style="' + inputStyle + '">' +
         '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ID</label>' +
-          '<input id="prop-add-id" type="text" placeholder="t' + (addCounter + 1) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+          '<input id="prop-add-id" type="text" value="' + esc(addForm.id) + '" placeholder="' + esc(G.nextTaskId(mmdText)) + '" style="' + inputStyle + '">' +
         '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
-          '<input id="prop-add-start" type="date" value="2026-04-01" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
-          '<input id="prop-add-end" type="date" value="2026-04-15" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' +
+        (isMilestone
+          ? '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">日付</label>' +
+              '<input id="prop-add-start" type="date" value="' + esc(fStart) + '" style="' + inputStyle + '">' +
+            '</div>'
+          : '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
+              '<input id="prop-add-start" type="date" value="' + esc(fStart) + '" style="' + inputStyle + '">' +
+            '</div>' +
+            '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
+              '<input id="prop-add-end" type="date" value="' + esc(fEnd) + '" style="' + inputStyle + '">' +
+            '</div>') +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション</label>' +
           '<select id="prop-add-section" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + sectionOptions + '</select>' +
@@ -285,41 +414,114 @@ modules.gantt = {
               { v: '%a',       label: 'Tue (曜日)' }
             ];
             var current = parsedData.axisFormat || '';
+            // No axisFormat line means the app picks the granularity from the
+            // project span (ganttAxisFor). That is a real, named state — showing
+            // "カスタム…" with an empty box says the user chose something custom
+            // and then failed to type it, which is the opposite of what is
+            // happening.
+            var auto = !current;
             var matched = false;
-            var opts = '';
+            var opts = '<option value="__auto__"' + (auto ? ' selected' : '') +
+              '>自動 (期間に合わせる)</option>';
             for (var pi = 0; pi < presets.length; pi++) {
               var sel = (presets[pi].v === current) ? ' selected' : '';
               if (sel) matched = true;
               opts += '<option value="' + window.MA.htmlUtils.escHtml(presets[pi].v) + '"' + sel + '>' + window.MA.htmlUtils.escHtml(presets[pi].label + '  (' + presets[pi].v + ')') + '</option>';
             }
-            var customSel = matched ? '' : ' selected';
+            var customSel = (matched || auto) ? '' : ' selected';
             opts += '<option value="__custom__"' + customSel + '>カスタム…</option>';
-            var customDisplay = matched ? 'none' : 'block';
+            var customDisplay = (matched || auto) ? 'none' : 'block';
             return '<select id="prop-axisformat-preset" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:4px;">' + opts + '</select>' +
               '<input id="prop-axisformat-custom" type="text" value="' + window.MA.htmlUtils.escHtml(current) + '" placeholder="%m/%d" style="display:' + customDisplay + ';width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">';
           })() +
         '</div>';
 
-      // Bind add task button
-      var addBtn = document.getElementById('prop-add-btn');
-      if (addBtn) {
-        addBtn.addEventListener('click', function() {
-          var label = document.getElementById('prop-add-label').value || '新規タスク';
-          var idEl = document.getElementById('prop-add-id');
-          var id = (idEl && idEl.value) ? idEl.value : ('t' + (++addCounter));
-          var start = document.getElementById('prop-add-start').value || '2026-04-01';
-          var end = document.getElementById('prop-add-end').value || '2026-04-15';
-          var secIdx = parseInt(document.getElementById('prop-add-section').value, 10);
-          window.MA.history.pushHistory();
-          mmdText = addTask(mmdText, secIdx, label, id, start, end);
-          window.MA.selection.setSelected([{ type: 'task', id: id }]); // 追加したタスクを自動選択
-          suppressSync = true;
-          editorEl.value = mmdText;
-          suppressSync = false;
-          syncLineNumbers();
-          scheduleRefresh();
-          // renderPropsは scheduleRefresh → refresh → renderProps で自動的に呼ばれるので、追加呼び出しは不要
+      // Keep every field in addForm as it is typed, so the next rebuild restores
+      // it instead of resetting to the hardcoded defaults.
+      ['label', 'id', 'start', 'end'].forEach(function(field) {
+        var el = document.getElementById('prop-add-' + field);
+        if (!el) return;
+        el.addEventListener('input', function() { addForm[field] = this.value; });
+        // Enter anywhere in the form adds the task — the add button is below the
+        // fold on a short panel and the round trip to it is the whole friction.
+        el.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') { e.preventDefault(); doAddTask(); }
         });
+      });
+      var secSel = document.getElementById('prop-add-section');
+      if (secSel) {
+        secSel.addEventListener('change', function() { addForm.section = this.value; });
+      }
+
+      window.MA.properties.bindEvent('prop-add-kind-task', 'click', function() {
+        addForm.kind = 'task';
+        setAddFormFocus('label');
+        renderProps();
+      });
+      window.MA.properties.bindEvent('prop-add-kind-milestone', 'click', function() {
+        addForm.kind = 'milestone';
+        setAddFormFocus('label');
+        renderProps();
+      });
+
+      function doAddTask() {
+        var labelEl = document.getElementById('prop-add-label');
+        var idEl = document.getElementById('prop-add-id');
+        var startEl = document.getElementById('prop-add-start');
+        var endEl = document.getElementById('prop-add-end');
+        var secEl = document.getElementById('prop-add-section');
+        var label = (labelEl && labelEl.value) || '新規タスク';
+        var id = (idEl && idEl.value) ? idEl.value : window.MA.modules.gantt.nextTaskId(mmdText);
+        var start = startEl ? startEl.value : '';
+        var secIdx = secEl ? parseInt(secEl.value, 10) : -1;
+        var milestone = addForm.kind === 'milestone';
+        // Without a date there is nothing to place the bar at; mermaid resolves a
+        // missing start to the chart origin, which reads as a task that silently
+        // jumped to the beginning of the project.
+        if (!start) {
+          if (startEl) startEl.focus();
+          return;
+        }
+        var end = milestone ? '0d' : ((endEl && endEl.value) || start);
+        window.MA.history.pushHistory();
+        mmdText = addTask(mmdText, secIdx, label, id, start, end, milestone ? 'milestone' : null);
+        // 追加したタスクを自動選択しない。
+        //
+        // 選択するとプロパティパネルが詳細表示に切り替わり、**追加フォームごと
+        // 消える**。「ラベル欄へフォーカスを戻して連続入力」と真正面から
+        // 矛盾していて、実測でも追加直後のパネルは詳細表示になり
+        // prop-add-label が存在しなかった。5本続けて足したいときに毎回
+        // Escape を押して戻る必要がある。
+        //
+        // 追加した結果は図とエディタに出るので、確認手段は失われない。
+        window.MA.selection.clearSelection();
+        // Clear only what identifies this task. The section and the kind are the
+        // user's current context and carry over to the next add; the dates are
+        // recomputed from the task just added.
+        addForm.label = '';
+        addForm.id = '';
+        addForm.start = '';
+        addForm.end = '';
+        addForm.section = secEl ? secEl.value : addForm.section;
+        setAddFormFocus('label');
+        suppressSync = true;
+        editorEl.value = mmdText;
+        suppressSync = false;
+        syncLineNumbers();
+        scheduleRefresh();
+        // renderPropsは scheduleRefresh → refresh → renderProps で自動的に呼ばれるので、追加呼び出しは不要
+      }
+
+      window.MA.properties.bindEvent('prop-add-btn', 'click', doAddTask);
+
+      // Restore focus after the rebuild that follows an add or a kind switch.
+      if (addForm.focus) {
+        var focusEl = document.getElementById('prop-add-' + addForm.focus);
+        addForm.focus = null;
+        if (focusEl) {
+          focusEl.focus();
+          if (focusEl.select) focusEl.select();
+        }
       }
 
       // Bind add section button
@@ -338,6 +540,28 @@ modules.gantt = {
         });
       }
 
+      // Bind section move buttons. Sections own the tasks between their header and
+      // the next one, so moving a section carries its tasks along — the task-level
+      // ↑↓ only reorders within a section.
+      ['up', 'down'].forEach(function(dir) {
+        var btns = propsEl.querySelectorAll('.prop-section-' + dir);
+        for (var mi = 0; mi < btns.length; mi++) {
+          btns[mi].addEventListener('click', function() {
+            var ln = parseInt(this.getAttribute('data-section-line'), 10);
+            if (isNaN(ln)) return;
+            var moved = window.MA.modules.gantt.moveSection(mmdText, ln, dir === 'up' ? -1 : 1);
+            if (moved === mmdText) return; // at the edge — nothing to do
+            window.MA.history.pushHistory();
+            mmdText = moved;
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            syncLineNumbers();
+            scheduleRefresh();
+          });
+        }
+      });
+
       // Bind section delete buttons
       var sectionDeleteBtns = propsEl.querySelectorAll('.prop-section-delete');
       for (var sdbi = 0; sdbi < sectionDeleteBtns.length; sdbi++) {
@@ -345,7 +569,7 @@ modules.gantt = {
           btn.addEventListener('click', function() {
             var secName = btn.getAttribute('data-section-name');
             var secLine = parseInt(btn.getAttribute('data-section-line'), 10);
-            if (!confirm('セクション「' + secName + '」と含まれるタスクを削除しますか？')) return;
+            var secTasks = parseInt(btn.getAttribute('data-task-count'), 10) || 0;
             window.MA.history.pushHistory();
             mmdText = deleteSection(mmdText, secLine);
             suppressSync = true;
@@ -353,9 +577,44 @@ modules.gantt = {
             suppressSync = false;
             window.MA.selection.setSelected([]);
             syncLineNumbers();
+            showTransient('セクション「' + secName + '」とタスク' + secTasks +
+              '件を削除 — Ctrl+Z で戻せます');
             scheduleRefresh();
           });
         })(sectionDeleteBtns[sdbi]);
+      }
+
+      // Bind task list (select / delete)
+      //
+      // 選択は他の図種と同じく selection に載せるだけ。バーをクリックした場合と
+      // 同じ状態にしたいので、id で選ぶ (行番号は編集で動く)。
+      var taskSelBtns = propsEl.querySelectorAll('.prop-task-select');
+      for (var tsi = 0; tsi < taskSelBtns.length; tsi++) {
+        (function(btn) {
+          btn.addEventListener('click', function() {
+            var id = btn.getAttribute('data-element-id');
+            if (!id) return;
+            window.MA.selection.setSelected([{ type: 'task', id: id }]);
+            scheduleRefresh();
+          });
+        })(taskSelBtns[tsi]);
+      }
+      var taskDelBtns = propsEl.querySelectorAll('.prop-task-delete');
+      for (var tdi = 0; tdi < taskDelBtns.length; tdi++) {
+        (function(btn) {
+          btn.addEventListener('click', function() {
+            var ln = parseInt(btn.getAttribute('data-line'), 10);
+            if (isNaN(ln)) return;
+            window.MA.history.pushHistory();
+            mmdText = deleteTask(mmdText, ln);
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            window.MA.selection.setSelected([]);
+            syncLineNumbers();
+            scheduleRefresh();
+          });
+        })(taskDelBtns[tdi]);
       }
 
       // Bind global settings
@@ -390,6 +649,18 @@ modules.gantt = {
           }
           if (afCustom) afCustom.style.display = 'none';
           window.MA.history.pushHistory();
+          // 自動 = the axisFormat line is absent, so the app derives the tick
+          // granularity from the project span. Writing a value here would pin it
+          // again, because the DSL line beats the config.
+          if (v === '__auto__') {
+            mmdText = window.MA.modules.gantt.removeGlobalSetting(mmdText, 'axisFormat');
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            syncLineNumbers();
+            scheduleRefresh();
+            return;
+          }
           mmdText = updateGlobalSetting(mmdText, 'axisFormat', v);
           suppressSync = true;
           editorEl.value = mmdText;
@@ -447,8 +718,8 @@ modules.gantt = {
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;">' +
           '<div style="flex:1;font-weight:bold;color:var(--text-primary);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + window.MA.htmlUtils.escHtml(task.label) + '</div>' +
-          '<button id="prop-move-up" title="同一セクション内で上に移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↑</button>' +
-          '<button id="prop-move-down" title="同一セクション内で下に移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↓</button>' +
+          '<button id="prop-move-up" title="同一セクション内で上へ移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↑</button>' +
+          '<button id="prop-move-down" title="同一セクション内で下へ移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↓</button>' +
         '</div>' +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label>' +
@@ -458,14 +729,23 @@ modules.gantt = {
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ID</label>' +
           '<input id="prop-id" type="text" value="' + window.MA.htmlUtils.escHtml(window.MA.parserUtils.isAutoId(task.id) ? '' : task.id) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
         '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
-          '<input id="prop-start" type="date" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
-          '<input id="prop-end" type="date" value="' + window.MA.htmlUtils.escHtml(task.endDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' +
+        // A milestone is a point in time; the second date field has nothing to
+        // hold. status is the single source of truth for what a task is, so the
+        // panel folds purely on it — the add form's kind toggle only ever writes
+        // status, it never gets its own opinion.
+        (task.status === 'milestone'
+          ? '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">日付</label>' +
+              '<input id="prop-start" type="date" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '</div>'
+          : '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
+              '<input id="prop-start" type="date" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '</div>' +
+            '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
+              '<input id="prop-end" type="date" value="' + window.MA.htmlUtils.escHtml(task.endDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '</div>') +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ステータス</label>' +
           '<div style="display:flex;gap:2px;">' + statusBtns + '</div>' +
@@ -747,14 +1027,6 @@ modules.gantt = {
     // Default fallback
     propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">タスクを選択してください</p>';
   },
-  updateText: function(text, change) {
-    if (change.type === 'dates')  return updateTaskDates(text, change.line, change.startDate, change.endDate);
-    if (change.type === 'field')  return updateTaskField(text, change.line, change.field, change.value);
-    if (change.type === 'add')    return addTask(text, change.sectionIndex, change.label, change.id, change.startDate, change.endDate);
-    if (change.type === 'delete') return deleteTask(text, change.line);
-    return text;
-  },
-  exportMmd: function(parsedData) { return mmdText; },
 };
 
 // Register window.MA.modules (sequence, etc.) into local modules dict
@@ -807,6 +1079,7 @@ async function refresh(skipRender) {
     } catch (e) {
       parsed = { title: '', dateFormat: 'YYYY-MM-DD', axisFormat: '', sections: [], tasks: [] };
     }
+    pruneStaleSelection(parsed);
   }
 
   // During drag: update parse/status/props only, skip expensive mermaid render
@@ -816,6 +1089,12 @@ async function refresh(skipRender) {
     syncLineNumbers();
     return;
   }
+
+  // Rebuild the whole mermaid config before every render. In detail mode the
+  // gantt width follows the project span, so it changes with each edit — and
+  // because initialize() replaces rather than merges, this has to be the single
+  // place that calls it.
+  applyMermaidConfig(parsed);
 
   // Render via mermaid.js
   var svgId = 'mermaid-svg-' + thisRender;
@@ -849,11 +1128,34 @@ async function refresh(skipRender) {
         overlayEl.setAttribute('viewBox', svgEl.getAttribute('viewBox'));
       }
 
-      // Auto-fit zoom on first render: fit chart width to container
-      if (thisRender === 1) {
+      // Fit the drawing to the container on the first render, and again whenever
+      // the document is replaced (diagram-type switch, file open).
+      //
+      // Two separate reasons, both measured on a 1400px window:
+      //
+      // - Without the "document replaced" case the previous diagram's zoom
+      //   carried over, and natural sizes differ by more than an order of
+      //   magnitude: after switching away from the startup gantt, stateDiagram
+      //   came out 51px wide in a 750px pane while timeline overflowed at 1190px.
+      // - gantt must not be scaled at all. Shrinking the drawing is exactly what
+      //   overview mode exists to avoid: the startup chart came up at 68% via a
+      //   CSS transform, putting the axis labels on screen at 6.8px. Overview
+      //   mode reaches the same fit by redrawing at the container width, so the
+      //   labels keep their real size.
+      if ((thisRender === 1 || pendingAutoFit) && currentModule && currentModule.type === 'gantt') {
+        pendingAutoFit = false;
+        zoom = 1.0;
+        updateZoomLabel();
+      } else if (thisRender === 1 || pendingAutoFit) {
+        pendingAutoFit = false;
         var previewContainer = document.getElementById('preview-container');
         var containerW = previewContainer.clientWidth - 32;
-        var fitZoom = containerW / naturalW;
+        var containerH = previewContainer.clientHeight - 32;
+        // Both axes. Width alone blew up tall diagrams: a flowchart TD is narrow
+        // and long, so fitting its width scaled it to 294% and pushed the last
+        // node off the bottom of the pane — "fit" that needs scrolling to read.
+        var fitZoom = Math.min(containerW / naturalW,
+          containerH > 0 ? containerH / naturalH : Infinity);
         fitZoom = Math.max(0.25, Math.min(3.0, fitZoom));
         zoom = Math.round(fitZoom * 100) / 100;
       }
@@ -866,7 +1168,7 @@ async function refresh(skipRender) {
       overlayEl.style.transform = 'scale(' + zoom + ')';
       overlayEl.style.transformOrigin = 'top left';
     }
-    if (zoomDisplayEl) zoomDisplayEl.textContent = Math.round(zoom * 100) + '%';
+    updateZoomLabel();
 
     // Build overlay (skip during drag to prevent jitter)
     if (currentModule && svgEl && !dragState) {
@@ -881,7 +1183,27 @@ async function refresh(skipRender) {
     statusParseEl.classList.remove('error');
   } catch (e) {
     if (thisRender !== renderCounter) return;
-    previewSvgEl.innerHTML = '<p style="color:var(--accent-red);padding:16px;font-family:var(--font-mono);font-size:12px;">Render error:<br>' + String(e).replace(/</g, '&lt;') + '</p>';
+    // mermaid のエラーは字句解析器の言葉なので、原因が分かる場合は先に日本語で言う。
+    // 「Lexer error on line 3, column 25」だけ見せられても、自分の入力のどの文字が
+    // 悪いのかは分からない (R11 特殊文字)。
+    var cause = window.MA.diagnose ? window.MA.diagnose.diagnose(mmdText, e) : '';
+    // 幅を明示して折り返す。
+    //
+    // このコンテナは図の大きさに合わせて広がるので、既定のままだと本文は
+    // 見えているペインの幅ではなく**キャンバスの幅**で折り返す。結果、一行が
+    // ペインの右端で切れ、肝心の「どの文字が該当するか」が読めない。
+    // 元からある Render error の行も同じ理由で切れていた (実機で確認)。
+    // 拡大率を一旦外す。このコンテナには scale(zoom) がかかっているので、
+    // 124% のまま文章を出すと文字も 124% になり、指定した幅で折り返しても
+    // ペインからはみ出す。図に戻れば次の描画で scale は付け直される。
+    previewSvgEl.style.transform = 'none';
+    previewSvgEl.innerHTML =
+      '<div style="max-width:680px;padding:16px;overflow-wrap:anywhere;white-space:normal;">' +
+        (cause ? '<p style="color:var(--accent-red);margin:0 0 12px 0;font-size:13px;line-height:1.6;">' +
+          window.MA.htmlUtils.escHtml(cause) + '</p>' : '') +
+        '<p style="color:var(--accent-red);margin:0;font-family:var(--font-mono);font-size:12px;line-height:1.5;">Render error:<br>' +
+          String(e).replace(/</g, '&lt;') + '</p>' +
+      '</div>';
     statusParseEl.textContent = 'Error';
     statusParseEl.classList.add('error');
   }
@@ -892,27 +1214,196 @@ async function refresh(skipRender) {
 }
 
 // ── Status Bar ─────────────────────────────────────────────────────────────
+
+// The status bar only ever spoke gantt. Every other diagram type produces a
+// parse result with no `tasks` array, so the bar fell into the empty branch and
+// announced「タスク: 0 | プロパティパネルからタスクを追加してください」while the
+// user was looking at a flowchart with thirty nodes. It was not just useless
+// there, it was wrong.
+//
+// Kept as a pure function so the wording is testable without a DOM.
+function statusInfoText(parsedData, moduleType) {
+  if (!parsedData) return '';
+  if (moduleType === 'gantt' || (parsedData.tasks && parsedData.tasks.length > 0)) {
+    return ganttStatusText(parsedData);
+  }
+  var parts = [];
+  var els = parsedData.elements ? parsedData.elements.length : 0;
+  var rels = parsedData.relations ? parsedData.relations.length : 0;
+  var groups = parsedData.groups ? parsedData.groups.length : 0;
+  parts.push('要素: ' + els);
+  if (rels > 0 || els > 0) parts.push('関連: ' + rels);
+  if (groups > 0) parts.push('グループ: ' + groups);
+  if (parsedData.meta && parsedData.meta.title) parts.push(parsedData.meta.title);
+  if (els === 0 && rels === 0) return '要素: 0 | プロパティパネルから追加してください';
+  return parts.join(' | ');
+}
+
+function ganttStatusText(parsedData) {
+  var tasks = parsedData.tasks || [];
+  if (tasks.length === 0) return 'タスク: 0 | プロパティパネルからタスクを追加してください';
+  var info = 'タスク: ' + tasks.length;
+  if (parsedData.sections && parsedData.sections.length > 0) {
+    info += ' | セクション: ' + parsedData.sections.length;
+  }
+  var dates = tasks.filter(function(t) { return t.startDate; }).map(function(t) { return t.startDate; });
+  var endDates = tasks.filter(function(t) { return t.endDate && DATE_RE.test(t.endDate); })
+    .map(function(t) { return t.endDate; });
+  var allDates = dates.concat(endDates).sort();
+  if (allDates.length >= 2) {
+    info += ' | 期間: ' + allDates[0] + ' ~ ' + allDates[allDates.length - 1];
+  }
+  return info;
+}
+
+// 一時メッセージ。
+//
+// 「保存できたのか」「いま何が消えたのか」を画面が何も言っていなかった。
+// 行を増やさずに済ませたいので、既存のステータス行を数秒だけ borrow する
+// (dragBlockedMsg が同じ枠を使っているのと同じやり方)。
+var transientMsg = '';
+var transientUntil = 0;
+var transientTimer = null;
+function showTransient(msg, ms) {
+  transientMsg = msg;
+  transientUntil = Date.now() + (ms || 4000);
+  if (transientTimer) clearTimeout(transientTimer);
+  transientTimer = setTimeout(function() { transientMsg = ''; renderStatus(); }, ms || 4000);
+  renderStatus();
+}
+// ショートカット一覧の開閉。Escape でも閉じられる (閉じ方を探させない)。
+function toggleShortcutHelp(force) {
+  var box = document.getElementById('shortcut-help');
+  if (!box) return;
+  var show = (force === undefined) ? box.hasAttribute('hidden') : force;
+  if (show) box.removeAttribute('hidden');
+  else box.setAttribute('hidden', '');
+}
+
+function twoDigit(n) { return (n < 10 ? '0' : '') + n; }
+function savedMessage(d) {
+  return '保存: ' + twoDigit(d.getHours()) + ':' + twoDigit(d.getMinutes());
+}
+function deletedMessage(n) {
+  return n + '件削除 — Ctrl+Z で戻せます';
+}
+
 function renderStatus() {
   if (!statusInfoEl) return;
-  var info = '';
-  if (parsed && parsed.tasks && parsed.tasks.length > 0) {
-    info = 'タスク: ' + parsed.tasks.length;
-    if (parsed.sections && parsed.sections.length > 0) info += ' | セクション: ' + parsed.sections.length;
-    // Calculate date range
-    var dates = parsed.tasks.filter(function(t) { return t.startDate; }).map(function(t) { return t.startDate; });
-    var endDates = parsed.tasks.filter(function(t) { return t.endDate && DATE_RE.test(t.endDate); }).map(function(t) { return t.endDate; });
-    var allDates = dates.concat(endDates).sort();
-    if (allDates.length >= 2) {
-      info += ' | 期間: ' + allDates[0] + ' ~ ' + allDates[allDates.length - 1];
-    }
-  } else {
-    info = 'タスク: 0 | プロパティパネルからタスクを追加してください';
+  if (transientMsg && Date.now() < transientUntil) {
+    statusInfoEl.textContent = transientMsg;
+    return;
   }
-  statusInfoEl.textContent = info;
+  // Connection mode changes what the next click means, and nothing on screen
+  // said so: after pressing 「ここから線を引く」 the panel and the status bar
+  // looked exactly as before, so the mode was invisible until a line appeared
+  // somewhere unexpected.
+  if (dragBlockedMsg) {
+    statusInfoEl.textContent = dragBlockedMsg;
+    dragBlockedMsg = '';
+    return;
+  }
+  var conn = window.MA.connectionMode.getSource();
+  if (conn) {
+    statusInfoEl.textContent = '接続モード: ' + conn.id +
+      ' から線を引きます — 相手をクリック (Escape で中止)';
+    return;
+  }
+  statusInfoEl.textContent = statusInfoText(parsed, currentModule && currentModule.type);
 }
 
 // ── Properties Panel ───────────────────────────────────────────────────────
+//
+// パネルは innerHTML の入れ替えで作り直されるので、再描画のたびに入力欄が
+// 別物になる。確定 (change) のあとだけ再描画していたころは、利用者が既に欄から
+// 離れているので問題にならなかった。打鍵ごとに反映するなら、フォーカスと
+// カーソル位置を持ち越さないと**打っている途中で欄から弾き出される**。
+function withFocusKept(fn) {
+  var a = document.activeElement;
+  var keepId = a && a.id && propsEl && propsEl.contains(a) ? a.id : null;
+  var start = null, end = null;
+  if (keepId && a.setSelectionRange) {
+    try { start = a.selectionStart; end = a.selectionEnd; } catch (e) { /* type による */ }
+  }
+  fn();
+  if (!keepId) return;
+  // 再描画の中でモジュールが自分でフォーカスを置いた場合は、そちらを優先する。
+  // タスク連続入力は「追加ボタンを押したあとラベル欄に戻す」ことで成立しているので、
+  // ここで無差別に戻すとその意図を上書きしてしまう (e2e が捕まえた)。
+  // 戻すのは、再描画でフォーカスが**失われた**ときだけ。
+  var nowFocused = document.activeElement;
+  if (nowFocused && nowFocused !== document.body &&
+      propsEl && propsEl.contains(nowFocused)) return;
+  var back = document.getElementById(keepId);
+  if (!back) return;
+  back.focus();
+  if (start !== null && back.setSelectionRange) {
+    try { back.setSelectionRange(start, end); } catch (e) { /* 同上 */ }
+  }
+}
+
+// 一覧の絞り込み。
+//
+// 100要素の図で一覧は7.7画面分になり、目的の要素に辿り着く手段が目視の
+// スクロールしか無かった。要素数に対して線形に効く唯一の摩擦なので、ここだけは
+// 縦に1行増やす価値がある。行が少ないうちは出さない。
+var listFilterText = '';
+var LIST_FILTER_MIN_ROWS = 12;
+
+function applyListFilter() {
+  if (!propsEl) return;
+  var rows = propsEl.querySelectorAll('.ma-list-row');
+  if (rows.length < LIST_FILTER_MIN_ROWS) return;
+
+  var box = document.getElementById('ma-list-filter');
+  if (!box) {
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'margin-bottom:6px;';
+    wrap.innerHTML = '<input id="ma-list-filter" type="text" placeholder="一覧を絞り込む (' +
+      rows.length + '件)" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);' +
+      'color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">';
+    propsEl.insertBefore(wrap, propsEl.firstChild);
+    box = document.getElementById('ma-list-filter');
+    box.value = listFilterText;
+    box.addEventListener('input', function() {
+      listFilterText = box.value;
+      filterRows();
+    });
+  }
+  filterRows();
+}
+
+function filterRows() {
+  if (!propsEl) return;
+  var q = listFilterText.trim().toLowerCase();
+  var rows = propsEl.querySelectorAll('.ma-list-row');
+  var hit = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    if (!q) { r.style.display = ''; hit++; continue; }
+    var idAttr = '';
+    var withId = r.querySelector('[data-element-id]');
+    if (withId) idAttr = withId.getAttribute('data-element-id') || '';
+    var text = (r.textContent || '') + ' ' + idAttr;
+    var show = text.toLowerCase().indexOf(q) >= 0;
+    r.style.display = show ? '' : 'none';
+    if (show) hit++;
+  }
+  var box = document.getElementById('ma-list-filter');
+  if (box) {
+    // 絞った結果0件を無言で見せると「一覧が消えた」と読めるので、件数を常に出す。
+    box.placeholder = q ? ('絞り込み中: ' + hit + '件') : ('一覧を絞り込む (' + rows.length + '件)');
+  }
+}
+
 function renderProps() {
+  withFocusKept(function() {
+    renderPropsInner();
+    applyListFilter();
+  });
+}
+
+function renderPropsInner() {
   if (!propsEl || !currentModule) return;
   // Gantt's renderProps uses the old 2-arg form (inline in app.js)
   // Sequence and future modules use the 4-arg form: (selData, parsedData, propsEl, ctx)
@@ -942,9 +1433,27 @@ function renderProps() {
 }
 
 // ── Zoom ───────────────────────────────────────────────────────────────────
+// Any deliberate zoom leaves overview mode. There are six entry points into zoom
+// (the two buttons, fit, Ctrl+wheel, init, diagram switch); guarding only the
+// buttons left Ctrl+wheel — the primary gesture — stacking a CSS transform on top
+// of an already-fitted redraw, which is the double-shrink F4 warned about.
+// `setZoomFromUser` is that single guard; `setZoom` stays mechanical so fit and
+// init can set a value without changing the mode.
+function setZoomFromUser(z) {
+  if (currentModule && currentModule.type === 'gantt' && ganttViewMode === 'overview') {
+    setGanttViewMode('detail');
+    // Step off 100% in the direction asked for, rather than landing on it — the
+    // first click after leaving overview should visibly do something.
+    setZoom(z > zoom ? 1.1 : 0.9);
+    scheduleRefresh();
+    return;
+  }
+  setZoom(z);
+}
+
 function setZoom(z) {
   zoom = Math.max(0.25, Math.min(3.0, z));
-  if (zoomDisplayEl) zoomDisplayEl.textContent = Math.round(zoom * 100) + '%';
+  updateZoomLabel();
 
   if (previewSvgEl) {
     previewSvgEl.style.transform = 'scale(' + zoom + ')';
@@ -956,7 +1465,107 @@ function setZoom(z) {
   }
 }
 
+// ── Gantt overview / detail mode ───────────────────────────────────────────
+// Gantt is the one diagram type mermaid lays out on a fixed-width canvas
+// (gantt.useWidth, default 1600) while keeping the font at 11px. Scaling that
+// down with CSS to make it fit shrinks the text too, so "fits on screen" and
+// "readable" were mutually exclusive. Controlling useWidth instead keeps the
+// font fixed and only changes how many pixels a day gets.
+var DETAIL_PX_PER_DAY = 24;
+// Chrome's maximum canvas dimension is 65,535px; stay clear of it so PNG export
+// and clipboard copy keep working on very long projects.
+var GANTT_MAX_WIDTH = 60000;
+// Gantt starts in overview: the chart is drawn at the container width instead of
+// being scaled down to fit, so the labels keep their size on first paint.
+var ganttViewMode = 'overview'; // 'detail' | 'overview' 
+
+// The available width for a chart, minus padding and the vertical scrollbar. A
+// tall chart makes the scrollbar appear, which would otherwise push the chart
+// 6px past the edge and produce a horizontal scrollbar in "overview".
+function previewContentWidth() {
+  var c = document.getElementById('preview-container');
+  if (!c) return 800;
+  // clientWidth already excludes the scrollbar, so subtracting it again left a
+  // permanent 6px gap. The real hazard is measuring before the render that first
+  // introduces the scrollbar; `overflow-y: scroll` on the container removes that
+  // by reserving the gutter unconditionally.
+  return Math.max(200, c.clientWidth - 32);
+}
+
+// Axis granularity has to move with the width: mermaid draws 10-12 ticks
+// regardless of how wide the canvas is, so a ten-year chart at 24px/day spaces
+// them ~8700px apart and prints every one of them as "01/01".
+function ganttAxisFor(days) {
+  if (days <= 92) return { tickInterval: '1week', axisFormat: '%m/%d' };
+  if (days <= 730) return { tickInterval: '1month', axisFormat: '%Y/%m' };
+  return { tickInterval: '3month', axisFormat: '%Y/%m' };
+}
+
+function ganttSpanDays(parsedData) {
+  // Resolving `after` references and durations is the module's job — reading the
+  // raw startDate/endDate tokens here made the most ordinary gantt (a chain of
+  // `after X, Nd`) look like a single day.
+  var r = window.MA.modules.gantt.resolveSpan(parsedData);
+  return r ? r.days : 0;
+}
+
+// mermaid.initialize replaces the config rather than merging into it: passing
+// only {gantt:{...}} silently resets theme to default and securityLevel to
+// strict. Every call goes through here so the full object is always supplied,
+// and the mode lives in ganttViewMode rather than in mermaid's config — config
+// is derived state, so another initialize() elsewhere cannot lose it.
+function applyMermaidConfig(parsedData) {
+  var cfg = { startOnLoad: false, theme: 'dark', securityLevel: 'loose' };
+  if (currentModule && currentModule.type === 'gantt') {
+    var fitW = previewContentWidth();
+    var days = ganttSpanDays(parsedData);
+    var width = fitW;
+    if (ganttViewMode === 'detail' && days > 0) {
+      // Chrome refuses a canvas wider than 65,535px, and PNG/clipboard export
+      // sizes its canvas from the SVG. Past that the export throws instead of
+      // producing a file, so the chart is capped even if that means fewer px/day.
+      width = Math.min(GANTT_MAX_WIDTH, Math.max(fitW, Math.round(days * DETAIL_PX_PER_DAY)));
+    }
+    cfg.gantt = { useWidth: width };
+    // Only pin the axis when the span is actually known. Guessing a granularity
+    // from an unknown span is worse than leaving it out: d3 picks 10-12 ticks on
+    // its own, whereas a wrong '1week' on a decade-long chart draws 500+ of them.
+    if (days > 0) {
+      var axis = ganttAxisFor(days);
+      cfg.gantt.tickInterval = axis.tickInterval;
+      // The DSL's own `axisFormat` line wins over this (verified against
+      // mermaid's gantt renderer), so this only fills in for charts that omit it.
+      cfg.gantt.axisFormat = axis.axisFormat;
+    }
+  }
+  mermaid.initialize(cfg);
+}
+
+// One place decides what the zoom readout says. It used to be written from three
+// separate spots, and refresh() ran last — so pressing "fit" showed 概観 for a
+// frame and then reverted to 100%, leaving no indication of the mode at all.
+function updateZoomLabel() {
+  if (!zoomDisplayEl) return;
+  var isGantt = currentModule && currentModule.type === 'gantt';
+  zoomDisplayEl.textContent = (isGantt && ganttViewMode === 'overview')
+    ? '概観'
+    : Math.round(zoom * 100) + '%';
+}
+
+function setGanttViewMode(mode) {
+  ganttViewMode = mode;
+  updateZoomLabel();
+}
+
 function zoomToFit() {
+  // For gantt, "fit" means redraw at the container width so the labels stay
+  // 11px, not scale the drawing (and its text) down to 54%.
+  if (currentModule && currentModule.type === 'gantt') {
+    setZoom(1.0);
+    setGanttViewMode('overview');
+    scheduleRefresh();
+    return;
+  }
   var svgEl = previewSvgEl ? previewSvgEl.querySelector('svg') : null;
   var previewContainer = document.getElementById('preview-container');
   if (!svgEl || !previewContainer) return;
@@ -967,17 +1576,137 @@ function zoomToFit() {
 }
 
 // ── File Open / Save ───────────────────────────────────────────────────────
+
+// Base name of the file the user opened, so saving writes back to the same name
+// instead of a fresh download. Cleared when the diagram is replaced wholesale.
+var loadedFileName = '';
+
+// Text as of the last save/open. The diagram only lives in this tab — there is no
+// autosave and no server — so closing it threw the work away without a word.
+var savedText = null;
+
+// markSaved は「保存した」ではなく「未保存判定の基準を今の本文にする」関数。
+// 起動時のサンプル読み込み・ファイルを開いたとき・図種切替でも呼ばれるので、
+// ここに「保存: HH:MM」を出すと**保存していないのに保存したと言う**ことになる
+// (実機のスクリーンショットで発覚した)。表示は保存動作の側で行う。
+function markSaved() { savedText = mmdText; }
+
+// A diagram is worth warning about only when it differs from what was last
+// saved *and* from the template it started as. Prompting on an untouched
+// template would train the user to dismiss the dialog.
+function hasUnsavedWork(text, saved, template) {
+  var t = String(text == null ? '' : text).trim();
+  if (!t) return false;
+  if (saved !== null && saved !== undefined && String(saved).trim() === t) return false;
+  if (template !== null && template !== undefined && String(template).trim() === t) return false;
+  return true;
+}
+
+// What a download should be called.
+//
+// This used to be `(parsed.title || 'untitled')`, and most diagram types have no
+// title at all — flowchart, block, c4 and the rest never set one. Saving three
+// diagrams in a row produced untitled.mmd, untitled(1).mmd, untitled(2).mmd,
+// and the user had to open each one to find out which was which.
+//
+// Order: the name the file was opened under, then the diagram's own title, then
+// the diagram type with a date so at least the files sort and identify.
+function downloadBaseName(fileName, title, type, now) {
+  var base = sanitizeFileName(fileName || '') || sanitizeFileName(title || '');
+  if (base) return base;
+  var d = now || new Date();
+  var stamp = d.getFullYear() +
+    ('0' + (d.getMonth() + 1)).slice(-2) +
+    ('0' + d.getDate()).slice(-2);
+  return (type || 'diagram') + '-' + stamp;
+}
+
+// Titles are free text and go straight into a download name, so the characters
+// Windows and POSIX both refuse have to come out. A name that reduces to nothing
+// returns '' and lets the caller fall back.
+function sanitizeFileName(s) {
+  return String(s)
+    .replace(/[\\/:*?"<>|]/g, '')
+    .replace(/[\x00-\x1f]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s.]+|[\s.]+$/g, '')
+    .slice(0, 100);
+}
+
+function currentBaseName() {
+  return downloadBaseName(loadedFileName, parsed && parsed.title,
+    currentModule && currentModule.type);
+}
+
 function openFile() {
   document.getElementById('file-input').click();
 }
 
-function saveFile() {
+// 一度「名前を付けて保存」したファイルへの参照。以後はここへ上書きする。
+var saveHandle = null;
+
+function downloadAsFile() {
   var blob = new Blob([mmdText], { type: 'text/plain' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = (parsed.title || 'untitled') + '.mmd';
+  a.download = currentBaseName() + '.mmd';
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+// 保存。
+//
+// 従来はダウンロードだけで、名前は図の title から自動で決まり、場所も選べなかった。
+// リポジトリの `docs/arch.mmd` を更新する運用だと、毎回ダウンロードフォルダから
+// 移動してリネームすることになる。
+//
+// ただし Save の既定をファイル選択ダイアログに変えるのは違う。1クリックで
+// 終わっていた操作がモーダルになるのは、毎日使う側には改悪ではない
+// (実際、ヘッドレス環境ではダイアログが戻らず Save が完了しなくなった)。
+// 上書き先を一度指定したときだけ、以後の Save がそこへの上書きになる。
+function saveFile() {
+  if (saveHandle) { overwriteSaved(); return; }
+  downloadAsFile();
+  markSaved();
+  showTransient(savedMessage(new Date()) + ' (ダウンロード)');
+}
+
+async function overwriteSaved() {
+  try {
+    var w = await saveHandle.createWritable();
+    await w.write(mmdText);
+    await w.close();
+    markSaved();
+    showTransient(savedMessage(new Date()) + ' → ' + (saveHandle.name || ''));
+  } catch (e) {
+    // 上書きに失敗したら参照を捨て、黙ってダウンロードに落とす。
+    // 保存できたことにして本文を失わせるのが一番悪い。
+    saveHandle = null;
+    downloadAsFile();
+    markSaved();
+    showTransient('上書きに失敗したのでダウンロードしました');
+  }
+}
+
+// 上書き先を指定する (Ctrl+Shift+S / Export メニュー)。
+// 非対応ブラウザ (Firefox / Safari) ではこの機能自体が無いので、
+// できないことをその場で言う。黙ってダウンロードすると「指定できた」と誤解される。
+async function saveFileAs() {
+  if (!window.showSaveFilePicker) {
+    showTransient('このブラウザは上書き保存に対応していません (Chrome / Edge なら可能)', 5000);
+    return;
+  }
+  try {
+    saveHandle = await window.showSaveFilePicker({
+      suggestedName: currentBaseName() + '.mmd',
+      types: [{ description: 'Mermaid', accept: { 'text/plain': ['.mmd', '.mermaid'] } }],
+    });
+  } catch (e) {
+    showTransient('保存先の指定を中止しました', 2500);
+    return;
+  }
+  if (saveHandle && saveHandle.name) loadedFileName = saveHandle.name;
+  overwriteSaved();
 }
 
 // ── Export Functions ───────────────────────────────────────────────────────
@@ -988,7 +1717,7 @@ function exportSVG() {
   var blob = new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = (parsed.title || 'untitled') + '.svg';
+  a.download = currentBaseName() + '.svg';
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -1019,7 +1748,7 @@ function exportPNG(transparent) {
     canvas.toBlob(function(blob) {
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = (parsed.title || 'untitled') + '.png';
+      a.download = currentBaseName() + '.png';
       a.click();
       URL.revokeObjectURL(a.href);
     });
@@ -1047,18 +1776,14 @@ function init() {
   zoomDisplayEl = document.getElementById('zoom-display');
 
   // Init mermaid.js
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: 'dark',
-    securityLevel: 'loose',
-  });
+  applyMermaidConfig(null);
 
   // Default content
   mmdText = [
     'gantt',
     '    title プロジェクト計画',
     '    dateFormat YYYY-MM-DD',
-    '    axisFormat %m/%d',
+    // axisFormat はあえて書かない (gantt.template() と同じ理由)
     '',
     '    section 要件定義',
     '    要件分析           :a1, 2026-04-01, 2026-04-15',
@@ -1070,6 +1795,10 @@ function init() {
   ].join('\n');
 
   editorEl.value = mmdText;
+  // The startup sample is not the gantt module's template(), so without this the
+  // very first diagram-type switch would ask to confirm discarding text the user
+  // never wrote.
+  markSaved();
   syncLineNumbers();
   setZoom(1.0);
 
@@ -1094,6 +1823,10 @@ function init() {
 
   // Properties initialization
   window.MA.properties.init({
+    onStatus: function() { renderStatus(); },
+    // 選択の生存判定と同じ集合を使う。別の判定を持つと「選択は消えるのに
+    // 接続はできる」のような食い違いが生まれる
+    elementExists: function(id) { return !!knownSelectionIds(parsed)[String(id)]; },
     getMmdText: function() { return mmdText; },
     setMmdText: function(t) {
       mmdText = t;
@@ -1126,7 +1859,10 @@ function init() {
   // ── Editor events ────────────────────────────────────────────────────────
   editorEl.addEventListener('input', function() {
     if (suppressSync) return;
-    window.MA.history.pushHistory();
+    // A run of typing is one undo step. Pushing per keystroke made undo
+    // character-by-character and, with only 80 states kept, silently discarded
+    // the pre-edit text once a line grew past 80 characters.
+    window.MA.history.pushHistoryCoalesced('editor', EDITOR_UNDO_COALESCE_MS);
     mmdText = editorEl.value;
     scheduleRefresh();
   });
@@ -1162,10 +1898,10 @@ function init() {
   document.getElementById('btn-redo').addEventListener('click', function() { window.MA.history.redo(); });
 
   document.getElementById('btn-zoom-in').addEventListener('click', function() {
-    setZoom(zoom + 0.1);
+    setZoomFromUser(zoom + 0.1);
   });
   document.getElementById('btn-zoom-out').addEventListener('click', function() {
-    setZoom(zoom - 0.1);
+    setZoomFromUser(zoom - 0.1);
   });
   document.getElementById('btn-zoom-fit').addEventListener('click', function() {
     zoomToFit();
@@ -1176,9 +1912,25 @@ function init() {
     var file = e.target.files && e.target.files[0];
     if (!file) return;
     var reader = new FileReader();
+    var openedName = String(file.name || '').replace(/\.[^.]+$/, '');
     reader.onload = function(ev) {
       window.MA.history.pushHistory();
+      // Opening a file is a new document: its size is unrelated to whatever was
+      // on screen a moment ago, and the view mode resets the same way a type
+      // switch does. Editing and undo deliberately do not reset the mode — the
+      // one the user picked is theirs to keep while they work on the same diagram.
+      // Connection mode is bound to the document that started it (see the
+      // diagram-type handler).
+      window.MA.connectionMode.cancelConnectionMode();
+      pendingAutoFit = true;
+      setGanttViewMode('overview');
+      setZoom(1.0);
       mmdText = ev.target.result;
+      loadedFileName = openedName;
+      // 別のファイルを開いたら、前の保存先への参照は捨てる。
+      // 残しておくと、開いたつもりの無いファイルを上書きする。
+      saveHandle = null;
+      markSaved();
       suppressSync = true;
       editorEl.value = mmdText;
       suppressSync = false;
@@ -1204,6 +1956,73 @@ function init() {
   });
 
   // Export actions
+  // .mmd を Export の先頭に置く。Git に載せるのは .mmd なのに、「書き出す」の
+  // 入口が Save と Export に割れており、最も使う形式がメニューに無かった。
+  // 打鍵ごとに反映させる。
+  //
+  // プロパティ欄は change (確定時) でしか反映せず、エディタ側は input で即時だった。
+  // 同じ「ラベルを直す」で反映のタイミングが違うので、名前を試行錯誤する場面で
+  // GUI 側だけ結果を見ながら詰められない。
+  //
+  // 対象はラベル欄だけ。ID 欄を即時にすると、打ちかけの不完全な id で
+  // 参照側を一斉に書き換えてしまう (リネームは伝播する)。
+  // 既存の change ハンドラをそのまま使うので、各モジュールは手を入れない。
+  var LIVE_MS = 150;
+  var liveTimer = null;
+  if (propsEl) {
+    propsEl.addEventListener('input', function(ev) {
+      var t = ev.target;
+      if (!t || t.tagName !== 'INPUT' || t.type !== 'text') return;
+      if (!/-label$/.test(t.id || '')) return;
+      // 欄を触っている間はずっと束ねる。
+      //
+      // 合成した change だけ束ねても足りなかった。欄を離れるとブラウザが
+      // 本物の change を出すので、そちらが別の履歴を積む。結果、1つの名前を
+      // 直しただけで Ctrl+Z が2回必要になっていた (e2e が捕まえた)。
+      window.MA.history.setCoalesceMode('live-label:' + t.id, 600000);
+      if (liveTimer) clearTimeout(liveTimer);
+      liveTimer = setTimeout(function() {
+        // 打鍵ごとに反映すると、モジュール側の change ハンドラがそのたび
+        // pushHistory を呼ぶ。束ねないと、1つの名前を直すのに Ctrl+Z を
+        // 何度も押すことになる (「1編集 = Undo 1回」はこのツールの規律)。
+        t.dispatchEvent(new Event('change', { bubbles: true }));
+      }, LIVE_MS);
+    });
+
+    // 欄を離れたら束ねを終える。次の操作は別の Undo 単位。
+    // 再描画で同じ欄にフォーカスが戻る場合 (withFocusKept) は継続する。
+    propsEl.addEventListener('focusout', function(ev) {
+      var t = ev.target;
+      if (!t || !/-label$/.test(t.id || '')) return;
+      setTimeout(function() {
+        var a = document.activeElement;
+        if (a && a.id === t.id) return;
+        // 保留中の合成 change を捨てる。欄を離れた時点でブラウザが本物の
+        // change を出して確定済みなので、この後に遅れて発火すると束ねが切れた
+        // あとにもう一件履歴を積む (打ってすぐ離れると Undo が2回必要になっていた)。
+        if (liveTimer) { clearTimeout(liveTimer); liveTimer = null; }
+        window.MA.history.setCoalesceMode(null, 0);
+      }, 0);
+    });
+  }
+
+  var helpClose = document.getElementById('shortcut-help-close');
+  if (helpClose) helpClose.addEventListener('click', function() { toggleShortcutHelp(false); });
+  var helpBox = document.getElementById('shortcut-help');
+  if (helpBox) helpBox.addEventListener('click', function(ev) {
+    if (ev.target === helpBox) toggleShortcutHelp(false);   // 外側をクリックでも閉じる
+  });
+
+  document.getElementById('exp-mmd').addEventListener('click', function() {
+    exportMenu.classList.remove('open');
+    saveFile();
+  });
+
+  document.getElementById('exp-mmd-as').addEventListener('click', function() {
+    exportMenu.classList.remove('open');
+    saveFileAs();
+  });
+
   document.getElementById('exp-svg').addEventListener('click', function() {
     exportMenu.classList.remove('open');
     exportSVG();
@@ -1353,7 +2172,7 @@ function init() {
     if (e.ctrlKey) {
       e.preventDefault();
       var delta = e.deltaY < 0 ? 0.1 : -0.1;
-      setZoom(zoom + delta);
+      setZoomFromUser(zoom + delta);
     } else if (e.shiftKey && !e.ctrlKey) {
       // Shift+Wheel → horizontal scroll
       previewContainer.scrollLeft += e.deltaY;
@@ -1385,9 +2204,34 @@ function init() {
       e.stopPropagation();
       return;
     }
-    // Non-draggable sequence elements (message / note / group) — commit
-    // selection synchronously. selectItem handles toggle-off on re-click.
-    if (seqKind && seqId && (seqKind === 'message' || seqKind === 'note' || seqKind === 'group')) {
+    // Connection mode: the click after "ここから線" picks the target and the
+    // module's own connect() writes the edge.
+    //
+    // `core/connection-mode.js` has existed since the Tier-1 refactor and the
+    // design says edges are drawn by "クリック2回でエッジ作成 共通機構 / 全
+    // モジュールから利用" — but nothing ever called it. All 20 modules expose
+    // operations.connect(text, from, to, props) and every one of them was
+    // unreachable from the canvas. Drawing an edge meant picking both ends out
+    // of two dropdowns in the properties panel, which is five interactions and
+    // gets worse the more elements the diagram has.
+    if (seqKind && seqId && window.MA.connectionMode.isInConnectionMode()) {
+      e.preventDefault();
+      e.stopPropagation();
+      window.MA.connectionMode.notifyTarget(seqKind, seqId);
+      return;
+    }
+
+    // Any other overlay element that names what it is and which element it
+    // stands for — commit selection synchronously. selectItem handles toggle-off
+    // on re-click.
+    //
+    // This used to be a whitelist of 'message' | 'note' | 'group', which is the
+    // set sequence.js happens to emit. flowchart's buildOverlay emits
+    // data-element-kind="node", so its five overlay rects fell through to the
+    // "clicked empty space" branch below and *cleared* the selection: clicking a
+    // node in the diagram looked broken rather than unimplemented. A module that
+    // labels its overlay elements should not also have to be listed here.
+    if (seqKind && seqId) {
       window.MA.selection.selectItem(seqKind, seqId, e.shiftKey);
       e.preventDefault();
       e.stopPropagation();
@@ -1418,6 +2262,21 @@ function init() {
         for (var dti = 0; dti < parsed.tasks.length; dti++) {
           if (parsed.tasks[dti].id === taskId) { task = parsed.tasks[dti]; break; }
         }
+      }
+      // A task whose start comes from `after <id>` has no date to shift, so the
+      // drag never starts. That silence reads as the app being broken: the bar
+      // and its resize handles are drawn like any other, and grabbing them does
+      // nothing at all. Say why.
+      //
+      // (Before date-utils was fixed this branch was worse than silent —
+      // addDays(null, n) counted from the epoch, so the few paths that did get
+      // through moved the task to 1970 and dropped the dependency with it.)
+      if (task && (!task.startDate || !DATE_RE.test(task.startDate))) {
+        dragBlockedMsg = task.after
+          ? '「' + task.label + '」は after ' + task.after + ' で位置が決まります。' +
+            '動かすには開始日を直接指定してください'
+          : '「' + task.label + '」は開始日が日付ではないため動かせません';
+        renderStatus();
       }
       if (task && task.startDate && DATE_RE.test(task.startDate)) {
         // Use overlay SVG for coordinate conversion (same viewBox as mermaid SVG)
@@ -1756,9 +2615,54 @@ function init() {
   });
 
   // ── Keyboard shortcuts ───────────────────────────────────────────────────
+  // Every hit area currently on the overlay, in the order it was drawn — which
+  // is the order the module walked its parsed elements, i.e. document order.
+  //
+  // Reading the overlay rather than re-deriving a list from parsedData means the
+  // keyboard walk and the mouse click always agree on what is selectable and on
+  // what kind each thing is. A second list would drift from the first, which is
+  // the failure mode this codebase keeps producing.
+  function selectableItems() {
+    var items = [];
+    if (!overlayEl) return items;
+    var tagged = overlayEl.querySelectorAll('[data-element-id][data-element-kind]');
+    for (var i = 0; i < tagged.length; i++) {
+      items.push({
+        kind: tagged[i].getAttribute('data-element-kind'),
+        id: tagged[i].getAttribute('data-element-id'),
+      });
+    }
+    // gantt predates the data-element-* convention and tags bars with task ids.
+    var bars = overlayEl.querySelectorAll('.overlay-bar[data-task-id]');
+    for (var b = 0; b < bars.length; b++) {
+      items.push({ kind: 'task', id: bars[b].getAttribute('data-task-id') });
+    }
+    return items;
+  }
+
+  // Move the selection to the next/previous element without touching the mouse.
+  // There was no keyboard route between elements at all: selecting the twelfth
+  // node meant finding it in the diagram or scrolling the properties list to it,
+  // every time.
+  function selectAdjacentElement(dir) {
+    var items = selectableItems();
+    if (!items.length) return false;
+    var cur = -1;
+    for (var i = 0; i < items.length; i++) {
+      if (window.MA.selection.isSelected(items[i].id)) { cur = i; break; }
+    }
+    var next = cur < 0
+      ? (dir > 0 ? 0 : items.length - 1)
+      : (cur + dir + items.length) % items.length;
+    // setSelected, not selectItem: selectItem toggles, and landing back on the
+    // current element (a one-element diagram) would deselect instead of staying.
+    window.MA.selection.setSelected([{ type: items[next].kind, id: items[next].id }]);
+    return true;
+  }
+
   document.addEventListener('keydown', function(e) {
     var tag = e.target.tagName;
-    var inInput = (tag === 'INPUT' || tag === 'SELECT');
+    var inInput = (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA');
     var inEditor = (e.target === editorEl);
 
     if (e.key === 'Escape' && seqDragState && seqDragState.dragging) {
@@ -1769,12 +2673,27 @@ function init() {
       seqDragState = null;
       return;
     }
-    if (e.ctrlKey && e.key === 'z') {
-      if (inEditor) return;
+    // Ctrl+Z / Ctrl+Y always drive the app's history, including inside the
+    // editor.
+    //
+    // The editor used to be handed to the browser's native textarea undo. That
+    // made Ctrl+Z mean two different things depending on where the caret was —
+    // character-level inside the editor, operation-level everywhere else — and,
+    // worse, the native stack knows nothing about GUI edits: after changing a
+    // task through the properties panel, clicking into the editor and pressing
+    // Ctrl+Z could not undo that change at all. The two stacks also fought each
+    // other: a native undo fires `input`, which pushed the half-undone text back
+    // onto the app's stack.
+    //
+    // IME composition is left alone; taking Ctrl+Z during conversion would break
+    // candidate selection.
+    if (e.ctrlKey && e.key === 'z' && !e.isComposing) {
       e.preventDefault(); window.MA.history.undo();
-    } else if (e.ctrlKey && e.key === 'y') {
-      if (inEditor) return;
+    } else if (e.ctrlKey && e.key === 'y' && !e.isComposing) {
       e.preventDefault(); window.MA.history.redo();
+    } else if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
+      e.preventDefault();
+      saveFileAs();
     } else if (e.ctrlKey && e.key === 's') {
       e.preventDefault(); saveFile();
     } else if (e.ctrlKey && e.key === 'o') {
@@ -1792,9 +2711,40 @@ function init() {
       suppressSync = false;
       window.MA.selection.setSelected([]);
       syncLineNumbers();
+      // 削除に確認を出さないのは Undo で戻せるからだが、戻せることを示して
+      // いるのはツールバーの Undo だけで、視線は図の上にある。消したその場で言う。
+      showTransient(deletedMessage(lines.length));
       scheduleRefresh();
+    } else if (e.key === '?' && !inInput && !inEditor) {
+      // ショートカットが12個あるのに、それを知る手段が画面に無かった。
+      // キーボード中心の人にとって一番価値のある部分が伝わっていない。
+      e.preventDefault();
+      toggleShortcutHelp();
+    } else if (e.key === 'Escape' &&
+               document.getElementById('shortcut-help') &&
+               !document.getElementById('shortcut-help').hasAttribute('hidden')) {
+      toggleShortcutHelp(false);
     } else if (e.key === 'Escape') {
+      // Escape has to get out of connection mode too. Without it the only way
+      // to leave was to complete the edge — clicking anywhere else on the canvas
+      // just drew the line you had changed your mind about.
+      if (window.MA.connectionMode.isInConnectionMode()) {
+        window.MA.connectionMode.cancelConnectionMode();
+        renderStatus();
+        return;
+      }
       window.MA.selection.clearSelection();
+    } else if (!inEditor && !inInput && !e.ctrlKey && !e.altKey && !e.metaKey &&
+               !window.MA.connectionMode.isInConnectionMode() &&
+               (e.key === 'ArrowDown' || e.key === 'ArrowRight' ||
+                e.key === 'ArrowUp' || e.key === 'ArrowLeft')) {
+      // 接続モード中は選択を動かさない。動かすと選択の緑枠が「これを編集中」
+      // と言い、ステータスバーは「相手をクリック」と言う、という食い違いが
+      // 画面に同時に出る
+      // 次/前の要素へ。順序は図の宣言順 (オーバーレイの描画順) なので、
+      // どの図種でも「上から順に見ていく」動きになる。
+      var forward = (e.key === 'ArrowDown' || e.key === 'ArrowRight');
+      if (selectAdjacentElement(forward ? 1 : -1)) e.preventDefault();
     } else if (e.ctrlKey && e.key === 'a' && !inEditor && !inInput) {
       e.preventDefault();
       window.MA.selection.setSelected(parsed.tasks.map(function(t) { return { type: 'task', id: t.id }; }));
@@ -1878,8 +2828,33 @@ function init() {
       var targetType = this.value;
       var mod = modules[targetType];
       if (!mod) return;
+      // Switching type replaces the whole document with a template. Undo does
+      // bring it back, but nothing on screen says so, and the dropdown sits in
+      // the toolbar where a mis-click costs the entire diagram.
+      //
+      // The confirm comes first: bailing out must leave the view untouched.
+      var currentTemplate = currentModule && currentModule.template ? currentModule.template() : null;
+      if (hasUnsavedWork(mmdText, savedText, currentTemplate) &&
+          !confirm('図の種類を変えると、いま書いている内容は ' + targetType + ' のひな形に置き換わります。続けますか？')) {
+        this.value = currentModule ? currentModule.type : this.value;
+        return;
+      }
+      // Connection mode belongs to the document that started it. Left running
+      // across a type switch, the next click connected an id from the old
+      // diagram to one in the new one: starting from flowchart's `A` and
+      // switching to block-beta produced the line `A --> b`, naming a node that
+      // does not exist in that diagram.
+      window.MA.connectionMode.cancelConnectionMode();
+      // The view goes back to what a fresh document shows. Resetting to 'detail'
+      // here (as this used to) left the readout saying "100%" while the chart was
+      // actually drawn at fit width — no way to tell which mode you were in.
+      setGanttViewMode('overview');
+      setZoom(1.0);
       window.MA.history.pushHistory();
+      pendingAutoFit = true;
       mmdText = mod.template();
+      loadedFileName = '';
+      markSaved();
       suppressSync = true;
       editorEl.value = mmdText;
       suppressSync = false;
@@ -1888,6 +2863,16 @@ function init() {
       scheduleRefresh();
     });
   }
+
+  // The tab is the only place the diagram exists. Without this, closing it or
+  // navigating away discards everything silently.
+  window.addEventListener('beforeunload', function(e) {
+    var tpl = currentModule && currentModule.template ? currentModule.template() : null;
+    if (!hasUnsavedWork(mmdText, savedText, tpl)) return;
+    e.preventDefault();
+    e.returnValue = '';
+    return '';
+  });
 
   // ── Initial render ───────────────────────────────────────────────────────
   scheduleRefresh();
@@ -1900,6 +2885,10 @@ document.addEventListener('DOMContentLoaded', init);
 // ── Export hook for tests ──────────────────────────────────────────────────
 if (typeof __exportForTest === 'function') {
   __exportForTest({
+    downloadBaseName: downloadBaseName,
+    sanitizeFileName: sanitizeFileName,
+    hasUnsavedWork: hasUnsavedWork,
+    statusInfoText: statusInfoText,
     parseGantt: parseGantt,
     updateTaskDates: updateTaskDates,
     updateTaskField: updateTaskField,
@@ -1907,5 +2896,8 @@ if (typeof __exportForTest === 'function') {
     deleteTask: deleteTask,
     daysBetween: window.MA.dateUtils.daysBetween,
     addDays: window.MA.dateUtils.addDays,
+    ganttAxisFor: ganttAxisFor,
+    ganttSpanDays: ganttSpanDays,
+    DETAIL_PX_PER_DAY: DETAIL_PX_PER_DAY,
   });
 }

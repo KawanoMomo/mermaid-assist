@@ -158,3 +158,63 @@ describe('move が有効なのは flowchart のノードだけ', function() {
     expect(flags.filter(function(v) { return v; }).length).toBe(1);
   });
 });
+
+// deleteLabel / deleteTitle は「カスケード削除の警告をボタン自身に載せる」ための
+// オプションで、block と c4 が使っている。テストが1件も無かったので、
+// listItemHtml の中身を丸ごと `return ''` にしても全テストが通る状態だった。
+describe('listItemHtml: 削除ボタンの警告表示', function() {
+  test('deleteLabel を省略すると ✕ になる', function() {
+    var html = P.listItemHtml({ label: 'a', deleteClass: 'x-del' });
+    expect(html).toContain('>✕</button>');
+  });
+
+  test('deleteLabel を渡すとボタンの文字が置き換わる', function() {
+    var html = P.listItemHtml({ label: 'a', deleteClass: 'x-del', deleteLabel: '✕ 3' });
+    expect(html).toContain('>✕ 3</button>');
+    expect(html).not.toContain('>✕</button>');
+  });
+
+  test('deleteTitle は title 属性になる', function() {
+    var html = P.listItemHtml({ label: 'a', deleteClass: 'x-del', deleteTitle: '2要素が消えます' });
+    expect(html).toContain('title="2要素が消えます"');
+  });
+
+  // 以前はここで「省略すると title は出ない」を固定していた。
+  // 一覧行の削除ボタンは記号 (✕) だけなので、title が無いと何が消えるのか
+  // 読み取れない。R7 (一貫性) がこれを発見可能性の欠陥として指摘したため、
+  // 省略時はラベルから既定の説明を作る仕様に変えた。
+  test('deleteTitle を省略するとラベルから既定の説明が入る', function() {
+    var html = P.listItemHtml({ label: 'a', deleteClass: 'x-del' });
+    expect(html).toContain('title=');
+    expect(html).toContain('「a」を削除');
+  });
+
+  test('deleteLabel / deleteTitle はエスケープされる', function() {
+    // 件数はパース結果から作られるので、ラベル文字列が混ざる経路がある
+    var html = P.listItemHtml({
+      label: 'a', deleteClass: 'x-del',
+      deleteLabel: '<img>', deleteTitle: '"><script>',
+    });
+    expect(html).toContain('&lt;img&gt;');
+    expect(html).toContain('title="&quot;&gt;&lt;script&gt;"');
+    expect(html).not.toContain('<img>');
+  });
+
+  test('deleteClass が無ければ削除ボタンごと出ない', function() {
+    var html = P.listItemHtml({ label: 'a', deleteLabel: '✕ 3', deleteTitle: 'x' });
+    expect(html).not.toContain('✕ 3');
+    expect(html).not.toContain('title=');
+  });
+
+  test('data 属性は編集ボタンと削除ボタンの両方に付く', function() {
+    // 削除ハンドラは data-element-id から対象を引く。片方にしか付かないと
+    // 「押した行と違う要素が消える」状態に戻る
+    var html = P.listItemHtml({
+      label: 'a', selectClass: 'x-sel', deleteClass: 'x-del',
+      dataElementId: 'b', dataLine: 3,
+    });
+    var count = html.split('data-element-id="b"').length - 1;
+    expect(count).toBe(2);
+    expect(html.split('data-line="3"').length - 1).toBe(2);
+  });
+});

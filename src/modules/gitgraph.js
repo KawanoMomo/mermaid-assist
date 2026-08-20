@@ -175,8 +175,28 @@ window.MA.modules.gitGraph = (function() {
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var indent = lines[idx].match(/^(\s*)/)[1];
+    var bm = lines[idx].trim().match(/^branch\s+(\S+)/);
+    var oldName = bm ? bm[1] : null;
     lines[idx] = indent + 'branch ' + newName;
+    if (oldName && oldName !== newName) renameBranchRefs(lines, oldName, newName, idx);
     return lines.join('\n');
+  }
+
+  // Rewrite the `checkout` / `merge` lines that point at a renamed branch.
+  // Leaving them behind makes mermaid reject the diagram outright
+  // ("Trying to checkout branch which is not yet created"), replacing the
+  // preview with an error about a branch name the user just removed.
+  //
+  // Commit id strings are free text and are not touched even when they contain
+  // the branch name.
+  function renameBranchRefs(lines, oldName, newName, skipIdx) {
+    for (var j = 0; j < lines.length; j++) {
+      if (j === skipIdx) continue;
+      var indent = lines[j].match(/^(\s*)/)[1];
+      var trimmed = lines[j].trim();
+      var m = trimmed.match(/^(checkout|merge)\s+(\S+)(.*)$/);
+      if (m && m[2] === oldName) lines[j] = indent + m[1] + ' ' + newName + m[3];
+    }
   }
 
   function updateCheckout(text, lineNum, newTarget) {

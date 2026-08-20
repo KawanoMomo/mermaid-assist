@@ -1,0 +1,64 @@
+[
+ {
+  "name": "sequence-participant/before",
+  "text": "sequenceDiagram\n    participant A as アルファ\n    participant B as ブラボー\n    participant C as チャーリー\n    A->>B: m1\n    B->>C: m2\n    A->>C: m3\n"
+ },
+ {
+  "name": "sequence-participant/after",
+  "text": "sequenceDiagram\n    participant A as アルファ\n    participant C as チャーリー\n    A->>C: m3\n",
+  "expectAbsent": [
+   "ブラボー",
+   "m1",
+   "m2"
+  ],
+  "expectPresent": [
+   "アルファ",
+   "チャーリー",
+   "m3"
+  ]
+ },
+ {
+  "name": "class-delete/before",
+  "text": "classDiagram\n    class Animal {\n        +String name\n    }\n    class Dog\n    Animal <|-- Dog\n"
+ },
+ {
+  "name": "class-delete/after",
+  "text": "classDiagram\n    class Dog\n",
+  "expectAbsent": [
+   "Animal",
+   "name"
+  ],
+  "expectPresent": [
+   "Dog"
+  ]
+ },
+ {
+  "name": "state-delete/before",
+  "text": "stateDiagram-v2\n    [*] --> Idle\n    Idle --> Run\n    Run --> Idle\n    Run --> [*]\n"
+ },
+ {
+  "name": "state-delete/after",
+  "text": "stateDiagram-v2\n    Run --> [*]\n",
+  "expectAbsent": [
+   "Idle"
+  ],
+  "expectPresent": [
+   "Run"
+  ]
+ },
+ {
+  "name": "flowchart-delete/before",
+  "text": "flowchart TD\n    A[\"開始\"]\n    B[\"処理\"]\n    C[\"終了\"]\n    A --> B\n    B --> C\n"
+ },
+ {
+  "name": "flowchart-delete/after",
+  "text": "flowchart TD\n    A[\"開始\"]\n    C[\"終了\"]\n",
+  "expectAbsent": [
+   "処理"
+  ],
+  "expectPresent": [
+   "開始",
+   "終了"
+  ]
+ }
+]

@@ -202,11 +202,36 @@ window.MA.modules.state = (function() {
   function moveStateUp(text, lineNum) { return _moveStateStep(text, lineNum, -1); }
   function moveStateDown(text, lineNum) { return _moveStateStep(text, lineNum, 1); }
 
-  function deleteState(text, lineNum) {
-    return window.MA.textUpdater.deleteLine(text, lineNum);
+  // Delete a state and every transition that touches it.
+  //
+  // Transitions declare both of their endpoints, so deleting "the line the state
+  // was first seen on" removed one transition and left the state itself on the
+  // canvas — every other transition still named it, and mermaid re-declares from
+  // those. Pressing ✕ on Idle removed `[*] --> Idle` and Idle stayed.
+  //
+  // `stateId` is optional so older single-argument callers keep working.
+  function deleteState(text, lineNum, stateId) {
+    if (!stateId) return window.MA.textUpdater.deleteLine(text, lineNum);
+    var lines = text.split('\n');
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var trimmed = lines[i].trim();
+      var tr = trimmed.match(/^(\S+|\[\*\])\s+-->\s+(\S+|\[\*\])(?:\s*:\s*(.*))?$/);
+      if (tr && (tr[1] === stateId || tr[2] === stateId)) continue;
+      var alias = trimmed.match(/^state\s+"[^"]+"\s+as\s+(\S+)\s*$/);
+      if (alias && alias[1] === stateId) continue;
+      var special = trimmed.match(/^state\s+(\S+)\s+<<(?:fork|join|choice)>>/);
+      if (special && special[1] === stateId) continue;
+      var decl = trimmed.match(/^state\s+(\S+)\s*$/);
+      if (decl && decl[1] === stateId) continue;
+      var note = trimmed.match(/^note\s+(?:left of|right of|above|below)\s+(\S+)\s*:/);
+      if (note && note[1] === stateId) continue;
+      out.push(lines[i]);
+    }
+    return out.join('\n');
   }
 
-  function updateStateLabel(text, lineNum, newLabel) {
+  function updateStateLabel(text, lineNum, newLabel, stateId) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
@@ -222,6 +247,25 @@ window.MA.modules.state = (function() {
     if (simpleMatch) {
       // Need to convert to aliased form
       lines[idx] = indent + 'state "' + newLabel + '" as ' + simpleMatch[1];
+      return lines.join('\n');
+    }
+    // 宣言行が無い状態。
+    //
+    // ひな形の状態は遷移 (`[*] --> Idle`) にしか現れないので、`state X` の行が無い。
+    // 従来はそこで無言で戻っており、ラベル欄が何もしなかった。
+    // 無いなら作る — 別名宣言を先頭 (図種宣言の直後) に挿してラベルを与える。
+    // 遷移側は id のままなので、図の形は変わらない。
+    if (stateId) {
+      var insertAt = 1;
+      for (var k = 0; k < lines.length; k++) {
+        if (/^(stateDiagram(-v2)?)/.test(lines[k].trim())) { insertAt = k + 1; break; }
+      }
+      var baseIndent = '    ';
+      for (var k2 = insertAt; k2 < lines.length; k2++) {
+        var t2 = lines[k2];
+        if (t2.trim()) { baseIndent = t2.match(/^(\s*)/)[1]; break; }
+      }
+      lines.splice(insertAt, 0, baseIndent + 'state "' + newLabel + '" as ' + stateId);
       return lines.join('\n');
     }
     return text;
@@ -287,17 +331,12 @@ window.MA.modules.state = (function() {
 
   // ── UI ──
   function buildOverlay(svgEl, parsedData, overlayEl) {
-    if (!overlayEl) return;
-    while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
-    if (!svgEl || !parsedData) return;
-    var viewBox = svgEl.getAttribute('viewBox');
-    if (viewBox) overlayEl.setAttribute('viewBox', viewBox);
-    var svgW = svgEl.getAttribute('width');
-    var svgH = svgEl.getAttribute('height');
-    if (svgW) overlayEl.setAttribute('width', svgW);
-    if (svgH) overlayEl.setAttribute('height', svgH);
-
-    // Minimal overlay: no clickable highlight for now (property panel is primary UI)
+    // id="state-<状態名>-<連番>"。start/end の擬似ノード (state-root_start-0) は
+    // parsedData に存在しないので、id 照合の時点で自然に外れる。
+    window.MA.overlayGeom.buildNodeOverlay(svgEl, parsedData, overlayEl, {
+      prefix: 'state',
+      kindOf: function() { return 'state'; },
+    });
   }
 
   function renderProps(selData, parsedData, propsEl, ctx) {
@@ -407,7 +446,10 @@ window.MA.modules.state = (function() {
       });
       P.bindSelectButtons(propsEl, 'st-select-state', 'state');
       P.bindSelectButtons(propsEl, 'st-select-trans', 'transition');
-      P.bindDeleteButtons(propsEl, 'st-delete-state', ctx, deleteState);
+      // 遷移行が両端の状態を宣言するので、id なしだと押した状態が残る
+      P.bindDeleteButtons(propsEl, 'st-delete-state', ctx, function(t, ln, elId) {
+        return deleteState(t, ln, elId);
+      });
       P.bindDeleteButtons(propsEl, 'st-delete-trans', ctx, deleteTransition);
       P.bindDeleteButtons(propsEl, 'st-delete-comp', ctx, deleteComposite, true);
       return;
@@ -426,6 +468,7 @@ window.MA.modules.state = (function() {
         fieldHtml('ID', 'sel-state-id', st.id) +
         fieldHtml('ラベル', 'sel-state-label', st.label) +
         '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">種別: ' + escHtml(st.type || 'simple') + '</div>' +
+        P.connectButtonHtml('sel-state-connect') +
         P.actionBarHtml('sel-state', {
           insertBefore: false, insertAfter: false,
           // move は無効。_is*Line が「宣言行か」で判定しており、コンポジット状態 (`state Active {`) を宣言行と誤判定し、他状態の子に吸い込む。
@@ -435,9 +478,12 @@ window.MA.modules.state = (function() {
           labels: { delete: '状態削除' },
         });
 
+      P.bindConnectButton('sel-state-connect', 'state', st.id,
+        function(fromId, toId) { return addTransition(ctx.getMmdText(), fromId, toId); });
+
       document.getElementById('sel-state-label').addEventListener('change', function() {
         window.MA.history.pushHistory();
-        ctx.setMmdText(updateStateLabel(ctx.getMmdText(), st.line, this.value));
+        ctx.setMmdText(updateStateLabel(ctx.getMmdText(), st.line, this.value, st.id));
         ctx.onUpdate();
       });
       P.bindActionBar('sel-state', {
@@ -459,7 +505,7 @@ window.MA.modules.state = (function() {
         },
         'delete': function() {
           window.MA.history.pushHistory();
-          ctx.setMmdText(deleteState(ctx.getMmdText(), st.line));
+          ctx.setMmdText(deleteState(ctx.getMmdText(), st.line, st.id));
           window.MA.selection.clearSelection();
           ctx.onUpdate();
         },

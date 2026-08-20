@@ -196,24 +196,35 @@ test.describe('E08: セクションドロップダウン更新', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-//  E09: タスク追加後の自動選択
+//  E09: タスク追加後は追加フォームに留まる (旧: 自動選択)
+//
+//  以前は追加したタスクを自動選択していた。しかしそれをするとプロパティ
+//  パネルが詳細表示に切り替わり、**追加フォームごと消える**。項目3 の
+//  「ラベル欄へフォーカスを戻して連続入力」と真正面から矛盾していて、
+//  2本目を入れるには毎回 Escape で戻る必要があった。
+//
+//  連続入力を優先し、追加後は選択しない。追加した結果は図とエディタに
+//  出るので確認手段は失われない。
 // ─────────────────────────────────────────────────────────────────────────
-test.describe('E09: タスク追加後の自動選択', () => {
-  test('タスク追加後にそのタスクが自動選択されプロパティに表示', async ({ page }) => {
+test.describe('E09: タスク追加後は追加フォームに留まる', () => {
+  test('追加してもフォームが消えず、続けて入力できる', async ({ page }) => {
     await page.goto(HTML_URL);
     await waitForRender(page);
     await escapeSelection(page);
 
-    await page.locator('#prop-add-label').fill('自動選択テスト');
+    await page.locator('#prop-add-label').fill('連続入力テスト');
     await page.locator('#prop-add-id').fill('autosel1');
     await page.locator('#prop-add-start').fill('2026-06-01');
     await page.locator('#prop-add-end').fill('2026-06-15');
     await page.locator('#prop-add-btn').click();
     await page.waitForTimeout(1000);
 
-    const props = await page.locator('#props-content').textContent();
-    expect(props).toContain('自動選択テスト');
-    expect(props).toContain('ラベル');
+    // 追加されている
+    expect(await editorText(page)).toContain('連続入力テスト');
+    // フォームが残り、ラベル欄にフォーカスが戻っている
+    await expect(page.locator('#prop-add-label')).toHaveCount(1);
+    expect(await page.evaluate(() => document.activeElement && document.activeElement.id))
+      .toBe('prop-add-label');
   });
 });
 
@@ -436,7 +447,9 @@ test.describe('E14: axisFormatプリセット', () => {
 
     // エディタで非プリセット値に書き換え
     const original = await editorText(page);
-    const modified = original.replace(/axisFormat\s+%m\/%d/, 'axisFormat %j');
+    // テンプレートは axisFormat を持たない (長期チャートで年が消えるため)。
+    // 非プリセット値を見たいのでここで自分で挿入する
+    const modified = original.replace(/(dateFormat YYYY-MM-DD)/, '$1\n    axisFormat %j');
     await page.locator('#editor').fill(modified);
     await page.locator('#editor').dispatchEvent('input');
     await page.waitForTimeout(1500);

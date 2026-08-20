@@ -80,6 +80,42 @@ window.MA.modules.architectureBeta = (function() {
 
   function deleteLine(text, lineNum) { return window.MA.textUpdater.deleteLine(text, lineNum); }
 
+  // Delete a group or service together with everything that names it.
+  //
+  // Deleting the line on its own left `service db(database)[DB] in api` pointing
+  // at a group that no longer exists, and mermaid refused the whole diagram.
+  // Same for a service: the edges naming it stayed behind.
+  //
+  // A group's members are not deleted — they just leave the group. Removing
+  // someone's boxes because the box around them went away is not what the ✕ on
+  // the group row promises.
+  function deleteElement(text, lineNum, elementId) {
+    if (!elementId) return deleteLine(text, lineNum);
+    var lines = text.split('\n');
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var indent = lines[i].match(/^(\s*)/)[1];
+      var trimmed = lines[i].trim();
+
+      var decl = trimmed.match(/^(group|service)\s+(\S+)\s*\(([^)]+)\)\s*\[([^\]]*)\]\s*(?:in\s+(\S+))?\s*$/);
+      if (decl) {
+        if (decl[2] === elementId) continue;              // 本体
+        if (decl[5] === elementId) {                      // 消えたグループの中身
+          out.push(indent + decl[1] + ' ' + decl[2] + '(' + decl[3] + ')[' + decl[4] + ']');
+          continue;
+        }
+        out.push(lines[i]);
+        continue;
+      }
+
+      var edge = trimmed.match(/^(\S+):([TBLR])(\s+--\s+)([TBLR]):(\S+)\s*$/);
+      if (edge && (edge[1] === elementId || edge[5] === elementId)) continue;
+
+      out.push(lines[i]);
+    }
+    return out.join('\n');
+  }
+
   function updateElement(text, lineNum, field, value) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
@@ -90,13 +126,47 @@ window.MA.modules.architectureBeta = (function() {
     var m = trimmed.match(/^(group|service)\s+(\S+)\s*\(([^)]+)\)\s*\[([^\]]*)\]\s*(?:in\s+(\S+))?\s*$/);
     if (!m) return text;
     var kind = m[1], id = m[2], icon = m[3], label = m[4], parent = m[5] || '';
+    var oldId = id;
     if (field === 'id') id = value;
     else if (field === 'icon') icon = value;
     else if (field === 'label') label = value;
     else if (field === 'parentId') parent = value;
     else if (field === 'kind') kind = value;
     lines[idx] = indent + kind + ' ' + id + '(' + icon + ')[' + label + ']' + (parent ? ' in ' + parent : '');
+    if (field === 'id' && value !== oldId) renameRefs(lines, oldId, value, idx);
     return lines.join('\n');
+  }
+
+  // Rewrite the references to a renamed id: the two endpoints of an edge line
+  // and the `in <parent>` clause of anything nested under a renamed group.
+  // Leaving them behind makes mermaid refuse the whole diagram
+  // ("The left-hand id [x] does not yet exist"), so the preview is replaced by
+  // an error that names an id the user can no longer see anywhere.
+  //
+  // Labels are free text and keep the old string even when it matches the id.
+  function renameRefs(lines, oldId, newId, skipIdx) {
+    for (var j = 0; j < lines.length; j++) {
+      var indent = lines[j].match(/^(\s*)/)[1];
+      var trimmed = lines[j].trim();
+      if (!trimmed) continue;
+
+      if (j !== skipIdx) {
+        // group/service ... in <parent>  — same shape as parseArchitecture
+        var em = trimmed.match(/^(group|service)\s+(\S+)\s*\(([^)]+)\)\s*\[([^\]]*)\]\s*in\s+(\S+)\s*$/);
+        if (em && em[5] === oldId) {
+          lines[j] = indent + em[1] + ' ' + em[2] + '(' + em[3] + ')[' + em[4] + '] in ' + newId;
+          continue;
+        }
+      }
+
+      // <id>:<side> -- <side>:<id>
+      var edge = trimmed.match(/^(\S+):([TBLR])(\s+--\s+)([TBLR]):(\S+)\s*$/);
+      if (edge) {
+        var from = edge[1] === oldId ? newId : edge[1];
+        var to = edge[5] === oldId ? newId : edge[5];
+        lines[j] = indent + from + ':' + edge[2] + edge[3] + edge[4] + ':' + to;
+      }
+    }
   }
 
   function updateEdge(text, lineNum, field, value) {
@@ -238,8 +308,14 @@ window.MA.modules.architectureBeta = (function() {
       P.bindSelectButtons(propsEl, 'arch-select-group', 'group');
       P.bindSelectButtons(propsEl, 'arch-select-service', 'service');
       P.bindSelectButtons(propsEl, 'arch-select-edge', 'edge');
-      P.bindDeleteButtons(propsEl, 'arch-delete-group', ctx, deleteLine);
-      P.bindDeleteButtons(propsEl, 'arch-delete-service', ctx, deleteLine);
+      // 3引数目は data-element-id。無いと `in <group>` やエッジが残り、
+      // 存在しない要素を指したまま mermaid が図全体を拒否する
+      P.bindDeleteButtons(propsEl, 'arch-delete-group', ctx, function(t, ln, elId) {
+        return deleteElement(t, ln, elId);
+      });
+      P.bindDeleteButtons(propsEl, 'arch-delete-service', ctx, function(t, ln, elId) {
+        return deleteElement(t, ln, elId);
+      });
       P.bindDeleteButtons(propsEl, 'arch-delete-edge', ctx, deleteLine);
       return;
     }
@@ -338,14 +414,17 @@ window.MA.modules.architectureBeta = (function() {
       ].join('\n');
     },
     buildOverlay: function(svgEl, parsedData, overlayEl) {
-      if (!overlayEl) return;
-      while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
-      if (!svgEl) return;
-      var viewBox = svgEl.getAttribute('viewBox');
-      if (viewBox) overlayEl.setAttribute('viewBox', viewBox);
-      var svgW = svgEl.getAttribute('width'); var svgH = svgEl.getAttribute('height');
-      if (svgW) overlayEl.setAttribute('width', svgW);
-      if (svgH) overlayEl.setAttribute('height', svgH);
+      // mermaid は service を <g id="service-<id>" class="architecture-service">
+      // で描く。flowchart 系のような末尾連番は付かないので prefix を自前で外す。
+      // group は <rect id="group-..."> で g ではないため、ここではサービスだけ。
+      window.MA.overlayGeom.buildNodeOverlay(svgEl, parsedData, overlayEl, {
+        selector: '.architecture-service',
+        svgIdToKey: function(svgId) {
+          var m = String(svgId || '').match(/^service-(.+)$/);
+          return m ? m[1] : null;
+        },
+        kindOf: function() { return 'service'; },
+      });
     },
     renderProps: renderProps,
     operations: {
@@ -376,6 +455,7 @@ window.MA.modules.architectureBeta = (function() {
       },
     },
     addGroup: addGroup, addService: addService, addEdge: addEdge,
-    deleteLine: deleteLine, updateElement: updateElement, updateEdge: updateEdge,
+    deleteLine: deleteLine,
+    deleteElement: deleteElement, updateElement: updateElement, updateEdge: updateEdge,
   };
 })();

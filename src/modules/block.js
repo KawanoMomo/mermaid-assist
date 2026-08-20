@@ -56,7 +56,7 @@ window.MA.modules.blockBeta = (function() {
       BLOCK_TOKEN_RE.lastIndex = 0;
       while ((m = BLOCK_TOKEN_RE.exec(trimmed)) !== null) {
         var id = m[1];
-        var label = m[2] || m[3] || m[4] || id;
+        var label = decodeLabel(m[2] || m[3] || m[4] || id);
         // Skip tokens that are actually link keywords (shouldn't happen here but guard)
         if (id === 'block' || id === 'end' || id === 'columns') continue;
         result.elements.push({ kind: 'block', id: id, label: label, parentId: parent2, line: lineNum });
@@ -66,7 +66,7 @@ window.MA.modules.blockBeta = (function() {
   }
 
   function addBlock(text, id, label) {
-    var token = label && label !== id ? id + '["' + label + '"]' : id;
+    var token = label && label !== id ? id + '["' + encodeLabel(label) + '"]' : id;
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
@@ -99,7 +99,7 @@ window.MA.modules.blockBeta = (function() {
   }
 
   function addNestedBlock(text, parentId, id, label) {
-    var token = label && label !== id ? id + '["' + label + '"]' : id;
+    var token = label && label !== id ? id + '["' + encodeLabel(label) + '"]' : id;
     var lines = text.split('\n');
     for (var i = 0; i < lines.length; i++) {
       if (isGroupStart(lines[i].trim(), parentId)) {
@@ -210,14 +210,94 @@ window.MA.modules.blockBeta = (function() {
     return window.MA.textUpdater.deleteLine(text, lineNum);
   }
 
+  // Rewrite one block token on a line, leaving every other token byte-identical.
+  //
+  // The tokens are found with BLOCK_TOKEN_RE — the same regex parseBlock uses —
+  // so "which token is this block" means the same thing here as it does in the
+  // parser. The previous implementation built its own `\b<id>` regex instead:
+  // that has no closing boundary, so editing `a` on the line
+  // `a["A"] ab["AB"] abc["ABC"]` also matched the head of `ab` and `abc` and
+  // rewrote the line into `a["新"] a["新"]b["AB"] a["新"]bc["ABC"]`. mermaid
+  // parses and renders that happily, so the blocks silently changed identity and
+  // the links pointing at them grew phantom targets, with no error anywhere.
+  //
+  // `build(id, label)` returns the replacement token text.
+  function replaceBlockToken(line, blockId, build) {
+    var out = '', last = 0, m;
+    BLOCK_TOKEN_RE.lastIndex = 0;
+    while ((m = BLOCK_TOKEN_RE.exec(line)) !== null) {
+      if (m[0] === '') { BLOCK_TOKEN_RE.lastIndex++; continue; }
+      if (m[1] !== blockId) continue;
+      var label = m[2] !== undefined ? m[2] : (m[3] !== undefined ? m[3] : m[4]);
+      out += line.slice(last, m.index) + build(m[1], label === undefined ? null : label);
+      last = m.index + m[0].length;
+    }
+    return out + line.slice(last);
+  }
+
+  // 引用の中の  は mermaid が受け付けない。 に逃がす (c4 と同じ手)。
+  //  を先に逃がすのは、利用者が実際に  と打った場合を壊さないため。
+  function encodeLabel(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/#/g, '#35;')
+      .replace(/"/g, '#quot;');
+  }
+  function decodeLabel(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/#quot;/g, '"')
+      .replace(/#35;/g, '#');
+  }
+
   function updateBlockLabel(text, lineNum, blockId, newLabel) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
-    var line = lines[idx];
-    // Replace the specific block token (id or id["label"]) for matching blockId
-    var tokenRe = new RegExp('(\\b' + blockId + ')(?:\\["[^"]*"\\])?', 'g');
-    lines[idx] = line.replace(tokenRe, blockId + (newLabel ? '["' + newLabel + '"]' : ''));
+    lines[idx] = replaceBlockToken(lines[idx], blockId, function(id) {
+      return id + (newLabel ? '["' + encodeLabel(newLabel) + '"]' : '');
+    });
+    return lines.join('\n');
+  }
+
+  // Rename a block or group id, rewriting the links that point at it.
+  //
+  // Without the cascade the links keep the old id and mermaid quietly declares a
+  // fresh block for it, so renaming grows a duplicate instead of moving one.
+  // A rename onto an id that already exists is refused outright: mermaid would
+  // merge the two blocks into one with no diagnostic, which reads as "my block
+  // disappeared".
+  function updateBlockId(text, lineNum, oldId, newId) {
+    if (!newId) return text;
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+
+    // Also the no-op guard for newId === oldId: the id is already in the
+    // diagram, so it reads as a collision with itself and the rename stops.
+    var existing = parseBlock(text).elements;
+    for (var e = 0; e < existing.length; e++) {
+      if (existing[e].id === newId) return text;
+    }
+
+    // A group header goes through the same token rewrite as a plain block:
+    // BLOCK_TOKEN_RE sees `block:g1:2 columns 3` as the tokens `block`, `g1`,
+    // `columns`, so replacing the `g1` token keeps the span and column counts
+    // untouched. Special-casing the header would mean a second definition of
+    // "which token is the id", which is how the neighbouring bugs got in.
+    lines[idx] = replaceBlockToken(lines[idx], oldId, function(id, label) {
+      return newId + (label === null ? '' : '["' + label + '"]');
+    });
+
+    for (var j = 0; j < lines.length; j++) {
+      if (j === idx) continue;
+      var lineIndent = lines[j].match(/^(\s*)/)[1];
+      var lm = lines[j].trim().match(LINK_RE);
+      if (!lm) continue;
+      var from = lm[1] === oldId ? newId : lm[1];
+      var to = lm[3] === oldId ? newId : lm[3];
+      if (from === lm[1] && to === lm[3]) continue;
+      var label = (lm[2] || '').trim();
+      lines[j] = lineIndent + (label ? from + ' -- "' + label + '" --> ' + to : from + ' --> ' + to);
+    }
     return lines.join('\n');
   }
 
@@ -271,15 +351,38 @@ window.MA.modules.blockBeta = (function() {
         '  b --> c',
       ].join('\n');
     },
+    // Click-to-select on the diagram itself. Until now this only sized the
+    // overlay and produced no hit areas, so block-beta could only be edited
+    // through the properties list — the list is fine for four blocks and
+    // unusable for forty.
+    //
+    // mermaid's block renderer puts the DSL id straight onto the node group
+    // (`<g class="node ..." id="a">`), so the mapping is exact and does not need
+    // to go through label text.
     buildOverlay: function(svgEl, parsedData, overlayEl) {
-      if (!overlayEl) return;
-      while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
-      if (!svgEl) return;
-      var viewBox = svgEl.getAttribute('viewBox');
-      if (viewBox) overlayEl.setAttribute('viewBox', viewBox);
-      var svgW = svgEl.getAttribute('width'); var svgH = svgEl.getAttribute('height');
-      if (svgW) overlayEl.setAttribute('width', svgW);
-      if (svgH) overlayEl.setAttribute('height', svgH);
+      var geom = window.MA.overlayGeom;
+      geom.syncViewport(svgEl, overlayEl);
+      if (!overlayEl || !svgEl || !parsedData) return;
+
+      var byId = {};
+      for (var i = 0; i < parsedData.elements.length; i++) {
+        byId[parsedData.elements[i].id] = parsedData.elements[i];
+      }
+
+      var nodes = svgEl.querySelectorAll('.node');
+      for (var n = 0; n < nodes.length; n++) {
+        var el = byId[nodes[n].getAttribute('id')];
+        if (!el) continue;
+        var box = geom.boxInSvgSpace(svgEl, nodes[n]);
+        if (!box) continue;
+        overlayEl.appendChild(geom.hitRect(document, box, {
+          id: el.id,
+          kind: el.kind === 'group' ? 'group' : 'block',
+          line: el.line,
+          selected: window.MA.selection.isSelected(el.id),
+          className: 'overlay-node',
+        }));
+      }
     },
     renderProps: function(selData, parsedData, propsEl, ctx) {
       if (!propsEl) return;
@@ -445,15 +548,14 @@ window.MA.modules.blockBeta = (function() {
         P.bindSelectButtons(propsEl, 'block-select-block', 'block');
         P.bindSelectButtons(propsEl, 'block-select-group', 'group');
         P.bindSelectButtons(propsEl, 'block-select-link', 'link');
-        P.bindDeleteButtons(propsEl, 'block-delete-block', ctx, function(t, ln) {
-          var bid = '';
-          for (var di = 0; di < parsedData.elements.length; di++) if (parsedData.elements[di].line === ln) { bid = parsedData.elements[di].id; break; }
-          return deleteBlock(t, ln, bid);
+        // Use the id the row was rendered for. Looking it up by line number picks
+        // the first block on that line, and block-beta normally puts several on
+        // one line — so pressing b's ✕ used to delete a, silently.
+        P.bindDeleteButtons(propsEl, 'block-delete-block', ctx, function(t, ln, elId) {
+          return elId ? deleteBlock(t, ln, elId) : t;
         });
-        P.bindDeleteButtons(propsEl, 'block-delete-group', ctx, function(t, ln) {
-          var gid = '';
-          for (var di = 0; di < parsedData.elements.length; di++) if (parsedData.elements[di].line === ln) { gid = parsedData.elements[di].id; break; }
-          return deleteBlock(t, ln, gid);
+        P.bindDeleteButtons(propsEl, 'block-delete-group', ctx, function(t, ln, elId) {
+          return elId ? deleteBlock(t, ln, elId) : t;
         });
         P.bindDeleteButtons(propsEl, 'block-delete-link', ctx, deleteLink);
         return;
@@ -473,9 +575,33 @@ window.MA.modules.blockBeta = (function() {
             '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">種別: ' + escHtml(el.kind) + (el.parentId ? ' (親: ' + escHtml(el.parentId) + ')' : '') + '</div>' +
             P.fieldHtml('ID', 'block-edit-id', el.id) +
             (el.kind === 'block' ? P.fieldHtml('Label', 'block-edit-label', el.label !== el.id ? el.label : '') : '') +
+            P.connectButtonHtml('block-edit-connect') +
             P.dangerButtonHtml('block-edit-delete', '削除');
 
           var elLine = el.line, elId = el.id, elKind = el.kind;
+          P.bindConnectButton('block-edit-connect', el.kind === 'group' ? 'group' : 'block', el.id,
+            function(fromId, toId) { return addLink(ctx.getMmdText(), fromId, toId, ''); });
+          // The ID field used to be rendered without a handler: it looked
+          // editable, accepted typing, and threw the value away on blur.
+          var idInput = document.getElementById('block-edit-id');
+          if (idInput) {
+            idInput.addEventListener('change', function() {
+              var next = this.value.trim();
+              if (!next || next === elId) { this.value = elId; return; }
+              var updated = updateBlockId(ctx.getMmdText(), elLine, elId, next);
+              if (updated === ctx.getMmdText()) {
+                // Refused — the id is taken, or the shape was not recognised.
+                // Putting the old value back is the only signal the panel has;
+                // leaving the typed text in place would claim a rename happened.
+                this.value = elId;
+                return;
+              }
+              window.MA.history.pushHistory();
+              ctx.setMmdText(updated);
+              window.MA.selection.clearSelection();
+              ctx.onUpdate();
+            });
+          }
           if (el.kind === 'block') {
             document.getElementById('block-edit-label').addEventListener('change', function() {
               window.MA.history.pushHistory();
@@ -573,6 +699,6 @@ window.MA.modules.blockBeta = (function() {
     },
     addBlock: addBlock, addNestedBlock: addNestedBlock, addLink: addLink,
     deleteBlock: deleteBlock, deleteLink: deleteLink, deletionImpact: deletionImpact,
-    updateBlockLabel: updateBlockLabel, updateLink: updateLink, setColumns: setColumns,
+    updateBlockLabel: updateBlockLabel, updateBlockId: updateBlockId, updateLink: updateLink, setColumns: setColumns,
   };
 })();

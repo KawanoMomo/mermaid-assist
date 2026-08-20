@@ -150,6 +150,11 @@ window.MA.modules.requirementDiagram = (function() {
         return m[1] !== elementName && m[2] !== elementName;
       });
     }
+    // 末尾に空行を残さない。
+    // 末尾の要素を消すと、それを区切っていた空行だけが残る。図としては同じでも
+    // Git の差分には無意味な行が乗る。テンプレートは21図種すべて末尾改行なしで
+    // 揃っているので、削除だけがその規約を破っていた (R9 ワークフロー適合)。
+    while (lines.length > 1 && lines[lines.length - 1].trim() === '') lines.pop();
     return lines.join('\n');
   }
 
@@ -242,6 +247,13 @@ window.MA.modules.requirementDiagram = (function() {
   }
 
   return {
+    // 図の中での識別子は `name`。`id` は要件番号 (REQ-001) という別の値で、
+    // mermaid の SVG にも関係行にも出てこない。
+    //
+    // これを知らずに `id` を使うと、存在しない端点で関係を作ったり、
+    // オーバーレイが1件も当たらなかったりする — このセッションで実際に
+    // 2回踏んだので、モジュール自身に名乗らせる。
+    identityField: 'name',
     type: 'requirementDiagram',
     displayName: 'Requirement',
     REQ_TYPES: REQ_TYPES,
@@ -283,14 +295,15 @@ window.MA.modules.requirementDiagram = (function() {
       ].join('\n');
     },
     buildOverlay: function(svgEl, parsedData, overlayEl) {
-      if (!overlayEl) return;
-      while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
-      if (!svgEl) return;
-      var viewBox = svgEl.getAttribute('viewBox');
-      if (viewBox) overlayEl.setAttribute('viewBox', viewBox);
-      var svgW = svgEl.getAttribute('width'); var svgH = svgEl.getAttribute('height');
-      if (svgW) overlayEl.setAttribute('width', svgW);
-      if (svgH) overlayEl.setAttribute('height', svgH);
+      // requirementDiagram は DSL の名前をそのまま id にする (prefix なし)。
+      // 選択種別は requirement / element の2種類あるので、要素の kind を使う。
+      // identityField (上で宣言) を単一の出所にする。ここに 'name' を
+      // 書き直すと、識別子がどれかを言う場所が2つになり、片方だけ直る余地が
+      // 生まれる — このリポジトリが繰り返してきた欠陥の形そのもの。
+      var idField = window.MA.modules.requirementDiagram.identityField;
+      window.MA.overlayGeom.buildNodeOverlay(svgEl, parsedData, overlayEl, {
+        keyOf: function(e) { return e[idField]; },
+      });
     },
     renderProps: function(selData, parsedData, propsEl, ctx) {
       if (!propsEl) return;

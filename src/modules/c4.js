@@ -479,6 +479,7 @@ window.MA.modules.c4 = (function() {
     var tech = isContainer ? (args[2] || '') : '';
     var descr = isContainer ? (args[3] || '') : (args[2] || '');
 
+    var oldId = id;
     if (field === 'id') id = value;
     else if (field === 'label') label = value;
     else if (field === 'tech') tech = value;
@@ -486,7 +487,60 @@ window.MA.modules.c4 = (function() {
     else if (field === 'kind') matchedKind = value;
 
     lines[idx] = indent + formatArgs(matchedKind, id, label, descr, tech, hadBrace) + comment;
+    if (field === 'id' && value !== oldId) renameRelRefs(lines, oldId, value);
     return lines.join('\n');
+  }
+
+  // Renaming an element's id without rewriting the Rel lines that point at it
+  // leaves a dangling reference. C4 is the worst case of that: mermaid.parse
+  // still returns OK and only mermaid.render throws ("Cannot read properties of
+  // undefined (reading 'x')"), so the preview goes blank with no usable message.
+  //
+  // Only the first two arguments of a Rel line are ids; label/technology/descr
+  // are free text and must not be touched even when they contain the old id.
+  //
+  // The rewrite is done on the raw argument slices rather than by re-serialising
+  // the parsed args. Re-serialising would drop the quotes around the label (and
+  // any argument past the fourth, which updateRel does not model), so a rename
+  // would quietly reformat parts of the line that the user never edited.
+  function renameRelRefs(lines, oldId, newId) {
+    for (var j = 0; j < lines.length; j++) {
+      var lineComment = commentSuffix(lines[j]);
+      var t = stripComment(lines[j]).trim();
+      var lineIndent = lines[j].match(/^(\s*)/)[1];
+      for (var k = 0; k < REL_KINDS.length; k++) {
+        var rr = new RegExp('^' + REL_KINDS[k] + '\\s*\\(\\s*(.+)\\s*\\)\\s*$');
+        var m = t.match(rr);
+        if (!m) continue;
+        var raw = splitArgsRaw(m[1]);
+        var changed = false;
+        for (var a = 0; a < 2 && a < raw.length; a++) {
+          if (decodeArg(raw[a].trim().replace(/^"|"$/g, '')) === oldId) {
+            raw[a] = raw[a].replace(/^(\s*)(.*?)(\s*)$/, '$1' + encodeArg(newId) + '$3');
+            changed = true;
+          }
+        }
+        if (changed) {
+          lines[j] = lineIndent + REL_KINDS[k] + '(' + raw.join(',') + ')' + lineComment;
+        }
+        break;
+      }
+    }
+  }
+
+  // Same top-level comma split as parseArgs, but returns the untouched source
+  // slices (quotes, padding and all) so a caller can rewrite one argument in
+  // place without reformatting the rest.
+  function splitArgsRaw(str) {
+    var out = [], cur = '', inQ = false;
+    for (var i = 0; i < str.length; i++) {
+      var c = str[i];
+      if (c === '"') { inQ = !inQ; cur += c; continue; }
+      if (c === ',' && !inQ) { out.push(cur); cur = ''; continue; }
+      cur += c;
+    }
+    out.push(cur);
+    return out;
   }
 
   function updateRel(text, lineNum, field, value) {
@@ -515,6 +569,18 @@ window.MA.modules.c4 = (function() {
     if (tech) parts.push('"' + encodeArg(tech) + '"');
     lines[idx] = indent + matchedKind + '(' + parts.join(', ') + ')' + comment;
     return lines.join('\n');
+  }
+
+  // The label C4 actually drew for a shape. Its <text> runs start with the
+  // stereotype (`<<person>>`), which is decoration rather than the name.
+  function c4LabelOf(gEl) {
+    if (!gEl || !gEl.querySelectorAll) return null;
+    var texts = gEl.querySelectorAll('text');
+    for (var i = 0; i < texts.length; i++) {
+      var t = (texts[i].textContent || '').trim();
+      if (t && !/^<<.*>>$/.test(t)) return t;
+    }
+    return null;
   }
 
   function renderProps(selData, parsedData, propsEl, ctx) {
@@ -773,14 +839,47 @@ window.MA.modules.c4 = (function() {
       ].join('\n');
     },
     buildOverlay: function(svgEl, parsedData, overlayEl) {
-      if (!overlayEl) return;
-      while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
-      if (!svgEl) return;
-      var viewBox = svgEl.getAttribute('viewBox');
-      if (viewBox) overlayEl.setAttribute('viewBox', viewBox);
-      var svgW = svgEl.getAttribute('width'); var svgH = svgEl.getAttribute('height');
-      if (svgW) overlayEl.setAttribute('width', svgW);
-      if (svgH) overlayEl.setAttribute('height', svgH);
+      var geom = window.MA.overlayGeom;
+      geom.syncViewport(svgEl, overlayEl);
+      if (!overlayEl || !svgEl || !parsedData) return;
+
+      // C4 は要素を識別できる属性を何も出さない。実測すると <g> の class は
+      // どの要素も 'person-man' で、id も data-* も無い。手がかりは描画された
+      // ラベルだけで、同じラベルの要素が2つあると区別できない。
+      //
+      // 出現順で決め打つこともできるが、mermaid のレンダラが宣言順を保つ保証は
+      // 無く、Boundary のネストで簡単に崩れる。**間違った要素を選ぶのは、
+      // 選べないより悪い。**
+      //
+      // そこで、図の中でラベルが一意な要素だけ当たり判定を作る。重複している
+      // ラベルの要素はプロパティ一覧から編集する (それは常に正しく引ける)。
+      var count = {};
+      var byLabel = {};
+      for (var i = 0; i < parsedData.elements.length; i++) {
+        var e = parsedData.elements[i];
+        if (!e.label) continue;
+        count[e.label] = (count[e.label] || 0) + 1;
+        byLabel[e.label] = e;
+      }
+
+      var groups = svgEl.querySelectorAll('g');
+      var used = {};
+      for (var g = 0; g < groups.length; g++) {
+        var label = c4LabelOf(groups[g]);
+        if (!label || count[label] !== 1 || used[label]) continue;
+        var el = byLabel[label];
+        if (!el) continue;
+        var box = geom.boxInSvgSpace(svgEl, groups[g]);
+        if (!box) continue;
+        used[label] = true;
+        overlayEl.appendChild(geom.hitRect(document, box, {
+          id: el.id,
+          kind: 'element',
+          line: el.line,
+          selected: window.MA.selection.isSelected(el.id),
+          className: 'overlay-node',
+        }));
+      }
     },
     renderProps: renderProps,
     operations: {

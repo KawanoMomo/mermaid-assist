@@ -48,7 +48,7 @@ window.MA.modules.sequence = (function() {
       // participant/actor
       var pMatch = trimmed.match(/^(participant|actor)\s+(\S+)(?:\s+as\s+(.+))?$/);
       if (pMatch) {
-        var p = { kind: pMatch[1], id: pMatch[2], label: pMatch[3] ? pMatch[3].trim() : pMatch[2], line: lineNum };
+        var p = { kind: pMatch[1], id: pMatch[2], label: pMatch[3] ? decodeLabel(pMatch[3].trim()) : pMatch[2], line: lineNum };
         result.elements.push(p);
         continue;
       }
@@ -163,8 +163,61 @@ window.MA.modules.sequence = (function() {
     return window.MA.textUpdater.insertAfter(text, insertAfterLine, newLine);
   }
 
-  function deleteParticipant(text, lineNum) {
-    return window.MA.textUpdater.deleteLine(text, lineNum);
+  // _msgEnds: メッセージ行の両端を返す。メッセージでなければ null。
+  // `A->>+B: text` の活性化マーカー (+ / -) は id ではないので落とす。
+  function _msgEnds(trimmed) {
+    for (var ai = 0; ai < ARROW_TYPES.length; ai++) {
+      var pos = trimmed.indexOf(ARROW_TYPES[ai]);
+      if (pos <= 0) continue;
+      var from = trimmed.slice(0, pos).trim();
+      var rest = trimmed.slice(pos + ARROW_TYPES[ai].length);
+      var ci = rest.indexOf(':');
+      var to = (ci >= 0 ? rest.slice(0, ci) : rest).trim();
+      return { from: from.replace(/^[+-]/, '').trim(), to: to.replace(/^[+-]/, '').trim() };
+    }
+    return null;
+  }
+
+  // deleteParticipant: participantId を渡すと、その participant を**図から**消す。
+  //
+  // 宣言行だけ消しても意味がない。mermaid は `A->>B` の参照だけで B を作るので、
+  // 一覧からは消えたのに図には残り続ける。パーサ (宣言行を見る) と mermaid
+  // (参照を見る) で「存在する」の述語が食い違っていた。
+  // class / er / state で先に直したのと同じ形に揃える。
+  //
+  // 巻き添えを最小にするため、消すのは「その participant を端に持つ行」だけ。
+  // Note の対象が複数あるときは、対象から外すだけで note 自体は残す。
+  function deleteParticipant(text, lineNum, participantId) {
+    if (!participantId) return window.MA.textUpdater.deleteLine(text, lineNum);
+    var lines = text.split('\n');
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var trimmed = lines[i].trim();
+
+      var decl = trimmed.match(/^(participant|actor)\s+(\S+)/);
+      if (decl && decl[2] === participantId) continue;
+
+      var ends = _msgEnds(trimmed);
+      if (ends && (ends.from === participantId || ends.to === participantId)) continue;
+
+      var act = trimmed.match(/^(activate|deactivate)\s+(\S+)\s*$/);
+      if (act && act[2] === participantId) continue;
+
+      var note = trimmed.match(/^(Note\s+(?:over|left of|right of)\s+)([^:]+)(:.*)$/i);
+      if (note) {
+        var targets = note[2].split(',').map(function(x) { return x.trim(); });
+        var kept = targets.filter(function(x) { return x !== participantId; });
+        if (kept.length === 0) continue;
+        if (kept.length !== targets.length) {
+          var indent = lines[i].slice(0, lines[i].length - lines[i].trimStart().length);
+          out.push(indent + note[1] + kept.join(',') + note[3]);
+          continue;
+        }
+      }
+
+      out.push(lines[i]);
+    }
+    return out.join('\n');
   }
 
   function moveParticipantUp(text, lineNum) {
@@ -230,6 +283,15 @@ window.MA.modules.sequence = (function() {
     return lines.join('\n');
   }
 
+  // ラベルの  は mermaid が実体参照の開始として食う。「A#1」は図に「A」だけが
+  // 出る (エラーは出ない)。mermaid 自身の実体  に逃がすとそのまま描かれる。
+  function encodeLabel(s) {
+    return String(s === undefined || s === null ? '' : s).replace(/#/g, '#35;');
+  }
+  function decodeLabel(s) {
+    return String(s === undefined || s === null ? '' : s).replace(/#35;/g, '#');
+  }
+
   function updateParticipant(text, lineNum, field, value) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
@@ -238,12 +300,64 @@ window.MA.modules.sequence = (function() {
     var m = trimmed.match(/^(participant|actor)\s+(\S+)(?:\s+as\s+(.+))?$/);
     if (!m) return text;
     var kind = m[1], id = m[2], label = m[3] ? m[3].trim() : id;
+    var oldId = id;
     if (field === 'kind') kind = value;
     else if (field === 'id') id = value;
     else if (field === 'label') label = value;
     var indent = lines[idx].match(/^(\s*)/)[1];
-    lines[idx] = indent + kind + ' ' + id + (label && label !== id ? ' as ' + label : '');
+    lines[idx] = indent + kind + ' ' + id + (label && label !== id ? ' as ' + encodeLabel(label) : '');
+    if (field === 'id' && value !== oldId) renameParticipantRefs(lines, oldId, value, idx);
     return lines.join('\n');
+  }
+
+  // Rewrite every reference to a renamed participant. Without this, mermaid
+  // implicitly declares a participant for the stale id: parse and render both
+  // succeed and the diagram silently grows an extra lifeline that the user never
+  // added, with no error anywhere.
+  //
+  // Only the id positions are rewritten. Message bodies, note text and the
+  // participant's own `as` alias are free text and keep whatever they said, even
+  // when that text happens to equal the old id.
+  function renameParticipantRefs(lines, oldId, newId, skipIdx) {
+    for (var j = 0; j < lines.length; j++) {
+      if (j === skipIdx) continue;
+      var indent = lines[j].match(/^(\s*)/)[1];
+      var trimmed = lines[j].trim();
+      if (!trimmed || trimmed.indexOf('%%') === 0) continue;
+
+      // activate / deactivate <id>
+      var act = trimmed.match(/^(activate|deactivate)\s+(\S+)\s*$/);
+      if (act) {
+        if (act[2] === oldId) lines[j] = indent + act[1] + ' ' + newId;
+        continue;
+      }
+
+      // note <position> <id>[,<id>]: text — same shape as parseSequence's noteMatch
+      var note = trimmed.match(/^(note\s+(?:left of|right of|over)\s+)([^:]+)(:.*)$/i);
+      if (note) {
+        var targets = note[2].split(',').map(function(s) {
+          return s.trim() === oldId ? s.replace(oldId, newId) : s;
+        });
+        lines[j] = indent + note[1] + targets.join(',') + note[3];
+        continue;
+      }
+
+      // message: <from><arrow><to>: label — arrow scan mirrors parseSequence
+      var arrow = null, arrowPos = -1;
+      for (var ai = 0; ai < ARROW_TYPES.length; ai++) {
+        var pos = trimmed.indexOf(ARROW_TYPES[ai]);
+        if (pos > 0) { arrow = ARROW_TYPES[ai]; arrowPos = pos; break; }
+      }
+      if (!arrow) continue;
+      var from = trimmed.slice(0, arrowPos);
+      var rest = trimmed.slice(arrowPos + arrow.length);
+      var colonIdx = rest.indexOf(':');
+      var to = colonIdx >= 0 ? rest.slice(0, colonIdx) : rest;
+      var tail = colonIdx >= 0 ? rest.slice(colonIdx) : '';
+      if (from.trim() === oldId) from = from.replace(oldId, newId);
+      if (to.trim() === oldId) to = to.replace(oldId, newId);
+      lines[j] = indent + from + arrow + to + tail;
+    }
   }
 
   // addMessage: append at end of file (or within last block)

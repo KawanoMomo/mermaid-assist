@@ -5,6 +5,8 @@ window.MA.properties = (function() {
     getMmdText: function() { return ''; },
     setMmdText: function(t) {},
     onUpdate: function() {},
+    onStatus: function() {},
+    elementExists: function(id) { return true; },
     moduleUpdater: function(text, lineNum, field, value) { return text; },
   };
 
@@ -13,6 +15,12 @@ window.MA.properties = (function() {
     state.setMmdText = opts.setMmdText;
     state.onUpdate = opts.onUpdate || function() {};
     state.moduleUpdater = opts.moduleUpdater;
+    // Redraw the status bar. Connection mode is announced there, and the
+    // selection callback does not cover it.
+    state.onStatus = opts.onStatus || function() {};
+    // 「その id はいま図に存在するか」。接続モードは編集をまたいで生き残るので、
+    // 始点が消えていないかを繋ぐ直前に確かめる必要がある。
+    state.elementExists = opts.elementExists || function() { return true; };
   }
 
   // bindTextField: text input の change で moduleUpdater を呼んでテキスト更新
@@ -22,8 +30,65 @@ window.MA.properties = (function() {
     el.addEventListener('change', function() {
       window.MA.history.pushHistory();
       var newText = state.moduleUpdater(state.getMmdText(), lineNum, field, el.value);
+      // Renaming the selected element left the selection on the old id, so the
+      // panel you were typing in switched to 「見つかりません」 the moment the
+      // rename landed. Carry the selection over to the new id instead.
+      if (field === 'id' && el.value) followRename(el.value);
       state.setMmdText(newText);
       state.onUpdate();
+    });
+  }
+
+  // Move any selection that pointed at the renamed element to its new id,
+  // keeping the selection type as it was.
+  function followRename(newId) {
+    var sel = window.MA.selection.getSelected();
+    if (sel.length !== 1) return;
+    window.MA.selection.setSelected([{ type: sel[0].type, id: newId }]);
+  }
+
+  // "Draw an edge from here" — starts connection mode. The next click on the
+  // canvas picks the target.
+  //
+  // Without this the only way to add an edge was two dropdowns and a button in
+  // the properties panel: five interactions, and the dropdowns get unusable once
+  // the diagram has thirty elements. `connection-mode.js` and every module's
+  // operations.connect() were already there, just never wired to anything.
+  function connectButtonHtml(id) {
+    return '<button id="' + id + '" style="width:100%;background:var(--bg-tertiary);' +
+      'color:var(--text-primary);border:1px solid var(--accent);padding:5px 8px;' +
+      'border-radius:4px;cursor:pointer;font-size:12px;margin-bottom:8px;">' +
+      'ここから線を引く</button>';
+  }
+
+  // Wire the button to connection mode. `connect` receives (fromId, toId) and
+  // is expected to return the new text.
+  function bindConnectButton(id, fromType, fromId, connect) {
+    bindEvent(id, 'click', function() {
+      window.MA.connectionMode.startConnectionMode(fromType, fromId, function(src, target) {
+        if (!target || !target.id || target.id === src.id) return;
+        // The source has to still exist. Connection mode survives editing, so
+        // deleting the start element in the editor and then clicking a target
+        // drew a line from a node that is no longer in the diagram — mermaid
+        // then re-creates it implicitly and a deleted element reappears with no
+        // error anywhere.
+        if (!state.elementExists(src.id)) {
+          state.onStatus();
+          return;
+        }
+        window.MA.history.pushHistory();
+        state.setMmdText(connect(src.id, target.id));
+        window.MA.selection.clearSelection();
+        state.onUpdate();
+      });
+      // Keeping the source selected would make the highlight say "this is what
+      // you are editing" while the next click actually means "connect to this".
+      //
+      // clearSelection fires the selection callback (panel + overlay redraw) but
+      // not the status bar, and the status bar is where the mode is announced.
+      window.MA.selection.clearSelection();
+      state.onUpdate();
+      if (state.onStatus) state.onStatus();
     });
   }
 
@@ -107,10 +172,16 @@ window.MA.properties = (function() {
     // button itself. The row's text is ellipsised at the panel width, so a warning
     // placed in the label is frequently invisible.
     var delLabel = opts.deleteLabel ? escHtml(opts.deleteLabel) : '✕';
-    var delTitle = opts.deleteTitle ? ' title="' + escHtml(opts.deleteTitle) + '"' : '';
+    // 記号だけのボタンは、何を消すのか読み取れない。deleteTitle を渡していない
+    // モジュールにも行のラベルから既定の説明を与える。ホバーとスクリーンリーダの
+    // 両方でここが唯一の手がかりになる。
+    var delTitleText = opts.deleteTitle || ('「' + String(opts.label) + '」を削除');
+    var delTitle = ' title="' + escHtml(delTitleText) + '"';
     var deleteBtn = opts.deleteClass ?
       '<button class="' + opts.deleteClass + '"' + dataAttrs + delTitle + ' style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">' + delLabel + '</button>' : '';
-    return '<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
+    // 行に印を付ける。一覧の絞り込みはこの印を見て行を選ぶので、
+    // 各モジュールは何もしなくてよい (41か所がこの関数を通る)。
+    return '<div class="ma-list-row" style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
       '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + fontStyle + '">' + escHtml(opts.label) + sub + '</div>' +
       selectBtn + deleteBtn +
     '</div>';
@@ -264,7 +335,14 @@ window.MA.properties = (function() {
         if (isNaN(endLn) || endLn <= 0) return;
       }
       window.MA.history.pushHistory();
-      var newText = useEndLine ? deleteFn(ctx.getMmdText(), ln, endLn) : deleteFn(ctx.getMmdText(), ln);
+      // The row already carries which element it stands for; hand it to the module.
+      // block-beta puts several blocks on one line (`a["Sensor"] b["MCU"] c["Actuator"]`),
+      // so a line number alone cannot say which one the user pressed — resolving by
+      // line picks the first every time, and pressing b's ✕ deletes a.
+      var elId = btn.getAttribute('data-element-id');
+      var newText = useEndLine
+        ? deleteFn(ctx.getMmdText(), ln, endLn)
+        : deleteFn(ctx.getMmdText(), ln, elId);
       ctx.setMmdText(newText);
       ctx.onUpdate();
     });
@@ -299,6 +377,8 @@ window.MA.properties = (function() {
     actionBarHtml: actionBarHtml,
     // Event helpers
     bindEvent: bindEvent,
+    connectButtonHtml: connectButtonHtml,
+    bindConnectButton: bindConnectButton,
     bindActionBar: bindActionBar,
     bindAllByClass: bindAllByClass,
     bindSelectButtons: bindSelectButtons,
