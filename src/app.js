@@ -1880,9 +1880,54 @@ function init() {
   });
 
   // ── Keyboard shortcuts ───────────────────────────────────────────────────
+  // Every hit area currently on the overlay, in the order it was drawn — which
+  // is the order the module walked its parsed elements, i.e. document order.
+  //
+  // Reading the overlay rather than re-deriving a list from parsedData means the
+  // keyboard walk and the mouse click always agree on what is selectable and on
+  // what kind each thing is. A second list would drift from the first, which is
+  // the failure mode this codebase keeps producing.
+  function selectableItems() {
+    var items = [];
+    if (!overlayEl) return items;
+    var tagged = overlayEl.querySelectorAll('[data-element-id][data-element-kind]');
+    for (var i = 0; i < tagged.length; i++) {
+      items.push({
+        kind: tagged[i].getAttribute('data-element-kind'),
+        id: tagged[i].getAttribute('data-element-id'),
+      });
+    }
+    // gantt predates the data-element-* convention and tags bars with task ids.
+    var bars = overlayEl.querySelectorAll('.overlay-bar[data-task-id]');
+    for (var b = 0; b < bars.length; b++) {
+      items.push({ kind: 'task', id: bars[b].getAttribute('data-task-id') });
+    }
+    return items;
+  }
+
+  // Move the selection to the next/previous element without touching the mouse.
+  // There was no keyboard route between elements at all: selecting the twelfth
+  // node meant finding it in the diagram or scrolling the properties list to it,
+  // every time.
+  function selectAdjacentElement(dir) {
+    var items = selectableItems();
+    if (!items.length) return false;
+    var cur = -1;
+    for (var i = 0; i < items.length; i++) {
+      if (window.MA.selection.isSelected(items[i].id)) { cur = i; break; }
+    }
+    var next = cur < 0
+      ? (dir > 0 ? 0 : items.length - 1)
+      : (cur + dir + items.length) % items.length;
+    // setSelected, not selectItem: selectItem toggles, and landing back on the
+    // current element (a one-element diagram) would deselect instead of staying.
+    window.MA.selection.setSelected([{ type: items[next].kind, id: items[next].id }]);
+    return true;
+  }
+
   document.addEventListener('keydown', function(e) {
     var tag = e.target.tagName;
-    var inInput = (tag === 'INPUT' || tag === 'SELECT');
+    var inInput = (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA');
     var inEditor = (e.target === editorEl);
 
     if (e.key === 'Escape' && seqDragState && seqDragState.dragging) {
@@ -1919,6 +1964,13 @@ function init() {
       scheduleRefresh();
     } else if (e.key === 'Escape') {
       window.MA.selection.clearSelection();
+    } else if (!inEditor && !inInput && !e.ctrlKey && !e.altKey && !e.metaKey &&
+               (e.key === 'ArrowDown' || e.key === 'ArrowRight' ||
+                e.key === 'ArrowUp' || e.key === 'ArrowLeft')) {
+      // 次/前の要素へ。順序は図の宣言順 (オーバーレイの描画順) なので、
+      // どの図種でも「上から順に見ていく」動きになる。
+      var forward = (e.key === 'ArrowDown' || e.key === 'ArrowRight');
+      if (selectAdjacentElement(forward ? 1 : -1)) e.preventDefault();
     } else if (e.ctrlKey && e.key === 'a' && !inEditor && !inInput) {
       e.preventDefault();
       window.MA.selection.setSelected(parsed.tasks.map(function(t) { return { type: 'task', id: t.id }; }));
