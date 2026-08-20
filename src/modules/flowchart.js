@@ -677,57 +677,42 @@ window.MA.modules.flowchart = (function() {
   }
 
   // ── UI: buildOverlay ──
+  // Match SVG nodes back to parsed nodes by mermaid's own element id
+  // (`flowchart-<id>-<n>`), not by label text.
+  //
+  // Label matching took the *first* element whose label equalled the rendered
+  // text, so on a chart with two nodes both labelled 確認 the second one's
+  // overlay answered for the first: clicking the lower node selected the upper
+  // one. Ids are what the DSL and the renderer actually agree on.
+  //
+  // The rect geometry goes through overlayGeom.boxInSvgSpace — the raw getBBox()
+  // this used before is in the node's own coordinate system, so every rect
+  // landed on top of the others at the local origin.
   function buildOverlay(svgEl, parsedData, overlayEl) {
-    if (!overlayEl) return;
-    while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
-    if (!svgEl || !parsedData) return;
-    var viewBox = svgEl.getAttribute('viewBox');
-    if (viewBox) overlayEl.setAttribute('viewBox', viewBox);
-    var svgW = svgEl.getAttribute('width');
-    var svgH = svgEl.getAttribute('height');
-    if (svgW) overlayEl.setAttribute('width', svgW);
-    if (svgH) overlayEl.setAttribute('height', svgH);
+    var geom = window.MA.overlayGeom;
+    geom.syncViewport(svgEl, overlayEl);
+    if (!overlayEl || !svgEl || !parsedData) return;
 
-    var NS = 'http://www.w3.org/2000/svg';
-    // Find node elements in flowchart SVG: they have class containing 'node'
+    var byId = {};
+    for (var pi = 0; pi < parsedData.elements.length; pi++) {
+      byId[parsedData.elements[pi].id] = parsedData.elements[pi];
+    }
+
     var svgNodes = svgEl.querySelectorAll('.node');
     for (var ni = 0; ni < svgNodes.length; ni++) {
       var gNode = svgNodes[ni];
-      // Mermaid node g element's id often contains the flowchart node id
-      var svgId = gNode.id || gNode.getAttribute('id') || '';
-      // Match by label text content
-      var tEls = gNode.querySelectorAll('text, .nodeLabel, foreignObject');
-      var nodeText = '';
-      for (var ti = 0; ti < tEls.length; ti++) {
-        var tt = tEls[ti].textContent.trim();
-        if (tt) { nodeText = tt; break; }
-      }
-
-      // Find matching element in parsedData
-      var matched = null;
-      for (var pi = 0; pi < parsedData.elements.length; pi++) {
-        if (parsedData.elements[pi].label === nodeText) { matched = parsedData.elements[pi]; break; }
-      }
+      var nodeId = geom.idFromSvgNodeId(gNode.getAttribute('id'), 'flowchart');
+      var matched = nodeId ? byId[nodeId] : null;
       if (!matched) continue;
-
-      try {
-        var bb = gNode.getBBox();
-        var rect = document.createElementNS(NS, 'rect');
-        rect.setAttribute('x', bb.x - 2);
-        rect.setAttribute('y', bb.y - 2);
-        rect.setAttribute('width', bb.width + 4);
-        rect.setAttribute('height', bb.height + 4);
-        rect.setAttribute('fill', 'transparent');
-        rect.setAttribute('stroke', window.MA.selection.isSelected(matched.id) ? '#7ee787' : 'none');
-        rect.setAttribute('stroke-width', '2');
-        rect.setAttribute('stroke-dasharray', '4');
-        rect.setAttribute('cursor', 'pointer');
-        rect.setAttribute('class', 'overlay-node');
-        rect.setAttribute('data-element-id', matched.id);
-        rect.setAttribute('data-element-kind', 'node');
-        rect.setAttribute('data-line', matched.line);
-        overlayEl.appendChild(rect);
-      } catch (e) { /* skip */ }
+      var box = geom.boxInSvgSpace(svgEl, gNode);
+      if (!box) continue;
+      overlayEl.appendChild(geom.hitRect(document, box, {
+        id: matched.id,
+        kind: 'node',
+        line: matched.line,
+        selected: window.MA.selection.isSelected(matched.id),
+        className: 'overlay-node',
+      }));
     }
   }
 

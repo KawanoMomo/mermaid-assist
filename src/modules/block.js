@@ -338,15 +338,38 @@ window.MA.modules.blockBeta = (function() {
         '  b --> c',
       ].join('\n');
     },
+    // Click-to-select on the diagram itself. Until now this only sized the
+    // overlay and produced no hit areas, so block-beta could only be edited
+    // through the properties list — the list is fine for four blocks and
+    // unusable for forty.
+    //
+    // mermaid's block renderer puts the DSL id straight onto the node group
+    // (`<g class="node ..." id="a">`), so the mapping is exact and does not need
+    // to go through label text.
     buildOverlay: function(svgEl, parsedData, overlayEl) {
-      if (!overlayEl) return;
-      while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
-      if (!svgEl) return;
-      var viewBox = svgEl.getAttribute('viewBox');
-      if (viewBox) overlayEl.setAttribute('viewBox', viewBox);
-      var svgW = svgEl.getAttribute('width'); var svgH = svgEl.getAttribute('height');
-      if (svgW) overlayEl.setAttribute('width', svgW);
-      if (svgH) overlayEl.setAttribute('height', svgH);
+      var geom = window.MA.overlayGeom;
+      geom.syncViewport(svgEl, overlayEl);
+      if (!overlayEl || !svgEl || !parsedData) return;
+
+      var byId = {};
+      for (var i = 0; i < parsedData.elements.length; i++) {
+        byId[parsedData.elements[i].id] = parsedData.elements[i];
+      }
+
+      var nodes = svgEl.querySelectorAll('.node');
+      for (var n = 0; n < nodes.length; n++) {
+        var el = byId[nodes[n].getAttribute('id')];
+        if (!el) continue;
+        var box = geom.boxInSvgSpace(svgEl, nodes[n]);
+        if (!box) continue;
+        overlayEl.appendChild(geom.hitRect(document, box, {
+          id: el.id,
+          kind: el.kind === 'group' ? 'group' : 'block',
+          line: el.line,
+          selected: window.MA.selection.isSelected(el.id),
+          className: 'overlay-node',
+        }));
+      }
     },
     renderProps: function(selData, parsedData, propsEl, ctx) {
       if (!propsEl) return;

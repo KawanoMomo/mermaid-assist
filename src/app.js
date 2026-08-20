@@ -867,7 +867,12 @@ async function refresh(skipRender) {
         pendingAutoFit = false;
         var previewContainer = document.getElementById('preview-container');
         var containerW = previewContainer.clientWidth - 32;
-        var fitZoom = containerW / naturalW;
+        var containerH = previewContainer.clientHeight - 32;
+        // Both axes. Width alone blew up tall diagrams: a flowchart TD is narrow
+        // and long, so fitting its width scaled it to 294% and pushed the last
+        // node off the bottom of the pane — "fit" that needs scrolling to read.
+        var fitZoom = Math.min(containerW / naturalW,
+          containerH > 0 ? containerH / naturalH : Infinity);
         fitZoom = Math.max(0.25, Math.min(3.0, fitZoom));
         zoom = Math.round(fitZoom * 100) / 100;
       }
@@ -1496,9 +1501,17 @@ function init() {
       e.stopPropagation();
       return;
     }
-    // Non-draggable sequence elements (message / note / group) — commit
-    // selection synchronously. selectItem handles toggle-off on re-click.
-    if (seqKind && seqId && (seqKind === 'message' || seqKind === 'note' || seqKind === 'group')) {
+    // Any other overlay element that names what it is and which element it
+    // stands for — commit selection synchronously. selectItem handles toggle-off
+    // on re-click.
+    //
+    // This used to be a whitelist of 'message' | 'note' | 'group', which is the
+    // set sequence.js happens to emit. flowchart's buildOverlay emits
+    // data-element-kind="node", so its five overlay rects fell through to the
+    // "clicked empty space" branch below and *cleared* the selection: clicking a
+    // node in the diagram looked broken rather than unimplemented. A module that
+    // labels its overlay elements should not also have to be listed here.
+    if (seqKind && seqId) {
       window.MA.selection.selectItem(seqKind, seqId, e.shiftKey);
       e.preventDefault();
       e.stopPropagation();

@@ -30,13 +30,17 @@ test.describe('図種切替時のフィット', () => {
       const m = await page.evaluate(() => {
         const svg = document.querySelector('#preview-svg svg');
         const box = document.getElementById('preview-container');
-        return { w: svg.getBoundingClientRect().width, c: box.clientWidth };
+        const r = svg.getBoundingClientRect();
+        return { w: r.width, h: r.height, W: box.clientWidth, H: box.clientHeight };
       });
-      // はみ出さない
-      expect(m.w).toBeLessThanOrEqual(m.c);
-      // かつサムネイルのように小さすぎない。切替のたびにズーム操作が要る状態を防ぐ。
-      // 拡大上限 (3.0倍) に当たる小さな図があるので下限はゆるめに取る。
-      expect(m.w).toBeGreaterThan(m.c * 0.35);
+      // 縦にも横にもはみ出さない
+      expect(m.w).toBeLessThanOrEqual(m.W + 1);
+      expect(m.h).toBeLessThanOrEqual(m.H + 1);
+      // かつ、どちらかの軸はペインを使い切っている。
+      // 縦長の図 (flowchart TD / stateDiagram) は縦が制約になるので幅は余る。
+      // 幅だけを見るとその余りを「小さすぎる」と誤判定する。
+      // 実測ではどの図種も片軸が 0.94〜0.96 に達する。
+      expect(Math.max(m.w / m.W, m.h / m.H)).toBeGreaterThan(0.9);
     });
   }
 });

@@ -14,6 +14,7 @@ const sourceFiles = [
   'src/core/connection-mode.js',
   'src/ui/properties.js',
   'src/ui/rich-label-editor.js',
+  'src/ui/overlay-geom.js',
   'src/modules/gantt.js',
   'src/modules/sequence.js',
   'src/modules/flowchart.js',
