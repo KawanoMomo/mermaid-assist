@@ -225,15 +225,11 @@ window.MA.modules.erDiagram = (function() {
 
   // ── UI ──
   function buildOverlay(svgEl, parsedData, overlayEl) {
-    if (!overlayEl) return;
-    while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
-    if (!svgEl) return;
-    var viewBox = svgEl.getAttribute('viewBox');
-    if (viewBox) overlayEl.setAttribute('viewBox', viewBox);
-    var svgW = svgEl.getAttribute('width');
-    var svgH = svgEl.getAttribute('height');
-    if (svgW) overlayEl.setAttribute('width', svgW);
-    if (svgH) overlayEl.setAttribute('height', svgH);
+    // id="entity-<エンティティ名>-<連番>"
+    window.MA.overlayGeom.buildNodeOverlay(svgEl, parsedData, overlayEl, {
+      prefix: 'entity',
+      kindOf: function() { return 'entity'; },
+    });
   }
 
   function renderProps(selData, parsedData, propsEl, ctx) {

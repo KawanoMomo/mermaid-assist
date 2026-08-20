@@ -287,17 +287,12 @@ window.MA.modules.state = (function() {
 
   // ── UI ──
   function buildOverlay(svgEl, parsedData, overlayEl) {
-    if (!overlayEl) return;
-    while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
-    if (!svgEl || !parsedData) return;
-    var viewBox = svgEl.getAttribute('viewBox');
-    if (viewBox) overlayEl.setAttribute('viewBox', viewBox);
-    var svgW = svgEl.getAttribute('width');
-    var svgH = svgEl.getAttribute('height');
-    if (svgW) overlayEl.setAttribute('width', svgW);
-    if (svgH) overlayEl.setAttribute('height', svgH);
-
-    // Minimal overlay: no clickable highlight for now (property panel is primary UI)
+    // id="state-<状態名>-<連番>"。start/end の擬似ノード (state-root_start-0) は
+    // parsedData に存在しないので、id 照合の時点で自然に外れる。
+    window.MA.overlayGeom.buildNodeOverlay(svgEl, parsedData, overlayEl, {
+      prefix: 'state',
+      kindOf: function() { return 'state'; },
+    });
   }
 
   function renderProps(selData, parsedData, propsEl, ctx) {

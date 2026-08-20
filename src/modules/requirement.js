@@ -283,14 +283,11 @@ window.MA.modules.requirementDiagram = (function() {
       ].join('\n');
     },
     buildOverlay: function(svgEl, parsedData, overlayEl) {
-      if (!overlayEl) return;
-      while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
-      if (!svgEl) return;
-      var viewBox = svgEl.getAttribute('viewBox');
-      if (viewBox) overlayEl.setAttribute('viewBox', viewBox);
-      var svgW = svgEl.getAttribute('width'); var svgH = svgEl.getAttribute('height');
-      if (svgW) overlayEl.setAttribute('width', svgW);
-      if (svgH) overlayEl.setAttribute('height', svgH);
+      // requirementDiagram は DSL の名前をそのまま id にする (prefix なし)。
+      // 選択種別は requirement / element の2種類あるので、要素の kind を使う。
+      window.MA.overlayGeom.buildNodeOverlay(svgEl, parsedData, overlayEl, {
+        keyOf: function(e) { return e.name; },
+      });
     },
     renderProps: function(selData, parsedData, propsEl, ctx) {
       if (!propsEl) return;

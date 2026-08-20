@@ -315,15 +315,13 @@ window.MA.modules.classDiagram = (function() {
 
   // ── UI ──
   function buildOverlay(svgEl, parsedData, overlayEl) {
-    if (!overlayEl) return;
-    while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
-    if (!svgEl) return;
-    var viewBox = svgEl.getAttribute('viewBox');
-    if (viewBox) overlayEl.setAttribute('viewBox', viewBox);
-    var svgW = svgEl.getAttribute('width');
-    var svgH = svgEl.getAttribute('height');
-    if (svgW) overlayEl.setAttribute('width', svgW);
-    if (svgH) overlayEl.setAttribute('height', svgH);
+    // mermaid のクラスノードは id="classId-<クラス名>-<連番>"。
+    // クリックで選択できるようにする (プロパティ一覧だけだとクラスが増えたとき
+    // 目的のクラスを探すのに一覧をスクロールし続けることになる)。
+    window.MA.overlayGeom.buildNodeOverlay(svgEl, parsedData, overlayEl, {
+      prefix: 'classId',
+      kindOf: function() { return 'class'; },
+    });
   }
 
   function renderProps(selData, parsedData, propsEl, ctx) {

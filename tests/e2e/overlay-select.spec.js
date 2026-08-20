@@ -25,7 +25,10 @@ async function ready(page, type) {
 // flowchart が出す 'node' は「空白をクリックした」扱いで選択解除に落ちていた。
 // 「無い」より「あるように見えて動かない」方が悪い。
 test.describe('オーバーレイのクリック選択', () => {
-  for (const [type, expectLabel] of [['flowchart', 'Start'], ['block-beta', 'a']]) {
+  for (const [type, expectLabel] of [
+    ['flowchart', 'Start'], ['block-beta', 'a'], ['classDiagram', 'Animal'],
+    ['erDiagram', 'CUSTOMER'], ['stateDiagram', 'Idle'], ['requirementDiagram', 'sample_req'],
+  ]) {
     test(`${type}: 図の要素をクリックすると選択される`, async ({ page }) => {
       await ready(page, type);
       const before = await page.locator('#props-content').textContent();
@@ -99,4 +102,25 @@ test.describe('オーバーレイのクリック選択', () => {
       expect(p.dy).toBeLessThan(4);
     }
   });
+});
+
+// 選択したときに、その要素だけに枠が出ること。
+// requirementDiagram は SVG の id (name) と要素の id フィールドが別物なので、
+// 判定を el.id でやると「クリックした要素は選択されていない」ことになり
+// 枠が永久に出ない。
+test.describe('選択のハイライト', () => {
+  for (const type of ['flowchart', 'block-beta', 'classDiagram', 'erDiagram',
+                      'stateDiagram', 'requirementDiagram']) {
+    test(`${type}: クリックした要素だけに枠が出る`, async ({ page }) => {
+      await ready(page, type);
+      const els = page.locator('#overlay-layer [data-element-id]');
+      expect(await els.count()).toBeGreaterThan(0);
+      await els.first().click({ force: true });
+      await page.waitForTimeout(900);
+      const outlined = await page.evaluate(() =>
+        [...document.querySelectorAll('#overlay-layer [data-element-id]')]
+          .filter(r => r.getAttribute('stroke') !== 'none').length);
+      expect(outlined).toBe(1);
+    });
+  }
 });

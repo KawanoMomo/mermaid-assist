@@ -95,10 +95,64 @@ window.MA.overlayGeom = (function() {
     return rect;
   }
 
+  // The whole node overlay for a diagram that renders one `<g class="node">` per
+  // element. Every such module was writing the same twenty lines, and the three
+  // that had written them had each got a different part of it wrong.
+  //
+  // opts.prefix : mermaid's element-id prefix (`flowchart-A-0` → 'flowchart').
+  //               Omit when the renderer uses the DSL id verbatim (block-beta,
+  //               requirementDiagram).
+  // opts.kindOf : element → the selection kind the module's renderProps expects.
+  //               Defaults to the parsed element's own `kind`.
+  // opts.keyOf  : element → the value mermaid used as the SVG id, and
+  //               opts.idOf → the value the module's renderProps looks a
+  //               selection up by. Both default to `id`. requirementDiagram
+  //               needs them: it renders `<g id="sample_req">` from the DSL
+  //               *name*, while the element's `id` field is a separate
+  //               user-facing value (`REQ-001`). Matching on `id` there found
+  //               nothing and produced no overlay at all.
+  function buildNodeOverlay(svgEl, parsedData, overlayEl, opts) {
+    opts = opts || {};
+    var keyOf = opts.keyOf || function(e) { return e.id; };
+    var idOf = opts.idOf || keyOf;
+    syncViewport(svgEl, overlayEl);
+    if (!overlayEl || !svgEl || !parsedData || !parsedData.elements) return;
+
+    var byId = {};
+    for (var i = 0; i < parsedData.elements.length; i++) {
+      var e = parsedData.elements[i];
+      var k = e && keyOf(e);
+      if (k) byId[k] = e;
+    }
+
+    var nodes = svgEl.querySelectorAll(opts.selector || '.node');
+    for (var n = 0; n < nodes.length; n++) {
+      var svgId = nodes[n].getAttribute('id');
+      var key = opts.prefix ? idFromSvgNodeId(svgId, opts.prefix) : svgId;
+      var el = key ? byId[key] : null;
+      if (!el) continue;
+      var box = boxInSvgSpace(svgEl, nodes[n]);
+      if (!box) continue;
+      var selId = idOf(el);
+      overlayEl.appendChild(hitRect(document, box, {
+        id: selId,
+        kind: opts.kindOf ? opts.kindOf(el) : el.kind,
+        line: el.line,
+        // The same value the click writes into the selection, not el.id — in
+        // requirementDiagram those differ, so asking about el.id would report
+        // "not selected" for the element the user just clicked and the
+        // highlight would never appear.
+        selected: window.MA.selection.isSelected(selId),
+        className: 'overlay-node',
+      }));
+    }
+  }
+
   return {
     boxInSvgSpace: boxInSvgSpace,
     idFromSvgNodeId: idFromSvgNodeId,
     syncViewport: syncViewport,
     hitRect: hitRect,
+    buildNodeOverlay: buildNodeOverlay,
   };
 })();
