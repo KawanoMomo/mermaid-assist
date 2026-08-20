@@ -240,10 +240,25 @@ window.MA.modules.mindmap = (function() {
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var parsedNodes = parseMindmap(text).elements;
+    // id を渡されたのに一致する要素が無いなら、何もしない。
+    //
+    // 以前は「一致した要素がルートなら拒否」だけを見ていたので、**存在しない id**
+    // を渡すとガードのループが一度も当たらず、行番号だけで削除が進んでいた。
+    // ルートの行を渡せば子ごと全部消える。実測: deleteNode(t, 2, 'root') は
+    // 実際の id が `__n0` なので素通りし、本文が `mindmap` だけになった。
+    // 「押した要素が見つからない」ときに消すより、何もしない方が安全。
+    var target = null;
     for (var pi = 0; pi < parsedNodes.length; pi++) {
       var n = parsedNodes[pi];
-      var matches = nodeId ? (n.id === nodeId) : (n.line === lineNum);
-      if (matches && n.parentId === null) return text;
+      if (nodeId ? (n.id === nodeId) : (n.line === lineNum)) { target = n; break; }
+    }
+    if (nodeId && !target) return text;
+    // ルートは子がいる間だけ守る。子が孤立して mermaid が
+    // 「There can be only one root」で落ちるのを避けるためのガードなので、
+    // 子が1つも無いなら拒否する理由が無い (空の mindmap は mermaid が受け付ける)。
+    if (target && target.parentId === null) {
+      var hasChild = parsedNodes.some(function(x) { return x.parentId === target.id; });
+      if (hasChild) return text;
     }
     var curIndent = lines[idx].match(/^(\s*)/)[1].length;
     var endIdx = idx + 1;

@@ -20,6 +20,12 @@ window.MA.modules.timeline = (function() {
       var trimmed = lines[i].trim();
       if (!trimmed || trimmed.indexOf('%%') === 0) continue;
       if (/^timeline/.test(trimmed)) continue;
+      // アクセシビリティ用のメタデータは図に描かれない。
+      //
+      // `accTitle:` / `accDescr:` は読み上げ用の情報で、mermaid は SVG のテキストに
+      // 出さない。ここで拾うと一覧に幽霊の「期間」が並び、その ✕ を押せば読み上げ用の
+      // 情報が消える。実描画に接地させたレビュー (R13) で見つけた。
+      if (/^acc(Title|Descr)\s*:/.test(trimmed)) continue;
 
       var tm = trimmed.match(TITLE_RE);
       if (tm) { result.meta.title = tm[1].trim(); continue; }

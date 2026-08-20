@@ -122,3 +122,79 @@ describe('CRLF 文書への挿入', function() {
     expect(out.indexOf('\r')).toBe(-1);
   });
 });
+
+describe('timeline: アクセシビリティ指示行', function() {
+  // R13 (未知構文) が実描画に接地させて見つけたもの。
+  // `accTitle:` / `accDescr:` は mermaid のアクセシビリティ用メタデータで、
+  // 図には描かれない。timeline はこれを「期間」として拾い、一覧に幽霊が出ていた。
+  // 幽霊の ✕ を押せば読み上げ用の情報が消える。
+  //
+  // 最初この検査を `e.label || e.id` で書いて通したが、period に label は無く
+  // `e.id` (= `__p_0`) を見ていただけの**恒真なテスト**だった。
+  // period の実際のフィールドは `period` と `events`。
+  var T = window.MA.modules.timeline;
+
+  test('PR-14: accTitle が期間として拾われない', function() {
+    var t = 'timeline\n    accTitle: 読み上げ用タイトル\n    title 歴史\n    2020 : 出来事A\n';
+    var periods = T.parse(t).elements.map(function(e) { return e.period; });
+    expect(periods).toEqual(['2020']);
+  });
+
+  test('PR-15: accDescr も同じ', function() {
+    var t = 'timeline\n    accDescr: 読み上げ用の説明\n    title 歴史\n    2020 : 出来事A\n';
+    var periods = T.parse(t).elements.map(function(e) { return e.period; });
+    expect(periods).toEqual(['2020']);
+  });
+
+  test('PR-16: 本文には残す (消さない)', function() {
+    var t = 'timeline\n    accTitle: 読み上げ用タイトル\n    title 歴史\n    2020 : 出来事A\n';
+    var els = T.parse(t).elements;
+    var out = T.deleteElement(t, els[0].line);
+    expect(out).toContain('accTitle: 読み上げ用タイトル');
+  });
+
+  test('PR-17: 普通の期間は今までどおり拾う', function() {
+    var t = 'timeline\n    title 歴史\n    2020 : 出来事A\n    2021 : 出来事B\n';
+    var periods = T.parse(t).elements.map(function(e) { return e.period; });
+    expect(periods).toEqual(['2020', '2021']);
+  });
+});
+
+describe('mindmap: ルートの削除ガードの範囲', function() {
+  // R14 (境界) が見つけたもの。
+  //
+  // ルート削除を拒否しているのは「子が孤立して mermaid が
+  // There can be only one root で落ちる」のを避けるため。ただしガードが
+  // 根拠より広く効いていて、**子が1つも無いルートまで消せない**。
+  // 実測では `mindmap\n` だけの本文を mermaid は受け付けるので、
+  // 子が無いときに拒否する理由が無い。図を白紙に戻す手段がテキスト編集しか
+  // 無かった。
+  var MM = window.MA.modules.mindmap;
+
+  test('PR-18: 子があるルートは今までどおり消せない', function() {
+    var t = 'mindmap\n  root\n    子1\n';
+    var rootId = MM.parse(t).elements[0].id;
+    expect(MM.deleteNode(t, 2, rootId)).toBe(t);
+  });
+
+  test('PR-18b: 存在しない id を渡されたら何もしない', function() {
+    // 以前はここでガードのループが一度も当たらず、行番号だけで削除が進んで
+    // ルートごと子が全部消えていた。実測では本文が `mindmap` だけになった。
+    var t = 'mindmap\n  root\n    子1\n';
+    expect(MM.deleteNode(t, 2, 'root')).toBe(t);
+    expect(MM.deleteNode(t, 3, '存在しないid')).toBe(t);
+  });
+
+  test('PR-19: 子が無いルートは消せる', function() {
+    var t = 'mindmap\n  root\n';
+    var rootId = MM.parse(t).elements[0].id;
+    var out = MM.deleteNode(t, 2, rootId);
+    expect(out).not.toBe(t);
+    expect(MM.parse(out).elements.length).toBe(0);
+  });
+
+  test('PR-20: 消したあとも図種の宣言は残る', function() {
+    var t = 'mindmap\n  root\n';
+    expect(MM.deleteNode(t, 2, 'root')).toContain('mindmap');
+  });
+});
