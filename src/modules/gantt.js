@@ -460,6 +460,18 @@ window.MA.modules.gantt = (function() {
   // ── Calibration (ADR-010) ─────────────────────────────────────────────────
   var calibration = { pxPerDay: 0, originX: 0, baseDate: '', barRects: [] };
 
+  // A milestone rect, identified without relying on getBBox: mermaid marks it with
+  // the `milestone` class, and hand-authored SVG may only carry the rotation. Both
+  // signals mean the box we would measure is not aligned to the timeline.
+  function isMilestoneRect(rect) {
+    if (!rect) return false;
+    var cls = rect.getAttribute && rect.getAttribute('class');
+    if (cls && cls.indexOf('milestone') !== -1) return true;
+    var tr = rect.getAttribute && rect.getAttribute('transform');
+    if (tr && /rotate\s*\(/.test(tr)) return true;
+    return false;
+  }
+
   function calibrateScale(svgEl, parsedData) {
     calibration = { pxPerDay: 0, originX: 0, baseDate: '', barRects: [] };
     if (!svgEl || !parsedData || !parsedData.tasks || parsedData.tasks.length === 0) return;
@@ -482,6 +494,12 @@ window.MA.modules.gantt = (function() {
     var candidateRects = []; // {x, y, width, height, yCenter}
     for (var cri = 0; cri < allRects.length; cri++) {
       try {
+        // Milestones are drawn as a 20x20 rect rotated 45deg. getBBox() reports the
+        // un-rotated box, so its x is the corner of a square that has nothing to do
+        // with the milestone's date — feeding it to the fit makes pxPerDay wrong for
+        // every other task. Measured: one milestone moved pxPerDay 19.267 -> 18.571
+        // and shifted an unrelated task's computed date by a day.
+        if (isMilestoneRect(allRects[cri])) continue;
         var rbb = allRects[cri].getBBox();
         // Task bars: reasonable height (8-40px), not too wide (< 95% of chart), minimum width
         if (rbb.height >= 8 && rbb.height <= 40 && rbb.width >= 3 && rbb.width < chartWidth * 0.95) {
@@ -613,6 +631,7 @@ window.MA.modules.gantt = (function() {
     moveTaskWithinSection: moveTaskWithinSection,
     moveTaskToSection: moveTaskToSection,
     calibrateScale: calibrateScale,
+    isMilestoneRect: isMilestoneRect,
     pxToDate: pxToDate,
     dateToPx: dateToPx,
     getCalibration: function() { return calibration; },

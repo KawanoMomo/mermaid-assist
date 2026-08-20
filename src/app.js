@@ -1017,7 +1017,7 @@ function applyMermaidConfig(parsedData) {
       width = Math.max(fitW, Math.round(days * DETAIL_PX_PER_DAY));
     }
     var axis = ganttAxisFor(days || 1);
-    cfg.gantt = { useWidth: width, tickInterval: axis.tickInterval };
+    cfg.gantt = { useWidth: width, tickInterval: axis.tickInterval, axisFormat: axis.axisFormat };
   }
   mermaid.initialize(cfg);
 }
