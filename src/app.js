@@ -479,7 +479,11 @@ modules.gantt = {
         // missing start to the chart origin, which reads as a task that silently
         // jumped to the beginning of the project.
         if (!start) {
+          // フォーカスを移すだけでは何が起きたのか分からない。
+          // 押しても何も起きないのが一番困る (C4 は「ID と Label は必須」と言うのに
+          // こちらだけ無言だった) ので、理由をその場で言う。
           if (startEl) startEl.focus();
+          showTransient('開始日を入れてください — 日付が無いとバーを置く位置が決まりません', 4000);
           return;
         }
         var end = milestone ? '0d' : ((endEl && endEl.value) || start);
@@ -1103,7 +1107,18 @@ async function refresh(skipRender) {
     // Guard: if a newer render was started, discard this result
     if (thisRender !== renderCounter) return;
 
+    // 描き上がりが本物か確かめる。
+    //
+    // 上限を上げてもさらに超える場合がある。mermaid はそのときも例外を投げず
+    // プレースホルダーを返すので、こちらで見分けないと「保存したつもりで空同然の
+    // 画像を受け取る」ことになる。間違った成果物が黙って出るのが一番悪い。
+    if (window.MA.diagnose && window.MA.diagnose.isOversizePlaceholder(renderResult.svg)) {
+      throw new Error('本文が長すぎて mermaid が図を描けません (' +
+        mmdText.length.toLocaleString() + ' 文字)。図を分割してください。');
+    }
+
     previewSvgEl.innerHTML = renderResult.svg;
+    previewStale = false;
 
     var svgEl = previewSvgEl.querySelector('svg');
     if (svgEl) {
@@ -1202,6 +1217,7 @@ async function refresh(skipRender) {
     // 成り立たなくなっていた。参照したい図が消えるので、結局エディタだけ見て打つことになる。
     //
     // 図が既に出ているなら、そのままにしてステータスと小さな帯だけでエラーを伝える。
+    previewStale = true;
     var hadDiagram = !!previewSvgEl.querySelector('svg');
     if (hadDiagram) {
       statusParseEl.textContent = 'Error';
@@ -1280,6 +1296,12 @@ function ganttStatusText(parsedData) {
 // 「保存できたのか」「いま何が消えたのか」を画面が何も言っていなかった。
 // 行を増やさずに済ませたいので、既存のステータス行を数秒だけ borrow する
 // (dragBlockedMsg が同じ枠を使っているのと同じやり方)。
+// いまプレビューに出ている図が、今の本文のものではないことを覚えておく。
+// 描画失敗時に直前の図を残すようにしたので、そのまま書き出すと
+// **編集していない内容**が成果物になる。図を残す判断自体は正しいので、
+// Export 側に「古い」という情報を伝える。
+var previewStale = false;
+
 var transientMsg = '';
 var transientUntil = 0;
 var transientTimer = null;
@@ -1554,7 +1576,10 @@ function ganttSpanDays(parsedData) {
 // and the mode lives in ganttViewMode rather than in mermaid's config — config
 // is derived state, so another initialize() elsewhere cannot lose it.
 function applyMermaidConfig(parsedData) {
-  var cfg = { startOnLoad: false, theme: 'dark', securityLevel: 'loose' };
+  // maxTextSize の既定は 50,000 文字で、超えると mermaid は**例外を投げずに**
+  // 「Maximum text size in diagram exceeded」とだけ書かれた小さな図を返す。
+  // 2900タスク (15万文字) のガントで実測したところ、この値を上げれば本物が描ける。
+  var cfg = { startOnLoad: false, theme: 'dark', securityLevel: 'loose', maxTextSize: 5000000 };
   if (currentModule && currentModule.type === 'gantt') {
     var fitW = previewContentWidth();
     var days = ganttSpanDays(parsedData);
@@ -1749,7 +1774,19 @@ async function saveFileAs() {
 }
 
 // ── Export Functions ───────────────────────────────────────────────────────
+// 古い図を書き出さない。
+//
+// 描画に失敗している間は直前の図を残しているので、そのまま Export すると
+// **編集していない内容**が成果物になる。帯で「古い」とは言っているが、
+// 書き出しはそれを見ていなかった (前回の修正が作った副作用)。
+function blockExportIfStale() {
+  if (!previewStale) return false;
+  showTransient('構文エラー中です。表示しているのは直前の図なので書き出しません', 5000);
+  return true;
+}
+
 function exportSVG() {
+  if (blockExportIfStale()) return;
   var svgEl = previewSvgEl.querySelector('svg');
   if (!svgEl) return;
   var clone = svgEl.cloneNode(true);
@@ -1783,6 +1820,7 @@ function svgToCanvas(transparent, callback) {
 }
 
 function exportPNG(transparent) {
+  if (blockExportIfStale()) return;
   svgToCanvas(transparent, function(canvas) {
     canvas.toBlob(function(blob) {
       var a = document.createElement('a');
@@ -1795,6 +1833,7 @@ function exportPNG(transparent) {
 }
 
 function exportClipboard() {
+  if (blockExportIfStale()) return;
   svgToCanvas(false, function(canvas) {
     canvas.toBlob(function(blob) {
       navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
@@ -2054,6 +2093,43 @@ function init() {
     ev.returnValue = '';
     return '';
   });
+
+  // 追加フォームで Enter を使えるようにする。
+  //
+  // 全図種で追加ボタンの click にしか紐付いておらず、10件追加するのに毎回
+  // マウスへ持ち替える必要があった。パネル幅は220pxで縦に長いので、ボタンが
+  // 画面外ならスクロールも加算される。学習コストを払っても速くならない形。
+  //
+  // 各モジュールを書き換える代わりに、パネル全体で Enter を拾い、その入力欄の
+  // **直後にある追加ボタン**を押す。追加ボタンはどの図種も文字が `+` で始まるか
+  // id が `add` を含むので、それを目印にする。
+  function findAddButtonAfter(input) {
+    var buttons = propsEl.querySelectorAll('button');
+    var seen = false;
+    for (var i = 0; i < buttons.length; i++) {
+      var btn = buttons[i];
+      var pos = input.compareDocumentPosition(btn);
+      // input より後ろにあるボタンだけ見る
+      if (!(pos & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+      var txt = (btn.textContent || '').trim();
+      var id = btn.id || '';
+      if (txt.charAt(0) === '+' || /add/i.test(id)) { seen = true; return btn; }
+    }
+    return seen ? null : null;
+  }
+
+  if (propsEl) {
+    propsEl.addEventListener('keydown', function(ev) {
+      if (ev.key !== 'Enter' || ev.isComposing) return;
+      var t = ev.target;
+      if (!t || t.tagName !== 'INPUT') return;
+      if (t.type !== 'text' && t.type !== 'date' && t.type !== 'number') return;
+      var btn = findAddButtonAfter(t);
+      if (!btn) return;
+      ev.preventDefault();
+      btn.click();
+    });
+  }
 
   var helpClose = document.getElementById('shortcut-help-close');
   if (helpClose) helpClose.addEventListener('click', function() { toggleShortcutHelp(false); });

@@ -64,6 +64,35 @@
     return '';
   }
 
+  // 描き上がりが本物か。
+  //
+  // mermaid はテキストが上限 (既定 50,000 文字) を超えると、**例外を投げずに**
+  // 「Maximum text size in diagram exceeded」とだけ書かれた小さな図を返す。
+  // しかも種別は元の図種ではなく flowchart-v2 になる。アプリはそれを本物として
+  // 扱い、ステータスに OK を出し、Export はその画像をそのまま書き出していた。
+  // 2900タスクの図を保存したつもりで、空同然の画像を無警告で受け取ることになる。
+  //
+  // 上限自体は設定で引き上げるが、引き上げた値をさらに超える場合もあるので、
+  // 描き上がりの側でも見分けられるようにしておく。
+  //
+  // 利用者が同じ文字列をラベルに書いている場合を誤判定しないよう、
+  // 「その文字しか無い」ことまで確かめる。
+  var OVERSIZE_TEXT = 'Maximum text size in diagram exceeded';
+
+  function isOversizePlaceholder(svgMarkup) {
+    if (!svgMarkup || typeof svgMarkup !== 'string') return false;
+    if (svgMarkup.indexOf(OVERSIZE_TEXT) < 0) return false;
+    // 描画要素が実質そのテキストだけであること。
+    var texts = svgMarkup.match(/<text[\s\S]*?<\/text>/g) || [];
+    if (texts.length > 1) return false;
+    var shapes = (svgMarkup.match(/<(path|rect|polygon|line|circle|ellipse)\b/g) || []).length;
+    return shapes === 0;
+  }
+
   window.MA = window.MA || {};
-  window.MA.diagnose = { diagnose: diagnose };
+  window.MA.diagnose = {
+    diagnose: diagnose,
+    isOversizePlaceholder: isOversizePlaceholder,
+    OVERSIZE_TEXT: OVERSIZE_TEXT,
+  };
 })();
