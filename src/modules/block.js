@@ -483,7 +483,7 @@ window.MA.modules.blockBeta = (function() {
           '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
             '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">ブロックを追加</label>' +
             P.fieldHtml('ID', 'block-add-id', '', '例: sensor') +
-            P.fieldHtml('Label', 'block-add-label', '', '省略可、IDと同じ') +
+            P.fieldHtml('ラベル', 'block-add-label', '', '省略可、IDと同じ') +
             P.selectFieldHtml('親グループ', 'block-add-parent', groupOpts) +
             P.primaryButtonHtml('block-add-btn', '+ ブロック追加') +
           '</div>' +
@@ -584,7 +584,7 @@ window.MA.modules.blockBeta = (function() {
             P.panelHeaderHtml(el.kind === 'group' ? 'block:' + el.id : el.id) +
             '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">種別: ' + escHtml(el.kind) + (el.parentId ? ' (親: ' + escHtml(el.parentId) + ')' : '') + '</div>' +
             P.fieldHtml('ID', 'block-edit-id', el.id) +
-            (el.kind === 'block' ? P.fieldHtml('Label', 'block-edit-label', el.label !== el.id ? el.label : '') : '') +
+            (el.kind === 'block' ? P.fieldHtml('ラベル', 'block-edit-label', el.label !== el.id ? el.label : '') : '') +
             P.connectButtonHtml('block-edit-connect') +
             P.dangerButtonHtml('block-edit-delete', '削除');
 

@@ -1313,6 +1313,13 @@ function showTransient(msg, ms) {
   renderStatus();
 }
 // ショートカット一覧の開閉。Escape でも閉じられる (閉じ方を探させない)。
+// 入力欄を抜けたときにフォーカスがどこにも残らないと、「いまどこにいるか」が
+// 画面から消える。矢印キーでの巡回は動くので実害は小さいが、戻し先を決めておく。
+function focusPreview() {
+  var pane = document.getElementById('preview-pane') || previewSvgEl;
+  if (pane && pane.focus) { pane.setAttribute('tabindex', '-1'); pane.focus(); }
+}
+
 function toggleShortcutHelp(force) {
   var box = document.getElementById('shortcut-help');
   if (!box) return;
@@ -1349,6 +1356,18 @@ function hideParseErrorBanner() {
   if (el) el.hidden = true;
 }
 
+// D1: いまどのファイルを触っているかを常に見えるようにする。
+//
+// 保存名は保存時に4秒だけ出て消えていたので、複数の図を並行して直す運用で
+// 「どこに上書きされるか」を確かめる手段がなかった。上書き保存を入れた以上、
+// これは安全に関わる情報になる。
+function updateDocumentTitle() {
+  var name = currentBaseName();
+  var dirty = hasUnsavedWork(mmdText, savedText,
+    currentModule && currentModule.template ? currentModule.template() : null);
+  document.title = (dirty ? '● ' : '') + name + '.mmd — MermaidAssist';
+}
+
 function renderStatus() {
   if (!statusInfoEl) return;
   if (transientMsg && Date.now() < transientUntil) {
@@ -1371,6 +1390,7 @@ function renderStatus() {
     return;
   }
   statusInfoEl.textContent = statusInfoText(parsed, currentModule && currentModule.type);
+  updateDocumentTitle();
 }
 
 // ── Properties Panel ───────────────────────────────────────────────────────
@@ -2131,6 +2151,9 @@ function init() {
     });
   }
 
+  var statusHelp = document.getElementById('status-help');
+  if (statusHelp) statusHelp.addEventListener('click', function() { toggleShortcutHelp(true); });
+
   var helpClose = document.getElementById('shortcut-help-close');
   if (helpClose) helpClose.addEventListener('click', function() { toggleShortcutHelp(false); });
   var helpBox = document.getElementById('shortcut-help');
@@ -2826,6 +2849,15 @@ function init() {
       saveFileAs();
     } else if (e.ctrlKey && e.key === 's') {
       e.preventDefault(); saveFile();
+    } else if (e.ctrlKey && (e.key === '0' || e.key === '9' || e.key === '+' ||
+                             e.key === '=' || e.key === '-')) {
+      // 拡大して細部を見る→全体に戻すは1日数十回。毎回ツールバーへ
+      // マウスを往復させていた (プレビュー中央から約400〜600px)。
+      e.preventDefault();
+      if (e.key === '0') setZoomFromUser(1.0);
+      else if (e.key === '9') zoomToFit();
+      else if (e.key === '-') setZoomFromUser(zoom - 0.1);
+      else setZoomFromUser(zoom + 0.1);
     } else if (e.ctrlKey && e.key === 'o') {
       e.preventDefault(); openFile();
     } else if (e.key === 'Delete' && !inInput && !inEditor) {
@@ -2855,6 +2887,7 @@ function init() {
                document.getElementById('shortcut-help') &&
                !document.getElementById('shortcut-help').hasAttribute('hidden')) {
       toggleShortcutHelp(false);
+      focusPreview();
     } else if (e.key === 'Escape') {
       // Escape has to get out of connection mode too. Without it the only way
       // to leave was to complete the edge — clicking anywhere else on the canvas

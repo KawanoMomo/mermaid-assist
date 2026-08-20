@@ -421,6 +421,18 @@ html, body {
 }
 #parse-error-banner[hidden] { display: none; }
 
+#status-help {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 2px;
+}
+#status-help:hover { color: var(--accent); }
+
 #statusbar {
   display: flex;
   align-items: center;
@@ -621,6 +633,8 @@ html, body {
         <tr><td>Ctrl+A</td><td>すべて選択</td></tr>
         <tr><td>Ctrl+C / Ctrl+V</td><td>選んでいる要素を複写 / 貼り付け</td></tr>
         <tr><td>Ctrl+Shift+C</td><td>図をクリップボードへ</td></tr>
+        <tr><td>Ctrl+0 / Ctrl+9</td><td>等倍 / 幅に合わせる</td></tr>
+        <tr><td>Ctrl++ / Ctrl+-</td><td>拡大 / 縮小</td></tr>
         <tr><td>Escape</td><td>選択解除 / 接続モードを中止</td></tr>
         <tr><td>?</td><td>この一覧を開閉</td></tr>
       </table>
@@ -631,6 +645,7 @@ html, body {
   <div id="statusbar">
     <span id="status-parse">Ready</span>
     <span id="status-info"></span>
+    <button id="status-help" title="キーボードショートカットを開く (?)">? ショートカット</button>
   </div>
 
 </div><!-- /#app -->

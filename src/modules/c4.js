@@ -671,7 +671,7 @@ window.MA.modules.c4 = (function() {
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">要素を追加</label>' +
           P.selectFieldHtml('Kind', 'c4-add-kind', kindOpts) +
           P.fieldHtml('ID', 'c4-add-id', '', '例: user1') +
-          P.fieldHtml('Label', 'c4-add-label', '', '例: Customer') +
+          P.fieldHtml('ラベル', 'c4-add-label', '', '例: Customer') +
           P.selectFieldHtml('親境界', 'c4-add-parent', parentOpts) +
           P.fieldHtml('Tech (Container系のみ)', 'c4-add-tech', '', '省略可') +
           P.fieldHtml('Description', 'c4-add-descr', '', '省略可') +
@@ -682,7 +682,7 @@ window.MA.modules.c4 = (function() {
           P.selectFieldHtml('Kind', 'c4-add-rel-kind', relKindOpts) +
           P.selectFieldHtml('From', 'c4-add-rel-from', elemIdOpts) +
           P.selectFieldHtml('To', 'c4-add-rel-to', elemIdOpts) +
-          P.fieldHtml('Label', 'c4-add-rel-label', '', '例: Uses') +
+          P.fieldHtml('ラベル', 'c4-add-rel-label', '', '例: Uses') +
           P.fieldHtml('Tech', 'c4-add-rel-tech', '', '省略可') +
           P.primaryButtonHtml('c4-add-rel-btn', '+ リレーション追加') +
         '</div>' +
@@ -760,7 +760,7 @@ window.MA.modules.c4 = (function() {
           P.panelHeaderHtml(el.id) +
           P.selectFieldHtml('Kind', 'c4-edit-kind', kOpts) +
           P.fieldHtml('ID', 'c4-edit-id', el.id) +
-          P.fieldHtml('Label', 'c4-edit-label', el.label) +
+          P.fieldHtml('ラベル', 'c4-edit-label', el.label) +
           P.fieldHtml('Tech', 'c4-edit-tech', el.tech || '') +
           P.fieldHtml('Description', 'c4-edit-descr', el.descr || '') +
           P.dangerButtonHtml('c4-edit-delete', el.isBoundary ? '削除（中の要素ごと）' : '削除');
@@ -794,7 +794,7 @@ window.MA.modules.c4 = (function() {
           P.selectFieldHtml('Kind', 'c4-edit-rel-kind', rOpts) +
           P.fieldHtml('From', 'c4-edit-rel-from', rel.from) +
           P.fieldHtml('To', 'c4-edit-rel-to', rel.to) +
-          P.fieldHtml('Label', 'c4-edit-rel-label', rel.label) +
+          P.fieldHtml('ラベル', 'c4-edit-rel-label', rel.label) +
           P.fieldHtml('Tech', 'c4-edit-rel-tech', rel.tech || '') +
           P.dangerButtonHtml('c4-edit-rel-delete', '削除');
         var rln = rel.line;

@@ -241,7 +241,7 @@ window.MA.modules.architectureBeta = (function() {
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">グループを追加</label>' +
           P.fieldHtml('ID', 'arch-add-g-id', '', '例: api') +
           P.selectFieldHtml('Icon', 'arch-add-g-icon', iconOpts) +
-          P.fieldHtml('Label', 'arch-add-g-label', '', '例: API Cluster') +
+          P.fieldHtml('ラベル', 'arch-add-g-label', '', '例: API Cluster') +
           P.selectFieldHtml('親グループ', 'arch-add-g-parent', groupOpts) +
           P.primaryButtonHtml('arch-add-g-btn', '+ グループ追加') +
         '</div>' +
@@ -249,7 +249,7 @@ window.MA.modules.architectureBeta = (function() {
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">サービスを追加</label>' +
           P.fieldHtml('ID', 'arch-add-s-id', '', '例: db') +
           P.selectFieldHtml('Icon', 'arch-add-s-icon', iconOpts) +
-          P.fieldHtml('Label', 'arch-add-s-label', '', '例: Database') +
+          P.fieldHtml('ラベル', 'arch-add-s-label', '', '例: Database') +
           P.selectFieldHtml('親グループ', 'arch-add-s-parent', groupOpts) +
           P.primaryButtonHtml('arch-add-s-btn', '+ サービス追加') +
         '</div>' +
@@ -333,7 +333,7 @@ window.MA.modules.architectureBeta = (function() {
           P.panelHeaderHtml(el.id) +
           P.fieldHtml('ID', 'arch-edit-id', el.id) +
           P.selectFieldHtml('Icon', 'arch-edit-icon', iconOpts2) +
-          P.fieldHtml('Label', 'arch-edit-label', el.label) +
+          P.fieldHtml('ラベル', 'arch-edit-label', el.label) +
           P.selectFieldHtml('親グループ', 'arch-edit-parent', groupOpts2) +
           P.dangerButtonHtml('arch-edit-delete', '削除');
         var ln = el.line;

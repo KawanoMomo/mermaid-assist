@@ -149,7 +149,7 @@ window.MA.modules.radarBeta = (function() {
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">カーブを追加</label>' +
           P.fieldHtml('ID', 'rd-add-id', '', '例: alice') +
-          P.fieldHtml('Label', 'rd-add-label', '', '例: Alice') +
+          P.fieldHtml('ラベル', 'rd-add-label', '', '例: Alice') +
           P.fieldHtml('Values (カンマ区切り)', 'rd-add-values', '', '軸の数に合わせる') +
           P.primaryButtonHtml('rd-add-btn', '+ カーブ追加') +
         '</div>' +
@@ -206,7 +206,7 @@ window.MA.modules.radarBeta = (function() {
       propsEl.innerHTML =
         P.panelHeaderHtml(c.label) +
         P.fieldHtml('ID', 'rd-edit-id', c.id) +
-        P.fieldHtml('Label', 'rd-edit-label', c.label) +
+        P.fieldHtml('ラベル', 'rd-edit-label', c.label) +
         P.fieldHtml('Values (カンマ区切り)', 'rd-edit-values', c.values.join(', ')) +
         P.dangerButtonHtml('rd-edit-delete', 'カーブ削除');
       var ln = c.line;

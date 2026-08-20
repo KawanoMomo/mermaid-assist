@@ -136,7 +136,7 @@ window.MA.modules.quadrantChart = (function() {
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">ポイントを追加</label>' +
-          P.fieldHtml('Label', 'qd-add-label', '', '例: Campaign A') +
+          P.fieldHtml('ラベル', 'qd-add-label', '', '例: Campaign A') +
           P.fieldHtml('X (0-1)', 'qd-add-x', '0.5') +
           P.fieldHtml('Y (0-1)', 'qd-add-y', '0.5') +
           P.primaryButtonHtml('qd-add-btn', '+ ポイント追加') +
@@ -198,7 +198,7 @@ window.MA.modules.quadrantChart = (function() {
       if (!pt) { propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">ポイントが見つかりません</p>'; return; }
       propsEl.innerHTML =
         P.panelHeaderHtml(pt.label) +
-        P.fieldHtml('Label', 'qd-edit-label', pt.label) +
+        P.fieldHtml('ラベル', 'qd-edit-label', pt.label) +
         P.fieldHtml('X (0-1)', 'qd-edit-x', String(pt.x)) +
         P.fieldHtml('Y (0-1)', 'qd-edit-y', String(pt.y)) +
         P.dangerButtonHtml('qd-edit-delete', 'ポイント削除');
