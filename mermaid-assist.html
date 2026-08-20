@@ -271,7 +271,13 @@ html, body {
 
 #preview-container {
   flex: 1;
-  overflow: auto;
+  /* The vertical gutter is reserved unconditionally so the usable width does not
+     change the moment a chart grows tall enough to need a scrollbar. Gantt's
+     overview mode measures this width before rendering, and with `auto` the
+     measurement was one render stale — the chart came out 6px too wide and grew a
+     horizontal scrollbar it did not need. */
+  overflow-x: auto;
+  overflow-y: scroll;
   position: relative;
   padding: 16px;
 }

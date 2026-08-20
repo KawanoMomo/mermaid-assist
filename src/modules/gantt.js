@@ -338,6 +338,73 @@ window.MA.modules.gantt = (function() {
     return lines.join('\n');
   }
 
+  // Days a duration token covers. mermaid accepts d/w/M/y (and h/s, which round to
+  // nothing useful here); anything else is not a duration.
+  function durationDays(token) {
+    if (!isDuration(token)) return null;
+    var n = parseInt(token, 10);
+    var unit = token.slice(String(n).length);
+    if (unit === 'd') return n;
+    if (unit === 'w') return n * 7;
+    if (unit === 'M') return Math.round(n * 30.44);
+    if (unit === 'y') return Math.round(n * 365.25);
+    return 0; // h / s / m — sub-day, contributes nothing to a day-grained span
+  }
+
+  // The real date range a chart covers, with `after` references and durations
+  // resolved the way mermaid resolves them. Reading startDate/endDate directly
+  // does not work: they hold raw tokens, so a chart written as
+  // `A :a1, 2026-01-01, 365d` / `B :a2, after a1, 365d` — the most ordinary way to
+  // write a gantt — exposes exactly one ISO date and looks like a single day.
+  // Returns null when no task has a resolvable anchor date.
+  function resolveSpan(parsedData) {
+    if (!parsedData || !parsedData.tasks || !parsedData.tasks.length) return null;
+    var addDays = window.MA.dateUtils.addDays;
+    var ends = {};   // task id -> resolved end date
+    var prevEnd = null;
+    var min = null, max = null;
+
+    for (var i = 0; i < parsedData.tasks.length; i++) {
+      var t = parsedData.tasks[i];
+      var start = null;
+
+      if (t.startDate && isDate(t.startDate)) {
+        start = t.startDate;
+      } else if (t.after && ends[t.after]) {
+        start = ends[t.after];
+      } else if (prevEnd) {
+        // No anchor of its own (bare duration, or an `after` we could not resolve):
+        // mermaid continues from the previous task.
+        start = prevEnd;
+      }
+      if (!start) continue; // nothing anchors this task yet
+
+      // `A :a1, 5d` puts the duration in startDate, not endDate — the parser fills
+      // positionally and there is no start to fill. Take whichever slot holds it.
+      var lengthToken = (t.endDate && !isDate(t.endDate)) ? t.endDate
+        : (t.startDate && !isDate(t.startDate)) ? t.startDate
+        : null;
+
+      var end = start;
+      if (t.endDate && isDate(t.endDate)) {
+        end = t.endDate;
+      } else if (lengthToken) {
+        var d = durationDays(lengthToken);
+        if (d !== null) end = addDays(start, d);
+      }
+
+      ends[t.id] = end;
+      prevEnd = end;
+      if (!min || start < min) min = start;
+      if (!max || end > max) max = end;
+    }
+
+    if (!min || !max) return null;
+    var days = window.MA.dateUtils.daysBetween(min, max);
+    if (!isFinite(days) || days < 0) return null;
+    return { min: min, max: max, days: Math.max(1, days) };
+  }
+
   // The lines a section owns: its own `section` line through the line before the
   // next section, blank lines at the end trimmed off. deleteSection also swallows
   // the blank line *before* the header; moveSection deliberately does not, because
@@ -663,7 +730,7 @@ window.MA.modules.gantt = (function() {
     addTask: addTask,
     deleteTask: deleteTask,
     sanitizeAfterDependencies: sanitizeAfterDependencies,
-    addSection: addSection, moveSection: moveSection,
+    addSection: addSection, moveSection: moveSection, resolveSpan: resolveSpan,
     deleteSection: deleteSection,
     updateGlobalSetting: updateGlobalSetting,
     moveTaskWithinSection: moveTaskWithinSection,

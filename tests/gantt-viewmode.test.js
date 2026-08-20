@@ -62,13 +62,15 @@ describe('Gantt 詳細モードの幅', function() {
 // なり、さらに ganttAxisFor(1) が '1week' を返すため 10 年チャートに週目盛が
 // 強制されて軸が過密になる (master より悪化する退行)。
 describe('C-2: duration 記法の混入で期間が潰れない', function() {
-  test('endDate が duration のタスクは期間計算から除外する', function() {
+  test('endDate が duration でも解決して期間に含める', function() {
     var p = { tasks: [
-      { startDate: '2026-04-01', endDate: '2026-04-15' },
-      { startDate: '2026-04-16', endDate: '5d' },
+      { id: 't1', startDate: '2026-04-01', endDate: '2026-04-15' },
+      { id: 't2', startDate: '2026-04-16', endDate: '5d' },
     ] };
-    // '5d' は無視。日付として有効な 04-01 / 04-15 / 04-16 の範囲で 15 日
-    expect(fns.ganttSpanDays(p)).toBe(15);
+    // 04-16 + 5d = 04-21 まで。04-01 から 20 日。
+    // 当初は「duration を除外する」応急処置だったが、resolveSpan で解決するように
+    // 根治したので、除外ではなく解決した値が正しい
+    expect(fns.ganttSpanDays(p)).toBe(20);
   });
 
   test('startDate が duration のタスクも除外する', function() {

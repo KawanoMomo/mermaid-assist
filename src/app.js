@@ -964,6 +964,24 @@ function renderProps() {
 }
 
 // ── Zoom ───────────────────────────────────────────────────────────────────
+// Any deliberate zoom leaves overview mode. There are six entry points into zoom
+// (the two buttons, fit, Ctrl+wheel, init, diagram switch); guarding only the
+// buttons left Ctrl+wheel — the primary gesture — stacking a CSS transform on top
+// of an already-fitted redraw, which is the double-shrink F4 warned about.
+// `setZoomFromUser` is that single guard; `setZoom` stays mechanical so fit and
+// init can set a value without changing the mode.
+function setZoomFromUser(z) {
+  if (currentModule && currentModule.type === 'gantt' && ganttViewMode === 'overview') {
+    setGanttViewMode('detail');
+    // Step off 100% in the direction asked for, rather than landing on it — the
+    // first click after leaving overview should visibly do something.
+    setZoom(z > zoom ? 1.1 : 0.9);
+    scheduleRefresh();
+    return;
+  }
+  setZoom(z);
+}
+
 function setZoom(z) {
   zoom = Math.max(0.25, Math.min(3.0, z));
   updateZoomLabel();
@@ -985,6 +1003,9 @@ function setZoom(z) {
 // "readable" were mutually exclusive. Controlling useWidth instead keeps the
 // font fixed and only changes how many pixels a day gets.
 var DETAIL_PX_PER_DAY = 24;
+// Chrome's maximum canvas dimension is 65,535px; stay clear of it so PNG export
+// and clipboard copy keep working on very long projects.
+var GANTT_MAX_WIDTH = 60000;
 var ganttViewMode = 'detail'; // 'detail' | 'overview'
 
 // The available width for a chart, minus padding and the vertical scrollbar. A
@@ -993,8 +1014,11 @@ var ganttViewMode = 'detail'; // 'detail' | 'overview'
 function previewContentWidth() {
   var c = document.getElementById('preview-container');
   if (!c) return 800;
-  var scrollbar = c.offsetWidth - c.clientWidth;
-  return Math.max(200, c.clientWidth - 32 - scrollbar);
+  // clientWidth already excludes the scrollbar, so subtracting it again left a
+  // permanent 6px gap. The real hazard is measuring before the render that first
+  // introduces the scrollbar; `overflow-y: scroll` on the container removes that
+  // by reserving the gutter unconditionally.
+  return Math.max(200, c.clientWidth - 32);
 }
 
 // Axis granularity has to move with the width: mermaid draws 10-12 ticks
@@ -1007,31 +1031,11 @@ function ganttAxisFor(days) {
 }
 
 function ganttSpanDays(parsedData) {
-  if (!parsedData || !parsedData.tasks || !parsedData.tasks.length) return 0;
-  // startDate/endDate hold the raw token, so '5d' and 'after a1' sit in the same
-  // field as a date. Comparing those as strings picks '5d' as the maximum (it
-  // sorts above '2026-…'), daysBetween then returns NaN, and the whole span
-  // collapses to a single day — which in turn forces a weekly tick interval onto
-  // a ten-year chart. Only ISO dates take part.
-  var isDate = window.MA.modules.gantt.DATE_RE;
-  var min = null, max = null;
-  for (var i = 0; i < parsedData.tasks.length; i++) {
-    var t = parsedData.tasks[i];
-    if (t.startDate && isDate.test(t.startDate)) {
-      if (!min || t.startDate < min) min = t.startDate;
-      if (!max || t.startDate > max) max = t.startDate;
-    }
-    if (t.endDate && isDate.test(t.endDate)) {
-      if (!min || t.endDate < min) min = t.endDate;
-      if (!max || t.endDate > max) max = t.endDate;
-    }
-  }
-  if (!min || !max) return 0;
-  var days = window.MA.dateUtils.daysBetween(min, max);
-  // A single-day task gives 0 here, but the span is still known — clamp to 1 so
-  // the width calculation has a denominator. Only an unparseable span means 0.
-  if (!isFinite(days) || days < 0) return 0;
-  return Math.max(1, days);
+  // Resolving `after` references and durations is the module's job — reading the
+  // raw startDate/endDate tokens here made the most ordinary gantt (a chain of
+  // `after X, Nd`) look like a single day.
+  var r = window.MA.modules.gantt.resolveSpan(parsedData);
+  return r ? r.days : 0;
 }
 
 // mermaid.initialize replaces the config rather than merging into it: passing
@@ -1046,7 +1050,10 @@ function applyMermaidConfig(parsedData) {
     var days = ganttSpanDays(parsedData);
     var width = fitW;
     if (ganttViewMode === 'detail' && days > 0) {
-      width = Math.max(fitW, Math.round(days * DETAIL_PX_PER_DAY));
+      // Chrome refuses a canvas wider than 65,535px, and PNG/clipboard export
+      // sizes its canvas from the SVG. Past that the export throws instead of
+      // producing a file, so the chart is capped even if that means fewer px/day.
+      width = Math.min(GANTT_MAX_WIDTH, Math.max(fitW, Math.round(days * DETAIL_PX_PER_DAY)));
     }
     cfg.gantt = { useWidth: width };
     // Only pin the axis when the span is actually known. Guessing a granularity
@@ -1289,13 +1296,10 @@ function init() {
   document.getElementById('btn-redo').addEventListener('click', function() { window.MA.history.redo(); });
 
   document.getElementById('btn-zoom-in').addEventListener('click', function() {
-    // Touching the zoom means the user wants to inspect, not overview.
-    if (ganttViewMode === 'overview') { setGanttViewMode('detail'); setZoom(1.0); scheduleRefresh(); return; }
-    setZoom(zoom + 0.1);
+    setZoomFromUser(zoom + 0.1);
   });
   document.getElementById('btn-zoom-out').addEventListener('click', function() {
-    if (ganttViewMode === 'overview') { setGanttViewMode('detail'); setZoom(1.0); scheduleRefresh(); return; }
-    setZoom(zoom - 0.1);
+    setZoomFromUser(zoom - 0.1);
   });
   document.getElementById('btn-zoom-fit').addEventListener('click', function() {
     zoomToFit();
@@ -1483,7 +1487,7 @@ function init() {
     if (e.ctrlKey) {
       e.preventDefault();
       var delta = e.deltaY < 0 ? 0.1 : -0.1;
-      setZoom(zoom + delta);
+      setZoomFromUser(zoom + delta);
     } else if (e.shiftKey && !e.ctrlKey) {
       // Shift+Wheel → horizontal scroll
       previewContainer.scrollLeft += e.deltaY;
