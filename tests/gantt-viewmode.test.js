@@ -54,3 +54,53 @@ describe('Gantt 詳細モードの幅', function() {
     expect(fns.DETAIL_PX_PER_DAY).toBeGreaterThan(0);
   });
 });
+
+// ── 敵対レビュー指摘 C-2 / C-3 ────────────────────────────────────────────
+// parsed.tasks[].startDate / endDate は生文字列で、'5d' や '0d' が混ざる。
+// 文字列比較で最大値を取ると '5d' > '2026-04-25' が true になり、そこから
+// daysBetween が NaN → span が 1 日に潰れる。詳細モードが概観モードと同じ幅に
+// なり、さらに ganttAxisFor(1) が '1week' を返すため 10 年チャートに週目盛が
+// 強制されて軸が過密になる (master より悪化する退行)。
+describe('C-2: duration 記法の混入で期間が潰れない', function() {
+  test('endDate が duration のタスクは期間計算から除外する', function() {
+    var p = { tasks: [
+      { startDate: '2026-04-01', endDate: '2026-04-15' },
+      { startDate: '2026-04-16', endDate: '5d' },
+    ] };
+    // '5d' は無視。日付として有効な 04-01 / 04-15 / 04-16 の範囲で 15 日
+    expect(fns.ganttSpanDays(p)).toBe(15);
+  });
+
+  test('startDate が duration のタスクも除外する', function() {
+    var p = { tasks: [
+      { startDate: '5d', endDate: '3d' },
+      { startDate: '2026-04-01', endDate: '2026-04-11' },
+    ] };
+    expect(fns.ganttSpanDays(p)).toBe(10);
+  });
+
+  test('after 依存だけの図は 0 (幅は概観幅にフォールバック)', function() {
+    var p = { tasks: [
+      { startDate: null, endDate: '5d', after: 'a1' },
+      { startDate: null, endDate: '3d', after: 'a2' },
+    ] };
+    expect(fns.ganttSpanDays(p)).toBe(0);
+  });
+
+  test('長期プロジェクトに duration が混ざっても期間が潰れない', function() {
+    var p = { tasks: [
+      { startDate: '2026-01-01', endDate: '2036-01-01' },
+      { startDate: '2026-02-01', endDate: '9d' },
+    ] };
+    // 10年 = 3653日。'9d' に奪われて 1 になってはいけない
+    expect(fns.ganttSpanDays(p)).toBeGreaterThan(3000);
+  });
+
+  test('C-3: 期間が正しければ 10 年チャートは 3month 目盛になる', function() {
+    var p = { tasks: [
+      { startDate: '2026-01-01', endDate: '2036-01-01' },
+      { startDate: '2026-02-01', endDate: '9d' },
+    ] };
+    expect(fns.ganttAxisFor(fns.ganttSpanDays(p)).tickInterval).toBe('3month');
+  });
+});

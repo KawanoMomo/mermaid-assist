@@ -872,7 +872,7 @@ async function refresh(skipRender) {
       overlayEl.style.transform = 'scale(' + zoom + ')';
       overlayEl.style.transformOrigin = 'top left';
     }
-    if (zoomDisplayEl) zoomDisplayEl.textContent = Math.round(zoom * 100) + '%';
+    updateZoomLabel();
 
     // Build overlay (skip during drag to prevent jitter)
     if (currentModule && svgEl && !dragState) {
@@ -950,7 +950,7 @@ function renderProps() {
 // ── Zoom ───────────────────────────────────────────────────────────────────
 function setZoom(z) {
   zoom = Math.max(0.25, Math.min(3.0, z));
-  if (zoomDisplayEl) zoomDisplayEl.textContent = Math.round(zoom * 100) + '%';
+  updateZoomLabel();
 
   if (previewSvgEl) {
     previewSvgEl.style.transform = 'scale(' + zoom + ')';
@@ -992,14 +992,30 @@ function ganttAxisFor(days) {
 
 function ganttSpanDays(parsedData) {
   if (!parsedData || !parsedData.tasks || !parsedData.tasks.length) return 0;
+  // startDate/endDate hold the raw token, so '5d' and 'after a1' sit in the same
+  // field as a date. Comparing those as strings picks '5d' as the maximum (it
+  // sorts above '2026-…'), daysBetween then returns NaN, and the whole span
+  // collapses to a single day — which in turn forces a weekly tick interval onto
+  // a ten-year chart. Only ISO dates take part.
+  var isDate = window.MA.modules.gantt.DATE_RE;
   var min = null, max = null;
   for (var i = 0; i < parsedData.tasks.length; i++) {
     var t = parsedData.tasks[i];
-    if (t.startDate && (!min || t.startDate < min)) min = t.startDate;
-    if (t.endDate && (!max || t.endDate > max)) max = t.endDate;
+    if (t.startDate && isDate.test(t.startDate)) {
+      if (!min || t.startDate < min) min = t.startDate;
+      if (!max || t.startDate > max) max = t.startDate;
+    }
+    if (t.endDate && isDate.test(t.endDate)) {
+      if (!min || t.endDate < min) min = t.endDate;
+      if (!max || t.endDate > max) max = t.endDate;
+    }
   }
   if (!min || !max) return 0;
-  return Math.max(1, window.MA.dateUtils.daysBetween(min, max) || 0);
+  var days = window.MA.dateUtils.daysBetween(min, max);
+  // A single-day task gives 0 here, but the span is still known — clamp to 1 so
+  // the width calculation has a denominator. Only an unparseable span means 0.
+  if (!isFinite(days) || days < 0) return 0;
+  return Math.max(1, days);
 }
 
 // mermaid.initialize replaces the config rather than merging into it: passing
@@ -1016,24 +1032,43 @@ function applyMermaidConfig(parsedData) {
     if (ganttViewMode === 'detail' && days > 0) {
       width = Math.max(fitW, Math.round(days * DETAIL_PX_PER_DAY));
     }
-    var axis = ganttAxisFor(days || 1);
-    cfg.gantt = { useWidth: width, tickInterval: axis.tickInterval, axisFormat: axis.axisFormat };
+    cfg.gantt = { useWidth: width };
+    // Only pin the axis when the span is actually known. Guessing a granularity
+    // from an unknown span is worse than leaving it out: d3 picks 10-12 ticks on
+    // its own, whereas a wrong '1week' on a decade-long chart draws 500+ of them.
+    if (days > 0) {
+      var axis = ganttAxisFor(days);
+      cfg.gantt.tickInterval = axis.tickInterval;
+      // The DSL's own `axisFormat` line wins over this (verified against
+      // mermaid's gantt renderer), so this only fills in for charts that omit it.
+      cfg.gantt.axisFormat = axis.axisFormat;
+    }
   }
   mermaid.initialize(cfg);
 }
 
+// One place decides what the zoom readout says. It used to be written from three
+// separate spots, and refresh() ran last — so pressing "fit" showed 概観 for a
+// frame and then reverted to 100%, leaving no indication of the mode at all.
+function updateZoomLabel() {
+  if (!zoomDisplayEl) return;
+  var isGantt = currentModule && currentModule.type === 'gantt';
+  zoomDisplayEl.textContent = (isGantt && ganttViewMode === 'overview')
+    ? '概観'
+    : Math.round(zoom * 100) + '%';
+}
+
 function setGanttViewMode(mode) {
   ganttViewMode = mode;
-  if (zoomDisplayEl) zoomDisplayEl.textContent = mode === 'overview' ? '概観' : Math.round(zoom * 100) + '%';
+  updateZoomLabel();
 }
 
 function zoomToFit() {
   // For gantt, "fit" means redraw at the container width so the labels stay
   // 11px, not scale the drawing (and its text) down to 54%.
   if (currentModule && currentModule.type === 'gantt') {
-    setGanttViewMode('overview');
     setZoom(1.0);
-    setGanttViewMode('overview'); // setZoom rewrites the label
+    setGanttViewMode('overview');
     scheduleRefresh();
     return;
   }
