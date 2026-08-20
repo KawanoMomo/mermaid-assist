@@ -397,3 +397,35 @@ test.describe('概観/詳細モードのリセット契機', () => {
     await expect(page.locator('#zoom-display')).toHaveText(before);
   });
 });
+
+// axisFormat 行を持たないテンプレートにしたので、「行が無い」状態を
+// プロパティパネルが正しく名乗る必要がある。
+test.describe('axisFormat の自動モード', () => {
+  test('axisFormat 行が無いとき「自動」を選択状態にする', async ({ page }) => {
+    await page.goto(HTML_PATH);
+    await waitForRender(page);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+
+    // 「カスタム…」+ 空欄だと、ユーザが独自指定して書き忘れたように見える
+    await expect(page.locator('#prop-axisformat-preset')).toHaveValue('__auto__');
+    await expect(page.locator('#prop-axisformat-custom')).toBeHidden();
+  });
+
+  test('プリセットを選ぶと行が入り、自動に戻すと消える', async ({ page }) => {
+    await page.goto(HTML_PATH);
+    await waitForRender(page);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+
+    await page.locator('#prop-axisformat-preset').selectOption('%Y/%m/%d');
+    await page.waitForTimeout(800);
+    expect(await getEditorText(page)).toContain('axisFormat %Y/%m/%d');
+
+    await page.locator('#prop-axisformat-preset').selectOption('__auto__');
+    await page.waitForTimeout(800);
+    expect(await getEditorText(page)).not.toContain('axisFormat');
+    // dateFormat を巻き添えにしていないこと
+    expect(await getEditorText(page)).toContain('dateFormat YYYY-MM-DD');
+  });
+});

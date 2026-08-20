@@ -564,6 +564,26 @@ window.MA.modules.gantt = (function() {
     return lines.join('\n');
   }
 
+  // Drop a global directive line entirely.
+  //
+  // Needed because "no axisFormat line" is a meaningful state, not just an
+  // absence: the app then picks the tick granularity from the project span. The
+  // properties panel offers it as「自動」, so it has to be able to get back there
+  // once the user has chosen a fixed format.
+  //
+  // The key is matched at the start of the trimmed line and must be followed by
+  // whitespace, so removing `Format` cannot take `dateFormat` with it.
+  function removeGlobalSetting(text, key) {
+    var lines = text.split('\n');
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var t = lines[i].trim();
+      if (t.indexOf(key) === 0 && /\s/.test(t.charAt(key.length))) continue;
+      out.push(lines[i]);
+    }
+    return out.join('\n');
+  }
+
   // moveTaskWithinSection — moves the task at 1-based lineNum up (-1) or down (+1)
   // within its current section.
   function moveTaskWithinSection(text, lineNum, direction) {
@@ -860,6 +880,7 @@ window.MA.modules.gantt = (function() {
     addSection: addSection, moveSection: moveSection, resolveSpan: resolveSpan,
     deleteSection: deleteSection,
     updateGlobalSetting: updateGlobalSetting,
+    removeGlobalSetting: removeGlobalSetting,
     moveTaskWithinSection: moveTaskWithinSection,
     moveTaskToSection: moveTaskToSection,
     calibrateScale: calibrateScale,

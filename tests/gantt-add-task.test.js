@@ -192,3 +192,41 @@ describe('updateTaskField: status=milestone の正規化', function() {
       .toBe('    設計 :done, t1, 2026-03-01, 2026-03-10');
   });
 });
+
+// テンプレートから axisFormat 行を外したので、「行が無い = 期間に合わせて自動」
+// という状態が普通に発生する。プロパティパネルはこれを名前のある選択肢として
+// 見せる必要があり、そこから他のプリセットへ／プリセットから自動へ、
+// 双方向に行き来できないといけない。
+describe('removeGlobalSetting: 自動に戻す', function() {
+  var withAf = 'gantt\n    title P\n    dateFormat YYYY-MM-DD\n    axisFormat %m/%d\n\n    section S\n    a :t1, 2026-04-01, 5d\n';
+
+  test('GA-1: axisFormat 行を消せる', function() {
+    var out = G.removeGlobalSetting(withAf, 'axisFormat');
+    expect(G.parseGantt(out).axisFormat).toBe('');
+    expect(out).not.toContain('axisFormat');
+  });
+
+  test('GA-2: 他の行は消さない', function() {
+    var out = G.removeGlobalSetting(withAf, 'axisFormat');
+    expect(out).toContain('title P');
+    expect(out).toContain('dateFormat YYYY-MM-DD');
+    expect(out).toContain('a :t1, 2026-04-01, 5d');
+  });
+
+  test('GA-3: 元から無ければ何も変わらない', function() {
+    var t = 'gantt\n    dateFormat YYYY-MM-DD\n    section S\n    a :t1, 2026-04-01, 5d\n';
+    expect(G.removeGlobalSetting(t, 'axisFormat')).toBe(t);
+  });
+
+  test('GA-4: 前方一致する別の行を巻き込まない', function() {
+    // 'dateFormat' は 'Format' を含むが、キーは行頭からの完全一致で見る
+    var out = G.removeGlobalSetting(withAf, 'Format');
+    expect(out).toBe(withAf);
+  });
+
+  test('GA-5: 自動に戻してから再度指定できる', function() {
+    var off = G.removeGlobalSetting(withAf, 'axisFormat');
+    var on = G.updateGlobalSetting(off, 'axisFormat', '%Y/%m');
+    expect(G.parseGantt(on).axisFormat).toBe('%Y/%m');
+  });
+});

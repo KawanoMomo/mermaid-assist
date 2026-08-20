@@ -340,16 +340,23 @@ modules.gantt = {
               { v: '%a',       label: 'Tue (曜日)' }
             ];
             var current = parsedData.axisFormat || '';
+            // No axisFormat line means the app picks the granularity from the
+            // project span (ganttAxisFor). That is a real, named state — showing
+            // "カスタム…" with an empty box says the user chose something custom
+            // and then failed to type it, which is the opposite of what is
+            // happening.
+            var auto = !current;
             var matched = false;
-            var opts = '';
+            var opts = '<option value="__auto__"' + (auto ? ' selected' : '') +
+              '>自動 (期間に合わせる)</option>';
             for (var pi = 0; pi < presets.length; pi++) {
               var sel = (presets[pi].v === current) ? ' selected' : '';
               if (sel) matched = true;
               opts += '<option value="' + window.MA.htmlUtils.escHtml(presets[pi].v) + '"' + sel + '>' + window.MA.htmlUtils.escHtml(presets[pi].label + '  (' + presets[pi].v + ')') + '</option>';
             }
-            var customSel = matched ? '' : ' selected';
+            var customSel = (matched || auto) ? '' : ' selected';
             opts += '<option value="__custom__"' + customSel + '>カスタム…</option>';
-            var customDisplay = matched ? 'none' : 'block';
+            var customDisplay = (matched || auto) ? 'none' : 'block';
             return '<select id="prop-axisformat-preset" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:4px;">' + opts + '</select>' +
               '<input id="prop-axisformat-custom" type="text" value="' + window.MA.htmlUtils.escHtml(current) + '" placeholder="%m/%d" style="display:' + customDisplay + ';width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">';
           })() +
@@ -524,6 +531,18 @@ modules.gantt = {
           }
           if (afCustom) afCustom.style.display = 'none';
           window.MA.history.pushHistory();
+          // 自動 = the axisFormat line is absent, so the app derives the tick
+          // granularity from the project span. Writing a value here would pin it
+          // again, because the DSL line beats the config.
+          if (v === '__auto__') {
+            mmdText = window.MA.modules.gantt.removeGlobalSetting(mmdText, 'axisFormat');
+            suppressSync = true;
+            editorEl.value = mmdText;
+            suppressSync = false;
+            syncLineNumbers();
+            scheduleRefresh();
+            return;
+          }
           mmdText = updateGlobalSetting(mmdText, 'axisFormat', v);
           suppressSync = true;
           editorEl.value = mmdText;
