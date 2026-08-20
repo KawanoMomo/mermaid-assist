@@ -13,6 +13,7 @@ const sourceFiles = [
   'src/core/selection.js',
   'src/core/connection-mode.js',
   'src/ui/properties.js',
+  'src/ui/rich-label-editor.js',
   'src/modules/gantt.js',
   'src/modules/sequence.js',
   'src/modules/flowchart.js',

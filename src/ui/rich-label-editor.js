@@ -62,7 +62,31 @@ window.MA.richLabelEditor = (function() {
     fireInput(ta);
   }
 
+  // Caret to restore on the next mount of the same container.
+  //
+  // The toolbar buttons fire `change`, which runs onChange → ctx.setMmdText →
+  // ctx.onUpdate → refresh → renderProps, and renderProps rebuilds the whole
+  // properties panel with innerHTML. The textarea the user was typing in is
+  // detached, so focus and the caret are gone: after clicking B the user has to
+  // click back into the field and re-select before they can click I. Formatting
+  // a single label costs a click and a re-selection per tag.
+  //
+  // Recording the caret here and restoring it when the replacement textarea is
+  // mounted keeps the toolbar usable without changing the refresh architecture.
+  var pendingCaret = null;
+
+  function rememberCaret(container, ta) {
+    if (!container || !container.id) return;
+    pendingCaret = { id: container.id, start: ta.selectionStart, end: ta.selectionEnd };
+  }
+
   function mount(container, initialValue, onChange) {
+    // Read and clear in one step: a pending caret that never gets claimed (the
+    // edit produced no text change, so no remount happened) must not sit around
+    // and steal focus the next time this panel is opened.
+    var restore = pendingCaret;
+    pendingCaret = null;
+
     // Display `<br/>` as a visible newline in the textarea so line breaks are
     // obvious while editing. getValue() reverses this before returning to DSL.
     var initialForEdit = String(initialValue || '').replace(/<br\s*\/?>(?=.|$)/g, '\n');
@@ -100,11 +124,16 @@ window.MA.richLabelEditor = (function() {
       }
     });
 
-    container.querySelector('.rle-b').addEventListener('click', function() { insertWrapAtSelection(ta, '<b>', '</b>'); fireChange(ta); });
-    container.querySelector('.rle-i').addEventListener('click', function() { insertWrapAtSelection(ta, '<i>', '</i>'); fireChange(ta); });
+    container.querySelector('.rle-b').addEventListener('click', function() { insertWrapAtSelection(ta, '<b>', '</b>'); rememberCaret(container, ta); fireChange(ta); });
+    container.querySelector('.rle-i').addEventListener('click', function() { insertWrapAtSelection(ta, '<i>', '</i>'); rememberCaret(container, ta); fireChange(ta); });
     // Insert a real newline into the textarea; getValue() converts it to
     // <br/> before handing off to the DSL so Mermaid renders the line break.
-    container.querySelector('.rle-newline').addEventListener('click', function() { insertAtCursor(ta, '\n'); fireChange(ta); });
+    container.querySelector('.rle-newline').addEventListener('click', function() { insertAtCursor(ta, '\n'); rememberCaret(container, ta); fireChange(ta); });
+
+    if (restore && restore.id === container.id) {
+      ta.focus();
+      ta.setSelectionRange(restore.start, restore.end);
+    }
 
     return {
       getValue: function() {

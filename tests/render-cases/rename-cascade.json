@@ -64,5 +64,32 @@
  {
   "name": "block-id-rename/after",
   "text": "block-beta\n  columns 3\n  sensor[\"A\"] ab[\"AB\"] abc[\"ABC\"]\n  sensor --> ab\n"
+ },
+ {
+  "name": "flowchart-delete-node/before",
+  "text": "flowchart TD\n    A[開始] --> B[処理]\n    B --> C[判定]\n    C --> D[終了]\n"
+ },
+ {
+  "name": "flowchart-delete-node/after",
+  "text": "flowchart TD\n    A[開始]\n    C[判定]\n    C --> D[終了]\n",
+  "expectText": "開始判定終了"
+ },
+ {
+  "name": "flowchart-delete-edge/before",
+  "text": "flowchart TD\n    A[開始] --> B[処理]\n    B --> C[判定]\n    C --> D[終了]\n"
+ },
+ {
+  "name": "flowchart-delete-edge/after",
+  "text": "flowchart TD\n    A[開始]\n    B[処理]\n    B --> C[判定]\n    C --> D[終了]\n",
+  "expectText": "開始処理判定終了"
+ },
+ {
+  "name": "flowchart-delete-subgraph/before",
+  "text": "flowchart TD\n    subgraph G[群]\n    X[x]\n    Y[y]\n    end\n    X --> Z[z]\n"
+ },
+ {
+  "name": "flowchart-delete-subgraph/after",
+  "text": "flowchart TD\n    Z[z]\n",
+  "expectText": "z"
  }
 ]

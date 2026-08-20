@@ -55,6 +55,16 @@ t = 'block-beta\n  columns 3\n  a["A"] ab["AB"] abc["ABC"]\n  a --> ab\n';
 pair('block-label-edit', t, M.blockBeta.updateBlockLabel(t, 3, 'a', 'センサ'), { expectText: 'センサABABC' });
 pair('block-id-rename', t, M.blockBeta.updateBlockId(t, 3, 'a', 'sensor'));
 
+// flowchart はエッジ行の中でノードを宣言するので、1行が複数ノードの宣言を兼ねる。
+// 行ごと消すと押していないノードが消え、押したノードはラベルを失う。
+// 描画テキストで「何が残ったか」を固定する。
+t = 'flowchart TD\n    A[開始] --> B[処理]\n    B --> C[判定]\n    C --> D[終了]\n';
+pair('flowchart-delete-node', t, M.flowchart.deleteNode(t, 2, 'B'), { expectText: '開始判定終了' });
+pair('flowchart-delete-edge', t, M.flowchart.deleteEdge(t, 2), { expectText: '開始処理判定終了' });
+
+t = 'flowchart TD\n    subgraph G[群]\n    X[x]\n    Y[y]\n    end\n    X --> Z[z]\n';
+pair('flowchart-delete-subgraph', t, M.flowchart.deleteSubgraph(t, 2, 5), { expectText: 'z' });
+
 const out = path.join(__dirname, 'render-cases', 'rename-cascade.json');
 fs.writeFileSync(out, JSON.stringify(cases, null, 1) + '\n');
 console.log('wrote ' + cases.length + ' cases → ' + path.relative(path.join(__dirname, '..'), out));

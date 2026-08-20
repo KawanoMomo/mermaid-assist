@@ -379,8 +379,159 @@ window.MA.modules.flowchart = (function() {
   function moveNodeUp(text, lineNum) { return _moveNodeStep(text, lineNum, -1); }
   function moveNodeDown(text, lineNum) { return _moveNodeStep(text, lineNum, 1); }
 
-  function deleteNode(text, lineNum) {
-    return window.MA.textUpdater.deleteLine(text, lineNum);
+  // Nodes that carry an explicit shape on this line. These are the declarations
+  // that would be lost with the line, so a delete has to re-emit them.
+  function declaredOnLine(trimmed) {
+    var out = [];
+    var parts = splitEdgeLine(trimmed);
+    var refs = parts
+      ? [parts.left.trim(), parts.right.trim()]
+      : [trimmed.replace(/;\s*$/, '').trim()];
+    for (var i = 0; i < refs.length; i++) {
+      if (!refs[i]) continue;
+      var ref = splitNodeRef(refs[i]);
+      if (!ref.shape) continue;
+      var sh = parseNodeShape(ref.shape);
+      if (!sh) continue;
+      out.push({ id: ref.id.trim(), shape: sh.shape, label: sh.label });
+    }
+    return out;
+  }
+
+  // Delete one node and everything that only existed because of it.
+  //
+  // mermaid's flowchart declares nodes inside edge lines
+  // (`A[開始] --> B[処理]`), so several nodes share one line number. Deleting the
+  // line — which is what this used to do — removed a node the user did not pick
+  // and stripped the label off the one they did: pressing ✕ on 処理 made 開始
+  // disappear and turned 処理 into a bare `B`.
+  //
+  // Instead: drop the lines that reference the node, then put back a standalone
+  // declaration for every other node whose shape/label lived on one of those
+  // lines. `nodeId` is optional so older callers that only had a line number
+  // keep their previous behaviour.
+  function deleteNode(text, lineNum, nodeId) {
+    if (!nodeId) return window.MA.textUpdater.deleteLine(text, lineNum);
+    var entries = text.split('\n').map(function(l) { return { text: l }; });
+    return dropRedundantDecls(removeNodeRefs(entries, nodeId)).join('\n');
+  }
+
+  // Drop every line that mentions nodeId, re-emitting the declarations of the
+  // other endpoints so their labels survive. Works on entry objects rather than
+  // strings so it can be applied repeatedly (deleteSubgraph removes each member
+  // in turn) without losing track of which lines this delete synthesised.
+  function removeNodeRefs(entries, nodeId) {
+    var out = [];
+    for (var i = 0; i < entries.length; i++) {
+      var entry = entries[i];
+      var indent = entry.text.match(/^(\s*)/)[1];
+      var trimmed = entry.text.trim();
+      if (!trimmed || trimmed.indexOf('%%') === 0) { out.push(entry); continue; }
+
+      // `class A,B name` / `style A ...` / `click A ...`
+      var kw = trimmed.match(/^(class|style|click)\s+(\S+)(.*)$/);
+      if (kw) {
+        var kept = kw[2].split(',').filter(function(s) { return s !== nodeId; });
+        if (kept.length) out.push({ text: indent + kw[1] + ' ' + kept.join(',') + kw[3] });
+        continue;
+      }
+
+      var parts = splitEdgeLine(trimmed);
+      if (parts) {
+        var l = splitNodeRef(parts.left.trim());
+        var r = splitNodeRef(parts.right.trim());
+        if (l.id.trim() !== nodeId && r.id.trim() !== nodeId) { out.push(entry); continue; }
+        // The edge goes; keep the surviving endpoint's declaration.
+        var decls = declaredOnLine(trimmed);
+        for (var d = 0; d < decls.length; d++) {
+          if (decls[d].id === nodeId) continue;
+          out.push({
+            text: indent + decls[d].id + buildShape(decls[d].shape, decls[d].label),
+            synthesized: true,
+            id: decls[d].id,
+          });
+        }
+        continue;
+      }
+
+      if (/^(flowchart|graph|subgraph|direction|classDef|linkStyle)\b/.test(trimmed) || trimmed === 'end') {
+        out.push(entry);
+        continue;
+      }
+      var solo = splitNodeRef(trimmed.replace(/;\s*$/, ''));
+      if (solo.id.trim() === nodeId) continue;
+      out.push(entry);
+    }
+    return out;
+  }
+
+  // Drop the declarations this delete put back that turned out to be unnecessary
+  // — the node is still declared with its shape on a line that survived, or the
+  // same node got re-emitted twice because it appeared on two removed edges.
+  //
+  // Only lines carrying `synthesized` are candidates. A duplicate declaration the
+  // user wrote themselves is theirs to keep; silently tidying it would make a
+  // delete rewrite parts of the file that have nothing to do with the delete.
+  function dropRedundantDecls(entries) {
+    var declaredElsewhere = {};
+    for (var i = 0; i < entries.length; i++) {
+      if (entries[i].synthesized) continue;
+      var ds = declaredOnLine(entries[i].text.trim());
+      for (var k = 0; k < ds.length; k++) declaredElsewhere[ds[k].id] = true;
+    }
+    var emitted = {};
+    var out = [];
+    for (var j = 0; j < entries.length; j++) {
+      var e = entries[j];
+      if (e.synthesized) {
+        if (declaredElsewhere[e.id] || emitted[e.id]) continue;
+        emitted[e.id] = true;
+      }
+      out.push(e.text);
+    }
+    return out;
+  }
+
+  // Delete an edge without taking the endpoint labels with it.
+  //
+  // `A[開始] --> B[処理]` is one line, so removing the edge used to remove both
+  // declarations: the nodes stayed in the diagram (other lines still referenced
+  // them) but came back as bare `A` and `B`.
+  function deleteEdge(text, lineNum) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    var entries = [];
+    for (var i = 0; i < lines.length; i++) {
+      if (i !== idx) { entries.push({ text: lines[i] }); continue; }
+      var indent = lines[i].match(/^(\s*)/)[1];
+      var decls = declaredOnLine(lines[i].trim());
+      for (var d = 0; d < decls.length; d++) {
+        entries.push({
+          text: indent + decls[d].id + buildShape(decls[d].shape, decls[d].label),
+          synthesized: true,
+          id: decls[d].id,
+        });
+      }
+    }
+    return dropRedundantDecls(entries).join('\n');
+  }
+
+  // How much a delete would actually remove, counted by running it and diffing
+  // the parse. A subgraph takes its contents and every edge crossing its border,
+  // and a node takes every edge that touches it, so the row label on its own
+  // cannot tell the user what one ✕ is about to cost.
+  function deletionImpact(text, el) {
+    var before = parseFlowchart(text);
+    var after = parseFlowchart(
+      el.kind === 'subgraph'
+        ? deleteSubgraph(text, el.line, el.endLine)
+        : deleteNode(text, el.line, el.id)
+    );
+    return {
+      elements: before.elements.length - after.elements.length,
+      relations: before.relations.length - after.relations.length,
+    };
   }
 
   function updateNode(text, lineNum, field, value) {
@@ -426,10 +577,6 @@ window.MA.modules.flowchart = (function() {
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
     lines.splice(insertAt, 0, newLine);
     return lines.join('\n');
-  }
-
-  function deleteEdge(text, lineNum) {
-    return window.MA.textUpdater.deleteLine(text, lineNum);
   }
 
   function updateEdge(text, lineNum, field, value) {
@@ -499,10 +646,25 @@ window.MA.modules.flowchart = (function() {
     return lines.join('\n');
   }
 
+  // Delete a subgraph together with its contents.
+  //
+  // Removing the block's lines is not enough: an edge drawn from a member to a
+  // node outside the group still names the member, so mermaid re-declares it as
+  // a bare node. The group's box vanished, the labels vanished, and an
+  // unlabelled ghost of every member stayed on the canvas. Each member goes
+  // through the same removal as a node delete.
   function deleteSubgraph(text, startLine, endLine) {
+    var members = parseFlowchart(text).elements.filter(function(n) {
+      return n.line >= startLine && n.line <= endLine;
+    }).map(function(n) { return n.id; });
+
     var lines = text.split('\n');
     lines.splice(startLine - 1, (endLine - startLine + 1));
-    return lines.join('\n');
+    var entries = lines.map(function(l) { return { text: l }; });
+    for (var i = 0; i < members.length; i++) {
+      entries = removeNodeRefs(entries, members[i]);
+    }
+    return dropRedundantDecls(entries).join('\n');
   }
 
   function addClassDef(text, name, style) {
@@ -596,11 +758,20 @@ window.MA.modules.flowchart = (function() {
       var nodesList = '';
       for (var lni = 0; lni < nodes.length; lni++) {
         var n = nodes[lni];
+        // A node takes its edges with it, and on a compact diagram it can take a
+        // neighbour's declaration line too. The row label cannot show that, so
+        // the count goes on the button.
+        var nImpact = deletionImpact(ctx.getMmdText(), n);
+        var nExtra = nImpact.elements + nImpact.relations;
         nodesList += window.MA.properties.listItemHtml({
           label: n.label,
           sublabel: '(' + n.id + ', ' + n.shape + ')',
           selectClass: 'fc-select-node',
           deleteClass: 'fc-delete-node',
+          deleteLabel: nExtra > 1 ? '✕' + nExtra : '✕',
+          deleteTitle: nExtra > 1
+            ? '削除すると ' + nImpact.elements + ' ノード / ' + nImpact.relations + ' エッジが消えます'
+            : '',
           dataElementId: n.id,
           dataLine: n.line,
         });
@@ -624,11 +795,17 @@ window.MA.modules.flowchart = (function() {
       var subgraphsList = '';
       for (var sgi = 0; sgi < subgraphs.length; sgi++) {
         var sg = subgraphs[sgi];
+        var sgImpact = deletionImpact(ctx.getMmdText(), sg);
+        var sgExtra = sgImpact.elements + sgImpact.relations;
         subgraphsList += window.MA.properties.listItemHtml({
           label: sg.label,
           sublabel: '(' + sg.id + ')',
           selectClass: null,
           deleteClass: 'fc-delete-subgraph',
+          deleteLabel: sgExtra > 1 ? '✕' + sgExtra : '✕',
+          deleteTitle: sgExtra > 1
+            ? '削除すると ' + sgImpact.elements + ' ノード / ' + sgImpact.relations + ' エッジが消えます'
+            : '',
           dataLine: sg.line,
           dataEndLine: sg.endLine,
         });
@@ -714,7 +891,12 @@ window.MA.modules.flowchart = (function() {
       });
 
       window.MA.properties.bindSelectButtons(propsEl, 'fc-select-node', 'node');
-      window.MA.properties.bindDeleteButtons(propsEl, 'fc-delete-node', ctx, deleteNode);
+      // The 3rd argument is data-element-id. It matters here because several
+      // nodes can share one line (`A[開始] --> B[処理]`): without the id the
+      // delete falls back to removing the whole line, taking the neighbour with it.
+      window.MA.properties.bindDeleteButtons(propsEl, 'fc-delete-node', ctx, function(t, ln, elId) {
+        return elId ? deleteNode(t, ln, elId) : t;
+      });
       window.MA.properties.bindSelectButtons(propsEl, 'fc-select-edge', 'edge');
       window.MA.properties.bindDeleteButtons(propsEl, 'fc-delete-edge', ctx, deleteEdge);
       window.MA.properties.bindDeleteButtons(propsEl, 'fc-delete-subgraph', ctx, deleteSubgraph, true);
@@ -778,7 +960,7 @@ window.MA.modules.flowchart = (function() {
         },
         'delete': function() {
           window.MA.history.pushHistory();
-          ctx.setMmdText(deleteNode(ctx.getMmdText(), node.line));
+          ctx.setMmdText(deleteNode(ctx.getMmdText(), node.line, node.id));
           window.MA.selection.clearSelection();
           ctx.onUpdate();
         },
@@ -899,6 +1081,7 @@ window.MA.modules.flowchart = (function() {
     updateNode: updateNode,
     addEdge: addEdge,
     deleteEdge: deleteEdge,
+    deletionImpact: deletionImpact,
     updateEdge: updateEdge,
     updateDirection: updateDirection,
     addSubgraph: addSubgraph,
