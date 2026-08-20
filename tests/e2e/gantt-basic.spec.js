@@ -347,3 +347,53 @@ test.describe('Undo/Redo', () => {
     expect(text).toContain(':a1,');
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  View mode reset (Major M-5)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test.describe('概観/詳細モードのリセット契機', () => {
+  // 図種を切り替えて戻すと ganttViewMode が 'detail' のまま残り、
+  // 表示は「100%」なのにチャートはフィット幅で描かれる、という
+  // 画面からモードを判別できない状態になっていた。
+  test('図種を切り替えて戻すと概観モードに戻る', async ({ page }) => {
+    await page.goto(HTML_PATH);
+    await waitForRender(page);
+    page.on('dialog', d => d.accept());
+
+    // 詳細モードへ
+    for (let i = 0; i < 3; i++) await page.locator('#btn-zoom-in').click();
+    await page.waitForTimeout(600);
+    expect(parseInt(await page.locator('#zoom-display').textContent())).toBeGreaterThan(100);
+
+    await page.locator('#diagram-type').selectOption('flowchart');
+    await page.waitForTimeout(1200);
+    await page.locator('#diagram-type').selectOption('gantt');
+    await page.waitForTimeout(1500);
+
+    await expect(page.locator('#zoom-display')).toHaveText('概観');
+    const fits = await page.evaluate(() => {
+      const svg = document.querySelector('#preview-svg svg');
+      const box = document.getElementById('preview-container');
+      return svg.getBoundingClientRect().width <= box.clientWidth + 1;
+    });
+    expect(fits).toBe(true);
+  });
+
+  // 逆に、同じ図を編集している間はユーザが選んだモードを保つ。
+  // 1打鍵ごとに概観へ戻されたら詳細モードは使いものにならない。
+  test('編集してもモードは保たれる', async ({ page }) => {
+    await page.goto(HTML_PATH);
+    await waitForRender(page);
+
+    for (let i = 0; i < 3; i++) await page.locator('#btn-zoom-in').click();
+    await page.waitForTimeout(600);
+    const before = await page.locator('#zoom-display').textContent();
+
+    await page.locator('#editor').press('End');
+    await page.locator('#editor').type('\n    追記 :zz, 2026-06-01, 5d');
+    await page.waitForTimeout(1200);
+
+    await expect(page.locator('#zoom-display')).toHaveText(before);
+  });
+});

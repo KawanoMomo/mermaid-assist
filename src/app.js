@@ -1442,6 +1442,11 @@ function init() {
     var reader = new FileReader();
     reader.onload = function(ev) {
       window.MA.history.pushHistory();
+      // Opening a file is a new document, so the view resets the same way a type
+      // switch does. Editing and undo deliberately do not reset it: the mode the
+      // user picked is theirs to keep while they work on the same diagram.
+      setGanttViewMode('overview');
+      setZoom(1.0);
       mmdText = ev.target.result;
       suppressSync = true;
       editorEl.value = mmdText;
@@ -2142,9 +2147,11 @@ function init() {
       var targetType = this.value;
       var mod = modules[targetType];
       if (!mod) return;
-      // Leaving gantt must not strand overview mode on another diagram type,
-      // and coming back to gantt should start from the normal detail view.
-      setGanttViewMode('detail');
+      // A type switch replaces the document, so the view goes back to what a
+      // fresh gantt shows. Resetting to 'detail' here (as this used to) left the
+      // readout saying "100%" while the chart was actually drawn at fit width —
+      // no way to tell from the screen which mode you were in.
+      setGanttViewMode('overview');
       setZoom(1.0);
       window.MA.history.pushHistory();
       mmdText = mod.template();
