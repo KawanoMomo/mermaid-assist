@@ -99,3 +99,41 @@ describe('sequence: # を含むラベル', function() {
     expect(p.label).toBe('A#1');
   });
 });
+
+describe('flowchart: 記号を含むラベル', function() {
+  var F = window.MA.modules.flowchart;
+  var src = 'flowchart TD\n    A[Start] --> B{Decision}\n';
+
+  test('SC-12: 括弧を含むラベルは引用で囲まれる', function() {
+    var out = F.updateNode(src, 2, 'label', '設計(詳細)', 'A');
+    expect(out).toContain('A["設計(詳細)"]');
+  });
+
+  test('SC-13: 角括弧・波括弧も同じ', function() {
+    expect(F.updateNode(src, 2, 'label', '配列[0]', 'A')).toContain('A["配列[0]"]');
+    expect(F.updateNode(src, 2, 'label', '条件{真}', 'B')).toContain('B{"条件{真}"}');
+  });
+
+  test('SC-14: 引用符は #quot; に逃がす', function() {
+    var out = F.updateNode(src, 2, 'label', '"引用"付き', 'A');
+    expect(out).toContain('#quot;');
+    expect(out).not.toContain('A[""引用"付き"]');
+  });
+
+  test('SC-15: ラベルが往復する', function() {
+    ['設計(詳細)', '配列[0]', '条件{真}', '"引用"付き', 'A#1'].forEach(function(label) {
+      var out = F.updateNode(src, 2, 'label', label, 'A');
+      var n = F.parse(out).elements.filter(function(e) { return e.id === 'A'; })[0];
+      expect(n.label).toBe(label);
+    });
+  });
+
+  test('SC-16: 記号が無ければ囲まない (差分を増やさない)', function() {
+    expect(F.updateNode(src, 2, 'label', '開始', 'A')).toContain('A[開始]');
+  });
+
+  test('SC-17: ノード追加でも同じ扱い', function() {
+    var out = F.addNode(src, 'zz', '設計(詳細)', 'rect');
+    expect(out).toContain('"設計(詳細)"');
+  });
+});

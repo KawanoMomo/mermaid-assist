@@ -231,7 +231,7 @@ window.MA.modules.state = (function() {
     return out.join('\n');
   }
 
-  function updateStateLabel(text, lineNum, newLabel) {
+  function updateStateLabel(text, lineNum, newLabel, stateId) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
@@ -247,6 +247,25 @@ window.MA.modules.state = (function() {
     if (simpleMatch) {
       // Need to convert to aliased form
       lines[idx] = indent + 'state "' + newLabel + '" as ' + simpleMatch[1];
+      return lines.join('\n');
+    }
+    // 宣言行が無い状態。
+    //
+    // ひな形の状態は遷移 (`[*] --> Idle`) にしか現れないので、`state X` の行が無い。
+    // 従来はそこで無言で戻っており、ラベル欄が何もしなかった。
+    // 無いなら作る — 別名宣言を先頭 (図種宣言の直後) に挿してラベルを与える。
+    // 遷移側は id のままなので、図の形は変わらない。
+    if (stateId) {
+      var insertAt = 1;
+      for (var k = 0; k < lines.length; k++) {
+        if (/^(stateDiagram(-v2)?)/.test(lines[k].trim())) { insertAt = k + 1; break; }
+      }
+      var baseIndent = '    ';
+      for (var k2 = insertAt; k2 < lines.length; k2++) {
+        var t2 = lines[k2];
+        if (t2.trim()) { baseIndent = t2.match(/^(\s*)/)[1]; break; }
+      }
+      lines.splice(insertAt, 0, baseIndent + 'state "' + newLabel + '" as ' + stateId);
       return lines.join('\n');
     }
     return text;
@@ -464,7 +483,7 @@ window.MA.modules.state = (function() {
 
       document.getElementById('sel-state-label').addEventListener('change', function() {
         window.MA.history.pushHistory();
-        ctx.setMmdText(updateStateLabel(ctx.getMmdText(), st.line, this.value));
+        ctx.setMmdText(updateStateLabel(ctx.getMmdText(), st.line, this.value, st.id));
         ctx.onUpdate();
       });
       P.bindActionBar('sel-state', {

@@ -11,21 +11,47 @@ window.MA.modules.flowchart = (function() {
   function parseNodeShape(raw) {
     raw = raw.trim();
     // Order matters: longer patterns first
-    if (/^\(\((.*)\)\)$/.test(raw)) return { shape: 'circle', label: RegExp.$1 };
-    if (/^\[\[(.*)\]\]$/.test(raw)) return { shape: 'subroutine', label: RegExp.$1 };
-    if (/^\[\((.*)\)\]$/.test(raw)) return { shape: 'cylinder', label: RegExp.$1 };
-    if (/^\[\/(.*)\/\]$/.test(raw)) return { shape: 'parallelogram', label: RegExp.$1 };
-    if (/^\[\\(.*)\\\]$/.test(raw)) return { shape: 'parallelogram_alt', label: RegExp.$1 };
-    if (/^\{\{(.*)\}\}$/.test(raw)) return { shape: 'hexagon', label: RegExp.$1 };
-    if (/^\[(.*)\]$/.test(raw)) return { shape: 'rect', label: RegExp.$1 };
-    if (/^\((.*)\)$/.test(raw)) return { shape: 'round', label: RegExp.$1 };
-    if (/^\{(.*)\}$/.test(raw)) return { shape: 'diamond', label: RegExp.$1 };
-    if (/^>(.*)\]$/.test(raw)) return { shape: 'asymmetric', label: RegExp.$1 };
+    if (/^\(\((.*)\)\)$/.test(raw)) return { shape: 'circle', label: unquoteLabel(RegExp.$1) };
+    if (/^\[\[(.*)\]\]$/.test(raw)) return { shape: 'subroutine', label: unquoteLabel(RegExp.$1) };
+    if (/^\[\((.*)\)\]$/.test(raw)) return { shape: 'cylinder', label: unquoteLabel(RegExp.$1) };
+    if (/^\[\/(.*)\/\]$/.test(raw)) return { shape: 'parallelogram', label: unquoteLabel(RegExp.$1) };
+    if (/^\[\\(.*)\\\]$/.test(raw)) return { shape: 'parallelogram_alt', label: unquoteLabel(RegExp.$1) };
+    if (/^\{\{(.*)\}\}$/.test(raw)) return { shape: 'hexagon', label: unquoteLabel(RegExp.$1) };
+    if (/^\[(.*)\]$/.test(raw)) return { shape: 'rect', label: unquoteLabel(RegExp.$1) };
+    if (/^\((.*)\)$/.test(raw)) return { shape: 'round', label: unquoteLabel(RegExp.$1) };
+    if (/^\{(.*)\}$/.test(raw)) return { shape: 'diamond', label: unquoteLabel(RegExp.$1) };
+    if (/^>(.*)\]$/.test(raw)) return { shape: 'asymmetric', label: unquoteLabel(RegExp.$1) };
     return null;
+  }
+
+  // 記号を含むラベルは引用で囲む。
+  //
+  // flowchart の `[]` `()` `{}` は形状の指定なので、「設計(詳細)」をそのまま
+  // 置くと parse が落ちて図が出ない。「"引用"付き」は引用が落ちる。
+  // 実測ではどの形状も引用囲みを受け付け、`#quot;` は引用符として描かれる。
+  // (この欠陥は updateNode がエッジ行で無言の空振りだった間ずっと隠れていた)
+  function _labelNeedsQuote(s) {
+    return /["()\[\]{}<>|#]/.test(String(s));
+  }
+  function encodeLabel(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/#/g, '#35;')
+      .replace(/"/g, '#quot;');
+  }
+  function decodeLabel(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/#quot;/g, '"')
+      .replace(/#35;/g, '#');
+  }
+  function unquoteLabel(s) {
+    var t = String(s === undefined || s === null ? '' : s);
+    if (t.length >= 2 && t.charAt(0) === '"' && t.charAt(t.length - 1) === '"') t = t.slice(1, -1);
+    return decodeLabel(t);
   }
 
   function buildShape(shape, label) {
     label = label || '';
+    if (_labelNeedsQuote(label)) label = '"' + encodeLabel(label) + '"';
     var map = {
       rect: ['[', ']'], round: ['(', ')'], diamond: ['{', '}'],
       circle: ['((', '))'], parallelogram: ['[/', '/]'],
@@ -534,7 +560,7 @@ window.MA.modules.flowchart = (function() {
     };
   }
 
-  function updateNode(text, lineNum, field, value) {
+  function updateNode(text, lineNum, field, value, nodeId) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
@@ -565,8 +591,56 @@ window.MA.modules.flowchart = (function() {
       return lines.join('\n');
     }
 
-    // Line has edge: only update label if field===label; otherwise no-op
-    return text;
+    // 宣言がエッジ行にある場合。`A[Start] --> B{Decision}` は flowchart の普通の
+    // 書き方で、ひな形の全ノードがこれに当たる。ここが no-op だったので、ラベル欄も
+    // ID 欄も形状も**無言で効かなかった** (エラーも出ない)。
+    // 元のコードには「label なら更新する」とコメントがあるだけで、分岐自体が無かった。
+    //
+    // 行には両端があるので、行番号だけではどちらを直すのか決まらない。削除で先に
+    // 直したのと同じ形で、押した要素の id を受け取って端を特定する。id が無い
+    // 旧来の呼び方では左辺 (その行で先に現れる方) を対象にする。
+    //
+    // 書式は splitEdgeLine がそのまま保持するので、直した端以外は1文字も動かない
+    // (1操作で差分を汚さない — R9 の見ているところ)。
+    var parts = splitEdgeLine(trimmed);
+    if (!parts) return text;
+
+    var leftCore = parts.left.replace(/\s+$/, '');
+    var leftPad = parts.left.slice(leftCore.length);
+    var rightLead = parts.right.slice(0, parts.right.length - parts.right.replace(/^\s+/, '').length);
+    var rightCore = parts.right.replace(/^\s+/, '');
+
+    var l = splitNodeRef(leftCore);
+    var r = splitNodeRef(rightCore);
+
+    var side;
+    if (nodeId) {
+      // 完全一致だけを見る。前方一致だと `A` を直したつもりで `AB` を掘む。
+      if (l.id === nodeId) side = 'left';
+      else if (r.id === nodeId) side = 'right';
+      else return text;               // その行に居ない → 何もしない
+    } else {
+      side = 'left';
+    }
+
+    var target = side === 'left' ? l : r;
+    var shapeInfo = target.shape ? parseNodeShape(target.shape) : null;
+    var curId = target.id;
+    var curLabel = shapeInfo ? shapeInfo.label : curId;
+    var curShape = shapeInfo ? shapeInfo.shape : 'rect';
+    var newId = curId;
+    if (field === 'id') newId = value;
+    else if (field === 'label') curLabel = value;
+    else if (field === 'shape') curShape = value;
+    else return text;
+
+    target.id = newId;
+    target.shape = buildShape(curShape, curLabel);
+
+    lines[idx] = indent + l.id + l.shape + leftPad + parts.edge + parts.labelPart +
+                 rightLead + r.id + r.shape + parts.tail;
+    if (field === 'id' && value !== curId) renameNodeRefs(lines, curId, value, idx);
+    return lines.join('\n');
   }
 
   function addEdge(text, from, to, arrow, label) {
@@ -919,17 +993,17 @@ window.MA.modules.flowchart = (function() {
 
       document.getElementById('sel-node-id').addEventListener('change', function() {
         window.MA.history.pushHistory();
-        ctx.setMmdText(updateNode(ctx.getMmdText(), node.line, 'id', this.value));
+        ctx.setMmdText(updateNode(ctx.getMmdText(), node.line, 'id', this.value, node.id));
         ctx.onUpdate();
       });
       document.getElementById('sel-node-label').addEventListener('change', function() {
         window.MA.history.pushHistory();
-        ctx.setMmdText(updateNode(ctx.getMmdText(), node.line, 'label', this.value));
+        ctx.setMmdText(updateNode(ctx.getMmdText(), node.line, 'label', this.value, node.id));
         ctx.onUpdate();
       });
       document.getElementById('sel-node-shape').addEventListener('change', function() {
         window.MA.history.pushHistory();
-        ctx.setMmdText(updateNode(ctx.getMmdText(), node.line, 'shape', this.value));
+        ctx.setMmdText(updateNode(ctx.getMmdText(), node.line, 'shape', this.value, node.id));
         ctx.onUpdate();
       });
       window.MA.properties.bindActionBar('sel-node', {
