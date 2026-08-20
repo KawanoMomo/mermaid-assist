@@ -410,10 +410,15 @@ test.describe('Spec 4.4: ズーム', () => {
     await page.goto(HTML_URL);
     await waitForRender(page);
 
-    const initial = parseInt(await page.locator('#zoom-display').textContent());
+    // gantt は概観モードで始まるので、表示はパーセントではなく「概観」。
+    // 最初のズームインで詳細モードへ抜け、そこからは倍率が上がっていく。
+    await expect(page.locator('#zoom-display')).toHaveText('概観');
     await page.locator('#btn-zoom-in').click();
-    const after = parseInt(await page.locator('#zoom-display').textContent());
-    expect(after).toBeGreaterThan(initial);
+    const first = parseInt(await page.locator('#zoom-display').textContent());
+    expect(first).toBeGreaterThan(100);
+    await page.locator('#btn-zoom-in').click();
+    const second = parseInt(await page.locator('#zoom-display').textContent());
+    expect(second).toBeGreaterThan(first);
   });
 
   test('Fitボタンでコンテナ幅にフィット', async ({ page }) => {
@@ -446,13 +451,20 @@ test.describe('Spec 4.4: ズーム', () => {
     await page.goto(HTML_URL);
     await waitForRender(page);
 
-    const initial = parseInt(await page.locator('#zoom-display').textContent());
+    // 概観モードから始まるので、1回目のホイールで詳細モードへ抜ける
+    await expect(page.locator('#zoom-display')).toHaveText('概観');
+    await page.locator('#preview-container').dispatchEvent('wheel', {
+      deltaY: -100, ctrlKey: true,
+    });
+    await page.waitForTimeout(100);
+    const first = parseInt(await page.locator('#zoom-display').textContent());
+    expect(first).toBeGreaterThan(100);
     await page.locator('#preview-container').dispatchEvent('wheel', {
       deltaY: -100, ctrlKey: true,
     });
     await page.waitForTimeout(100);
     const after = parseInt(await page.locator('#zoom-display').textContent());
-    expect(after).toBeGreaterThan(initial);
+    expect(after).toBeGreaterThan(first);
   });
 });
 

@@ -287,10 +287,14 @@ test.describe('Zoom', () => {
     await page.goto(HTML_PATH);
     await waitForRender(page);
 
-    const initialZoom = await page.locator('#zoom-display').textContent();
+    // gantt は概観モードで始まる。1回目のズームインで詳細モードへ抜け、
+    // そこから倍率が上がる
+    await expect(page.locator('#zoom-display')).toHaveText('概観');
     await page.locator('#btn-zoom-in').click();
-    const newZoom = await page.locator('#zoom-display').textContent();
-    expect(parseInt(newZoom)).toBeGreaterThan(parseInt(initialZoom));
+    const first = parseInt(await page.locator('#zoom-display').textContent());
+    expect(first).toBeGreaterThan(100);
+    await page.locator('#btn-zoom-in').click();
+    expect(parseInt(await page.locator('#zoom-display').textContent())).toBeGreaterThan(first);
   });
 
   // Fit no longer means "scale the drawing down to a percentage" for gantt.

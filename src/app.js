@@ -990,8 +990,17 @@ async function refresh(skipRender) {
         overlayEl.setAttribute('viewBox', svgEl.getAttribute('viewBox'));
       }
 
-      // Auto-fit zoom on first render: fit chart width to container
-      if (thisRender === 1) {
+      // Auto-fit zoom on first render: fit chart width to container.
+      //
+      // Not for gantt. Scaling the drawing down is exactly what overview mode
+      // exists to avoid: measured on a 1400px window, the startup chart came up
+      // at 68% via a CSS transform, which put the axis labels on screen at
+      // 6.8px. Overview mode reaches the same fit by redrawing at the container
+      // width, so the labels stay at their real size.
+      if (thisRender === 1 && currentModule && currentModule.type === 'gantt') {
+        zoom = 1.0;
+        updateZoomLabel();
+      } else if (thisRender === 1) {
         var previewContainer = document.getElementById('preview-container');
         var containerW = previewContainer.clientWidth - 32;
         var fitZoom = containerW / naturalW;
@@ -1125,7 +1134,9 @@ var DETAIL_PX_PER_DAY = 24;
 // Chrome's maximum canvas dimension is 65,535px; stay clear of it so PNG export
 // and clipboard copy keep working on very long projects.
 var GANTT_MAX_WIDTH = 60000;
-var ganttViewMode = 'detail'; // 'detail' | 'overview'
+// Gantt starts in overview: the chart is drawn at the container width instead of
+// being scaled down to fit, so the labels keep their size on first paint.
+var ganttViewMode = 'overview'; // 'detail' | 'overview' 
 
 // The available width for a chart, minus padding and the vertical scrollbar. A
 // tall chart makes the scrollbar appear, which would otherwise push the chart
@@ -1311,7 +1322,7 @@ function init() {
     'gantt',
     '    title プロジェクト計画',
     '    dateFormat YYYY-MM-DD',
-    '    axisFormat %m/%d',
+    // axisFormat はあえて書かない (gantt.template() と同じ理由)
     '',
     '    section 要件定義',
     '    要件分析           :a1, 2026-04-01, 2026-04-15',

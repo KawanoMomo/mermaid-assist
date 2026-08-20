@@ -671,16 +671,42 @@ window.MA.modules.gantt = (function() {
     var vb = svgEl.viewBox.baseVal;
     var chartWidth = vb ? vb.width : 2000;
     var allRects = svgEl.querySelectorAll('rect');
+    // mermaid labels its bars `class="task ..."` and its row backgrounds
+    // `class="section ..."`, so ask it directly instead of guessing from size.
+    //
+    // The old test was "narrower than 95% of the chart". A section background
+    // sits at exactly the same yCenter as the bar on its row, so once it becomes
+    // a candidate the two tie on distance and DOM order decides — and the
+    // background comes first. In detail mode the background happened to be wider
+    // than the threshold and got dropped; in overview mode, where the chart is
+    // redrawn at the container width, it is not. Measured at 718px wide: the
+    // background is 680.5px against a 682.1px threshold, so the first task's
+    // grab area became x=0 w=680.5 instead of x=75 w=181 and dragging moved
+    // nothing at all.
+    var classed = [];
+    for (var cli = 0; cli < allRects.length; cli++) {
+      var cls = allRects[cli].getAttribute && allRects[cli].getAttribute('class');
+      if (cls && /(^|\s)task(\s|$)/.test(cls)) classed.push(allRects[cli]);
+    }
+    // Fall back to the geometric guess only when nothing carries the class at
+    // all — a mermaid upgrade that renames it should degrade to the old
+    // behaviour rather than silently disabling drag everywhere.
+    var pool = classed.length > 0 ? classed : allRects;
+    var byClass = classed.length > 0;
     var candidateRects = []; // {x, y, width, height, yCenter}
-    for (var cri = 0; cri < allRects.length; cri++) {
+    for (var cri = 0; cri < pool.length; cri++) {
       try {
         // Milestones are drawn as a 20x20 rect rotated 45deg. getBBox() reports the
         // un-rotated box, so its x is the corner of a square that has nothing to do
         // with the milestone's date — feeding it to the fit makes pxPerDay wrong for
         // every other task. Measured: one milestone moved pxPerDay 19.267 -> 18.571
         // and shifted an unrelated task's computed date by a day.
-        if (isMilestoneRect(allRects[cri])) continue;
-        var rbb = allRects[cri].getBBox();
+        if (isMilestoneRect(pool[cri])) continue;
+        var rbb = pool[cri].getBBox();
+        if (byClass) {
+          candidateRects.push({ x: rbb.x, y: rbb.y, width: rbb.width, height: rbb.height, yCenter: rbb.y + rbb.height / 2, used: false });
+          continue;
+        }
         // Task bars: reasonable height (8-40px), not too wide (< 95% of chart), minimum width
         if (rbb.height >= 8 && rbb.height <= 40 && rbb.width >= 1 && rbb.width < chartWidth * 0.95) {
           candidateRects.push({ x: rbb.x, y: rbb.y, width: rbb.width, height: rbb.height, yCenter: rbb.y + rbb.height / 2, used: false });
@@ -808,7 +834,11 @@ window.MA.modules.gantt = (function() {
         'gantt',
         '    title プロジェクト計画',
         '    dateFormat YYYY-MM-DD',
-        '    axisFormat %m/%d',
+        // axisFormat はあえて書かない。DSL の axisFormat 行は mermaid の
+        // config より優先するので、ここで %m/%d を固定すると
+        // チャートが伸びても年が出ない。実測で 3 年の計画に
+        // 04/01 が 4 回、07/01 が 3 回並ぶ。app.js の ganttAxisFor に
+        // 任せれば短い間は %m/%d、長くなれば %Y/%m に切り替わる。
         '',
         '    section 要件定義',
         '    要件分析           :a1, 2026-04-01, 2026-04-15',

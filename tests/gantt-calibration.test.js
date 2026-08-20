@@ -169,3 +169,115 @@ describe('C-4: 行をまたいだ rect の誤割当を起こさない', function
     expect(bars[1].x).toBe(130);
   });
 });
+
+// 概観モードではチャートがコンテナ幅で描き直されるので、
+// 「幅がチャートの95%未満なら候補」という相対しきい値が section 背景を通す。
+// 実測: コンテナ幅 718px で描くと section 背景は 680.5px、しきい値は 682.1px。
+// 結果、先頭タスクのオーバーレイが x=0 w=680.5 (チャートほぼ全幅) になり、
+//   - 掴む位置がタスク本体 (x=75 w=181) と一致しない
+//   - ドラッグしても日付が1日も動かない
+// という状態になっていた。詳細モードでは幅 1056px でしきい値 1003px を
+// 背景 (1018.5px) が上回るため、たまたま表面化していなかった。
+describe('ADR-010 較正: section 背景をタスクと取り違えない', function() {
+  // 実測の幾何をそのまま使う。要点は section 背景とタスク矩形の yCenter が
+  // 完全に同値 (どちらも 60.0) になること。距離が並ぶので DOM 順で先に来る
+  // 背景が勝ってしまう。
+  //   section section0  x=0   y=48 w=680.5 h=24  yC=60.0
+  //   task task0        x=75  y=50 w=181   h=20  yC=60.0
+  //   ラベル 要件分析                              yC=59.5
+  function section(w, y) {
+    return fakeRect({ class: 'section section0' }, { x: 0, y: y, width: w, height: 24 });
+  }
+  function taskRect(x, w, y) {
+    return fakeRect({ class: 'task task0 ' }, { x: x, y: y, width: w, height: 20 });
+  }
+
+  function calibrate(chartWidth, sectionWidth) {
+    var texts = [
+      fakeText('設計', { x: 5, y: 53.5, width: 30, height: 12 }),
+      fakeText('実装', { x: 5, y: 77.5, width: 30, height: 12 }),
+    ];
+    var rects = [
+      section(sectionWidth, 48),
+      section(sectionWidth, 72),
+      taskRect(75, 100, 50),
+      taskRect(175, 200, 74),
+    ];
+    var parsed = gantt.parseGantt(
+      'gantt\n    dateFormat YYYY-MM-DD\n    section S\n' +
+      '    設計 :t1, 2026-04-01, 2026-04-06\n' +
+      '    実装 :t2, 2026-04-06, 2026-04-16\n');
+    gantt.calibrateScale(fakeSvg(rects, texts, chartWidth), parsed);
+    return gantt.getCalibration();
+  }
+
+  test('概観幅でも section 背景を掴まない', function() {
+    // 680.5 / 718 = 0.948 で、旧しきい値 0.95 をすり抜けていた幅
+    var c = calibrate(718, 680.5);
+    expect(c.barRects[0].x).toBe(75);
+    expect(c.barRects[0].width).toBe(100);
+  });
+
+  test('詳細幅でも同じ結果になる', function() {
+    var c = calibrate(1056, 1018.5);
+    expect(c.barRects[0].x).toBe(75);
+    expect(c.barRects[0].width).toBe(100);
+  });
+
+  test('背景が細くてもタスクを優先する', function() {
+    // 幅で弾く方式だと、背景がタスクより細い図では守れない
+    var c = calibrate(718, 90);
+    expect(c.barRects[0].x).toBe(75);
+  });
+
+  test('pxPerDay が概観と詳細で同じ計算式になる', function() {
+    // 設計 5日で 100px → 20px/日
+    expect(calibrate(718, 680.5).pxPerDay).toBe(20);
+    expect(calibrate(1056, 1018.5).pxPerDay).toBe(20);
+  });
+});
+
+// クラスで拾えているのに幾何フィルタを重ねると、
+// 「プロジェクト全体に伸びる1本のタスク」や「細く描かれたバー」が
+// 候補から落ちて掴めなくなる。クラスで特定できた時点で幾何の推測は要らない。
+describe('ADR-010 較正: クラスで拾えたら幾何で弾かない', function() {
+  function calib(rects, texts, width, mmd) {
+    gantt.calibrateScale(fakeSvg(rects, texts, width), gantt.parseGantt(mmd));
+    return gantt.getCalibration();
+  }
+
+  test('チャート全幅に伸びるタスクも掴める', function() {
+    // 幅 690/718 = 96% で、旧しきい値 95% を超える
+    var mmd = 'gantt\n    dateFormat YYYY-MM-DD\n    section S\n' +
+      '    通期 :t1, 2026-01-01, 2026-12-31\n';
+    var c = calib(
+      [fakeRect({ class: 'task task0 ' }, { x: 14, y: 50, width: 690, height: 20 })],
+      [fakeText('通期', { x: 5, y: 53.5, width: 30, height: 12 })],
+      718, mmd);
+    expect(c.barRects[0].width).toBe(690);
+  });
+
+  test('高さの薄いバーも掴める', function() {
+    var mmd = 'gantt\n    dateFormat YYYY-MM-DD\n    section S\n' +
+      '    薄い :t1, 2026-04-01, 2026-04-06\n';
+    var c = calib(
+      [fakeRect({ class: 'task task0 ' }, { x: 75, y: 55, width: 100, height: 6 })],
+      [fakeText('薄い', { x: 5, y: 53.5, width: 12, height: 12 })],
+      718, mmd);
+    expect(c.barRects[0].x).toBe(75);
+  });
+
+  test('taskText のような別クラスは拾わない', function() {
+    // mermaid はラベル側に taskText / taskTextOutsideRight を使う。
+    // 部分一致にすると、それらが rect に付いた瞬間に掴む対象が変わる
+    var mmd = 'gantt\n    dateFormat YYYY-MM-DD\n    section S\n' +
+      '    設計 :t1, 2026-04-01, 2026-04-06\n';
+    var c = calib(
+      [fakeRect({ class: 'taskTextOutsideRight' }, { x: 0, y: 50, width: 600, height: 20 }),
+       fakeRect({ class: 'task task0 ' }, { x: 75, y: 50, width: 100, height: 20 })],
+      [fakeText('設計', { x: 5, y: 53.5, width: 30, height: 12 })],
+      718, mmd);
+    expect(c.barRects[0].x).toBe(75);
+    expect(c.barRects[0].width).toBe(100);
+  });
+});

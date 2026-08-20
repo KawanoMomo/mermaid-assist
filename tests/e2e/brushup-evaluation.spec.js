@@ -436,7 +436,9 @@ test.describe('E14: axisFormatプリセット', () => {
 
     // エディタで非プリセット値に書き換え
     const original = await editorText(page);
-    const modified = original.replace(/axisFormat\s+%m\/%d/, 'axisFormat %j');
+    // テンプレートは axisFormat を持たない (長期チャートで年が消えるため)。
+    // 非プリセット値を見たいのでここで自分で挿入する
+    const modified = original.replace(/(dateFormat YYYY-MM-DD)/, '$1\n    axisFormat %j');
     await page.locator('#editor').fill(modified);
     await page.locator('#editor').dispatchEvent('input');
     await page.waitForTimeout(1500);
