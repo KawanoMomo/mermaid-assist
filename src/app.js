@@ -892,23 +892,51 @@ async function refresh(skipRender) {
 }
 
 // ── Status Bar ─────────────────────────────────────────────────────────────
+
+// The status bar only ever spoke gantt. Every other diagram type produces a
+// parse result with no `tasks` array, so the bar fell into the empty branch and
+// announced「タスク: 0 | プロパティパネルからタスクを追加してください」while the
+// user was looking at a flowchart with thirty nodes. It was not just useless
+// there, it was wrong.
+//
+// Kept as a pure function so the wording is testable without a DOM.
+function statusInfoText(parsedData, moduleType) {
+  if (!parsedData) return '';
+  if (moduleType === 'gantt' || (parsedData.tasks && parsedData.tasks.length > 0)) {
+    return ganttStatusText(parsedData);
+  }
+  var parts = [];
+  var els = parsedData.elements ? parsedData.elements.length : 0;
+  var rels = parsedData.relations ? parsedData.relations.length : 0;
+  var groups = parsedData.groups ? parsedData.groups.length : 0;
+  parts.push('要素: ' + els);
+  if (rels > 0 || els > 0) parts.push('関連: ' + rels);
+  if (groups > 0) parts.push('グループ: ' + groups);
+  if (parsedData.meta && parsedData.meta.title) parts.push(parsedData.meta.title);
+  if (els === 0 && rels === 0) return '要素: 0 | プロパティパネルから追加してください';
+  return parts.join(' | ');
+}
+
+function ganttStatusText(parsedData) {
+  var tasks = parsedData.tasks || [];
+  if (tasks.length === 0) return 'タスク: 0 | プロパティパネルからタスクを追加してください';
+  var info = 'タスク: ' + tasks.length;
+  if (parsedData.sections && parsedData.sections.length > 0) {
+    info += ' | セクション: ' + parsedData.sections.length;
+  }
+  var dates = tasks.filter(function(t) { return t.startDate; }).map(function(t) { return t.startDate; });
+  var endDates = tasks.filter(function(t) { return t.endDate && DATE_RE.test(t.endDate); })
+    .map(function(t) { return t.endDate; });
+  var allDates = dates.concat(endDates).sort();
+  if (allDates.length >= 2) {
+    info += ' | 期間: ' + allDates[0] + ' ~ ' + allDates[allDates.length - 1];
+  }
+  return info;
+}
+
 function renderStatus() {
   if (!statusInfoEl) return;
-  var info = '';
-  if (parsed && parsed.tasks && parsed.tasks.length > 0) {
-    info = 'タスク: ' + parsed.tasks.length;
-    if (parsed.sections && parsed.sections.length > 0) info += ' | セクション: ' + parsed.sections.length;
-    // Calculate date range
-    var dates = parsed.tasks.filter(function(t) { return t.startDate; }).map(function(t) { return t.startDate; });
-    var endDates = parsed.tasks.filter(function(t) { return t.endDate && DATE_RE.test(t.endDate); }).map(function(t) { return t.endDate; });
-    var allDates = dates.concat(endDates).sort();
-    if (allDates.length >= 2) {
-      info += ' | 期間: ' + allDates[0] + ' ~ ' + allDates[allDates.length - 1];
-    }
-  } else {
-    info = 'タスク: 0 | プロパティパネルからタスクを追加してください';
-  }
-  statusInfoEl.textContent = info;
+  statusInfoEl.textContent = statusInfoText(parsed, currentModule && currentModule.type);
 }
 
 // ── Properties Panel ───────────────────────────────────────────────────────
@@ -967,6 +995,64 @@ function zoomToFit() {
 }
 
 // ── File Open / Save ───────────────────────────────────────────────────────
+
+// Base name of the file the user opened, so saving writes back to the same name
+// instead of a fresh download. Cleared when the diagram is replaced wholesale.
+var loadedFileName = '';
+
+// Text as of the last save/open. The diagram only lives in this tab — there is no
+// autosave and no server — so closing it threw the work away without a word.
+var savedText = null;
+
+function markSaved() { savedText = mmdText; }
+
+// A diagram is worth warning about only when it differs from what was last
+// saved *and* from the template it started as. Prompting on an untouched
+// template would train the user to dismiss the dialog.
+function hasUnsavedWork(text, saved, template) {
+  var t = String(text == null ? '' : text).trim();
+  if (!t) return false;
+  if (saved !== null && saved !== undefined && String(saved).trim() === t) return false;
+  if (template !== null && template !== undefined && String(template).trim() === t) return false;
+  return true;
+}
+
+// What a download should be called.
+//
+// This used to be `(parsed.title || 'untitled')`, and most diagram types have no
+// title at all — flowchart, block, c4 and the rest never set one. Saving three
+// diagrams in a row produced untitled.mmd, untitled(1).mmd, untitled(2).mmd,
+// and the user had to open each one to find out which was which.
+//
+// Order: the name the file was opened under, then the diagram's own title, then
+// the diagram type with a date so at least the files sort and identify.
+function downloadBaseName(fileName, title, type, now) {
+  var base = sanitizeFileName(fileName || '') || sanitizeFileName(title || '');
+  if (base) return base;
+  var d = now || new Date();
+  var stamp = d.getFullYear() +
+    ('0' + (d.getMonth() + 1)).slice(-2) +
+    ('0' + d.getDate()).slice(-2);
+  return (type || 'diagram') + '-' + stamp;
+}
+
+// Titles are free text and go straight into a download name, so the characters
+// Windows and POSIX both refuse have to come out. A name that reduces to nothing
+// returns '' and lets the caller fall back.
+function sanitizeFileName(s) {
+  return String(s)
+    .replace(/[\\/:*?"<>|]/g, '')
+    .replace(/[\x00-\x1f]/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s.]+|[\s.]+$/g, '')
+    .slice(0, 100);
+}
+
+function currentBaseName() {
+  return downloadBaseName(loadedFileName, parsed && parsed.title,
+    currentModule && currentModule.type);
+}
+
 function openFile() {
   document.getElementById('file-input').click();
 }
@@ -975,9 +1061,10 @@ function saveFile() {
   var blob = new Blob([mmdText], { type: 'text/plain' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = (parsed.title || 'untitled') + '.mmd';
+  a.download = currentBaseName() + '.mmd';
   a.click();
   URL.revokeObjectURL(a.href);
+  markSaved();
 }
 
 // ── Export Functions ───────────────────────────────────────────────────────
@@ -988,7 +1075,7 @@ function exportSVG() {
   var blob = new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = (parsed.title || 'untitled') + '.svg';
+  a.download = currentBaseName() + '.svg';
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -1019,7 +1106,7 @@ function exportPNG(transparent) {
     canvas.toBlob(function(blob) {
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = (parsed.title || 'untitled') + '.png';
+      a.download = currentBaseName() + '.png';
       a.click();
       URL.revokeObjectURL(a.href);
     });
@@ -1070,6 +1157,10 @@ function init() {
   ].join('\n');
 
   editorEl.value = mmdText;
+  // The startup sample is not the gantt module's template(), so without this the
+  // very first diagram-type switch would ask to confirm discarding text the user
+  // never wrote.
+  markSaved();
   syncLineNumbers();
   setZoom(1.0);
 
@@ -1176,9 +1267,12 @@ function init() {
     var file = e.target.files && e.target.files[0];
     if (!file) return;
     var reader = new FileReader();
+    var openedName = String(file.name || '').replace(/\.[^.]+$/, '');
     reader.onload = function(ev) {
       window.MA.history.pushHistory();
       mmdText = ev.target.result;
+      loadedFileName = openedName;
+      markSaved();
       suppressSync = true;
       editorEl.value = mmdText;
       suppressSync = false;
@@ -1878,8 +1972,19 @@ function init() {
       var targetType = this.value;
       var mod = modules[targetType];
       if (!mod) return;
+      // Switching type replaces the whole document with a template. Undo does
+      // bring it back, but nothing on screen says so, and the dropdown sits in
+      // the toolbar where a mis-click costs the entire diagram.
+      var currentTemplate = currentModule && currentModule.template ? currentModule.template() : null;
+      if (hasUnsavedWork(mmdText, savedText, currentTemplate) &&
+          !confirm('図の種類を変えると、いま書いている内容は ' + targetType + ' のひな形に置き換わります。続けますか？')) {
+        this.value = currentModule ? currentModule.type : this.value;
+        return;
+      }
       window.MA.history.pushHistory();
       mmdText = mod.template();
+      loadedFileName = '';
+      markSaved();
       suppressSync = true;
       editorEl.value = mmdText;
       suppressSync = false;
@@ -1888,6 +1993,16 @@ function init() {
       scheduleRefresh();
     });
   }
+
+  // The tab is the only place the diagram exists. Without this, closing it or
+  // navigating away discards everything silently.
+  window.addEventListener('beforeunload', function(e) {
+    var tpl = currentModule && currentModule.template ? currentModule.template() : null;
+    if (!hasUnsavedWork(mmdText, savedText, tpl)) return;
+    e.preventDefault();
+    e.returnValue = '';
+    return '';
+  });
 
   // ── Initial render ───────────────────────────────────────────────────────
   scheduleRefresh();
@@ -1900,6 +2015,10 @@ document.addEventListener('DOMContentLoaded', init);
 // ── Export hook for tests ──────────────────────────────────────────────────
 if (typeof __exportForTest === 'function') {
   __exportForTest({
+    downloadBaseName: downloadBaseName,
+    sanitizeFileName: sanitizeFileName,
+    hasUnsavedWork: hasUnsavedWork,
+    statusInfoText: statusInfoText,
     parseGantt: parseGantt,
     updateTaskDates: updateTaskDates,
     updateTaskField: updateTaskField,
