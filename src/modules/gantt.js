@@ -607,10 +607,28 @@ window.MA.modules.gantt = (function() {
         if (isMilestoneRect(allRects[cri])) continue;
         var rbb = allRects[cri].getBBox();
         // Task bars: reasonable height (8-40px), not too wide (< 95% of chart), minimum width
-        if (rbb.height >= 8 && rbb.height <= 40 && rbb.width >= 3 && rbb.width < chartWidth * 0.95) {
+        if (rbb.height >= 8 && rbb.height <= 40 && rbb.width >= 1 && rbb.width < chartWidth * 0.95) {
           candidateRects.push({ x: rbb.x, y: rbb.y, width: rbb.width, height: rbb.height, yCenter: rbb.y + rbb.height / 2, used: false });
         }
       } catch (e) { /* skip */ }
+    }
+
+    // How far a rect may sit from its label before it belongs to a different row.
+    // A fixed 30px threshold exceeded the 24px row pitch, so whenever a task's own
+    // bar was missing the search happily took the next row's — and dragging that
+    // bar rewrote a different task's dates. Derive the tolerance from the observed
+    // pitch instead, and never let it reach a full row.
+    var rowTolerance = 12;
+    var ys = labelInfos.map(function(l) { return l.yCenter; }).sort(function(a, b) { return a - b; });
+    var gaps = [];
+    for (var gi = 1; gi < ys.length; gi++) {
+      var gap = ys[gi] - ys[gi - 1];
+      if (gap > 0.5) gaps.push(gap);
+    }
+    if (gaps.length) {
+      gaps.sort(function(a, b) { return a - b; });
+      var pitch = gaps[Math.floor(gaps.length / 2)]; // median, so one odd row cannot skew it
+      rowTolerance = Math.max(4, pitch * 0.45);
     }
 
     // Step 3: For each task, find its text label, then find the closest candidate rect
@@ -646,7 +664,7 @@ window.MA.modules.gantt = (function() {
         }
       }
 
-      if (closest !== null && closestDist < 30) {
+      if (closest !== null && closestDist <= rowTolerance) {
         candidateRects[closest].used = true;
         var cr = candidateRects[closest];
         barRects.push({ x: cr.x, y: cr.y, width: cr.width, height: cr.height });

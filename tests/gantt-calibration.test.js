@@ -89,3 +89,83 @@ describe('ADR-010 較正: マイルストーンを候補から除外する', fun
     expect(withMilestone).toBe(without);
   });
 });
+
+// ── C-4: 概観モードの細いバーで別タスクの rect を掴まない ─────────────────
+// 実測 (仕様書): 3年スパン (1.31px/日) でバー幅が [19, 0, 2, 19] になり、
+// `width >= 3` フィルタで細バーが脱落 → y近傍マッチ (行間24px に対し閾値30px) が
+// 3件目のタスクに4件目の rect を割り当てた。細いタスクをドラッグすると
+// **別タスクの日付が書き換わる**。無反応より悪い。
+describe('C-4: 行をまたいだ rect の誤割当を起こさない', function() {
+  var ROW = 24; // 行間
+
+  function rowsFor(specs) {
+    // specs: [{label, rectWidth|null}] — rectWidth が null なら rect を出さない
+    var texts = [], rects = [];
+    specs.forEach(function(s, i) {
+      var y = i * ROW;
+      texts.push(fakeText(s.label, { x: 5, y: y + 6, width: 40, height: 12 }));
+      if (s.rectWidth !== null) {
+        rects.push(fakeRect({ class: 'task' }, { x: 100 + i * 30, y: y + 2, width: s.rectWidth, height: 20 }));
+      }
+    });
+    return { texts: texts, rects: rects };
+  }
+
+  test('C4a: 細くて候補から漏れたタスクは null になり、隣の rect を奪わない', function() {
+    // T3 のバーが細すぎて候補に入らない状況
+    var r = rowsFor([
+      { label: 'T1', rectWidth: 19 },
+      { label: 'T2', rectWidth: 19 },
+      { label: 'T3', rectWidth: null },  // 候補なし
+      { label: 'T4', rectWidth: 19 },
+    ]);
+    var parsed = { tasks: [
+      { label: 'T1', startDate: '2026-04-01', endDate: '2026-04-02', status: null },
+      { label: 'T2', startDate: '2026-04-03', endDate: '2026-04-04', status: null },
+      { label: 'T3', startDate: '2026-04-05', endDate: '2026-04-06', status: null },
+      { label: 'T4', startDate: '2026-04-07', endDate: '2026-04-08', status: null },
+    ] };
+    gantt.calibrateScale(fakeSvg(r.rects, r.texts, 1000), parsed);
+    var bars = gantt.getCalibration().barRects;
+    expect(bars.length).toBe(4);
+    // T3 は rect が無いので null。T4 の rect を奪ってはいけない
+    expect(bars[2]).toBeNull();
+    expect(bars[3]).not.toBeNull();
+  });
+
+  test('C4b: 各タスクは自分の行の rect を掴む', function() {
+    var r = rowsFor([
+      { label: 'A', rectWidth: 19 },
+      { label: 'B', rectWidth: 19 },
+      { label: 'C', rectWidth: 19 },
+    ]);
+    var parsed = { tasks: [
+      { label: 'A', startDate: '2026-04-01', endDate: '2026-04-02', status: null },
+      { label: 'B', startDate: '2026-04-03', endDate: '2026-04-04', status: null },
+      { label: 'C', startDate: '2026-04-05', endDate: '2026-04-06', status: null },
+    ] };
+    gantt.calibrateScale(fakeSvg(r.rects, r.texts, 1000), parsed);
+    var bars = gantt.getCalibration().barRects;
+    // x は 100, 130, 160 の順に並ぶはず (行がずれていない証拠)
+    expect(bars[0].x).toBe(100);
+    expect(bars[1].x).toBe(130);
+    expect(bars[2].x).toBe(160);
+  });
+
+  test('C4c: 幅の細いバーでも自分の行の rect なら掴む', function() {
+    var r = rowsFor([
+      { label: 'A', rectWidth: 19 },
+      { label: 'B', rectWidth: 2 },   // 細いが自分の行にある
+      { label: 'C', rectWidth: 19 },
+    ]);
+    var parsed = { tasks: [
+      { label: 'A', startDate: '2026-04-01', endDate: '2026-04-02', status: null },
+      { label: 'B', startDate: '2026-04-03', endDate: '2026-04-04', status: null },
+      { label: 'C', startDate: '2026-04-05', endDate: '2026-04-06', status: null },
+    ] };
+    gantt.calibrateScale(fakeSvg(r.rects, r.texts, 1000), parsed);
+    var bars = gantt.getCalibration().barRects;
+    expect(bars[1]).not.toBeNull();
+    expect(bars[1].x).toBe(130);
+  });
+});
