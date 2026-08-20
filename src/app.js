@@ -1181,6 +1181,7 @@ async function refresh(skipRender) {
 
     statusParseEl.textContent = 'OK';
     statusParseEl.classList.remove('error');
+    hideParseErrorBanner();
   } catch (e) {
     if (thisRender !== renderCounter) return;
     // mermaid のエラーは字句解析器の言葉なので、原因が分かる場合は先に日本語で言う。
@@ -1193,6 +1194,24 @@ async function refresh(skipRender) {
     // 見えているペインの幅ではなく**キャンバスの幅**で折り返す。結果、一行が
     // ペインの右端で切れ、肝心の「どの文字が該当するか」が読めない。
     // 元からある Render error の行も同じ理由で切れていた (実機で確認)。
+    // 直前に描けていた図は残す。
+    //
+    // 以前は失敗のたびにプレビューを赤いエラーテキストで置き換えていた。構文を
+    // 打っている途中は必ず一時的に不正になるので、`section` と打つだけで図が消える。
+    // 「テキストを直すと図がどう変わるか」を見ながら書くという3ペインUIの目的が
+    // 成り立たなくなっていた。参照したい図が消えるので、結局エディタだけ見て打つことになる。
+    //
+    // 図が既に出ているなら、そのままにしてステータスと小さな帯だけでエラーを伝える。
+    var hadDiagram = !!previewSvgEl.querySelector('svg');
+    if (hadDiagram) {
+      statusParseEl.textContent = 'Error';
+      statusParseEl.classList.add('error');
+      showParseErrorBanner(e);
+      renderProps();
+      renderStatus();
+      return;
+    }
+
     // 拡大率を一旦外す。このコンテナには scale(zoom) がかかっているので、
     // 124% のまま文章を出すと文字も 124% になり、指定した幅で折り返しても
     // ペインからはみ出す。図に戻れば次の描画で scale は付け直される。
@@ -1286,6 +1305,26 @@ function savedMessage(d) {
 }
 function deletedMessage(n) {
   return n + '件削除 — Ctrl+Z で戻せます';
+}
+
+// 描画に失敗したが直前の図が残っているとき用の帯。
+// 図を消さずに「いま表示しているのは古い」ことだけを伝える。
+function showParseErrorBanner(err) {
+  var host = document.getElementById('preview-container') || previewSvgEl.parentElement;
+  if (!host) return;
+  var el = document.getElementById('parse-error-banner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'parse-error-banner';
+    host.appendChild(el);
+  }
+  var cause = window.MA.diagnose ? window.MA.diagnose.diagnose(mmdText, err) : '';
+  el.textContent = cause || ('構文エラー — 表示しているのは直前に描けた図です');
+  el.hidden = false;
+}
+function hideParseErrorBanner() {
+  var el = document.getElementById('parse-error-banner');
+  if (el) el.hidden = true;
 }
 
 function renderStatus() {
@@ -2006,6 +2045,16 @@ function init() {
     });
   }
 
+  // 未保存のままタブを閉じる / リロードすると作業が全消失する。
+  // 保存がダウンロード操作しか無いのでこまめな保存の習慣も付きにくい。
+  // 離脱確認を出す (ブラウザが文面を決めるので、こちらは意思表示だけ)。
+  window.addEventListener('beforeunload', function(ev) {
+    if (!hasUnsavedWork(mmdText, savedText, currentModule && currentModule.template ? currentModule.template() : null)) return;
+    ev.preventDefault();
+    ev.returnValue = '';
+    return '';
+  });
+
   var helpClose = document.getElementById('shortcut-help-close');
   if (helpClose) helpClose.addEventListener('click', function() { toggleShortcutHelp(false); });
   var helpBox = document.getElementById('shortcut-help');
@@ -2687,9 +2736,14 @@ function init() {
     //
     // IME composition is left alone; taking Ctrl+Z during conversion would break
     // candidate selection.
-    if (e.ctrlKey && e.key === 'z' && !e.isComposing) {
+    // Shift を除外しないと Ctrl+Shift+Z がここに先に吸われて Undo になる。
+    // ブラウザによって Shift+z の e.key は 'Z' にも 'z' にもなるので、
+    // 文字の大小ではなく **shiftKey で** 分ける。
+    if (e.ctrlKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z') && !e.isComposing) {
       e.preventDefault(); window.MA.history.undo();
-    } else if (e.ctrlKey && e.key === 'y' && !e.isComposing) {
+    } else if (e.ctrlKey && (e.key === 'y' || ((e.key === 'Z' || e.key === 'z') && e.shiftKey)) && !e.isComposing) {
+      // Ctrl+Shift+Z は Figma / draw.io / VSCode で Redo 。Shift 併用だと e.key は 'Z' に
+      // なるので、小文字比較だけだと分岐に入らない。
       e.preventDefault(); window.MA.history.redo();
     } else if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
       e.preventDefault();
@@ -2700,6 +2754,7 @@ function init() {
       e.preventDefault(); openFile();
     } else if (e.key === 'Delete' && !inInput && !inEditor) {
       if (sel.length === 0) return;
+      if (!parsed || !parsed.tasks) { showTransient('この図種では Delete キーの削除は未対応です (一覧の ✕ を使ってください)', 3000); return; }
       window.MA.history.pushHistory();
       var lines = sel.map(function(s) {
         var t = parsed.tasks.find(function(tk) { return tk.id === s.id; });
@@ -2746,12 +2801,18 @@ function init() {
       var forward = (e.key === 'ArrowDown' || e.key === 'ArrowRight');
       if (selectAdjacentElement(forward ? 1 : -1)) e.preventDefault();
     } else if (e.ctrlKey && e.key === 'a' && !inEditor && !inInput) {
+      // 選択・コピー・削除は gantt の `parsed.tasks` 前提で書かれていた。
+      // 他の図種では `parsed.tasks` が undefined なので `.map` で例外になり、
+      // コンソールにしか出ないので利用者には「押しても何も起きない」としか見えない。
+      // 未対応なら例外を出さず、その旨をステータスに出す。
       e.preventDefault();
+      if (!parsed || !parsed.tasks) { showTransient('この図種ではすべて選択は未対応です', 2500); return; }
       window.MA.selection.setSelected(parsed.tasks.map(function(t) { return { type: 'task', id: t.id }; }));
     } else if (e.ctrlKey && e.shiftKey && e.key === 'C') {
       e.preventDefault(); exportClipboard();
     } else if (e.ctrlKey && e.key === 'c' && !inEditor && !inInput && sel.length > 0) {
       e.preventDefault();
+      if (!parsed || !parsed.tasks) { showTransient('この図種では要素の複写は未対応です', 2500); return; }
       clipboard = sel.map(function(s) {
         return parsed.tasks.find(function(t) { return t.id === s.id; });
       }).filter(Boolean);

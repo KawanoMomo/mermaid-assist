@@ -4,7 +4,12 @@ window.MA.modules = window.MA.modules || {};
 
 window.MA.modules.flowchart = (function() {
   // Edge type patterns (longest first for greedy matching)
-  var EDGE_TYPES = ['==>', '-.->', '-.-', '===', '-->', '---', '--x', '--o'];
+  //
+  // 両端に記号が付く形 (`o--o` `x--x` `<-->`) を知らないと、`A o--o B` の
+  // 左辺を `A o` という**存在しないノード**として拾う。長い形を先に並べないと
+  // 短い `--o` に先に当たって同じことが起きるので、順序を崩さないこと。
+  var EDGE_TYPES = ['<-.->', '<-->', '<==>', 'o--o', 'o--x', 'x--o', 'x--x',
+                    '==>', '==o', '==x', '-.->', '-.-', '===', '-->', '---', '--x', '--o'];
 
   // Shape detection for node text
   // Returns { shape, label } or null if invalid
@@ -383,6 +388,22 @@ window.MA.modules.flowchart = (function() {
     return /^\w/.test(trimmed);
   }
 
+  // 入れ替えてよい行か。
+  //
+  // 以前は「ノード行」だけを相手にしていたので、直上がエッジ行だと無言で空振り
+  // していた。`A[Start] --> B[Mid]` のようにノードをエッジ行にインラインで書くのは
+  // flowchart で最も普通の書き方なので、実質「↑ が常に死んでいる」状態だった。
+  // 宣言順はレイアウトに影響するが、エッジ行との入れ替えは構文上安全なので相手に含める。
+  //
+  // 逆に `subgraph` / `end` を越えると**属するグループが変わる** — これは意味が
+  // 変わるので越えない。装飾行 (classDef / style / click) も動かさない。
+  function _isMovableLine(trimmed) {
+    if (!trimmed) return false;
+    if (trimmed.indexOf('%%') === 0) return false;
+    if (/^(subgraph|end|flowchart|graph|direction|classDef|class\s|style\s|linkStyle|click\s)/i.test(trimmed)) return false;
+    return true;
+  }
+
   function _moveNodeStep(text, lineNum, direction) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
@@ -391,7 +412,7 @@ window.MA.modules.flowchart = (function() {
     while (target >= 0 && target < lines.length) {
       var t = lines[target].trim();
       if (!t || t.indexOf('%%') === 0) { target += direction; continue; }
-      if (_isNodeLine(t)) {
+      if (_isMovableLine(t)) {
         var tmp = lines[idx];
         lines[idx] = lines[target];
         lines[target] = tmp;

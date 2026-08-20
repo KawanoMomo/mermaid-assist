@@ -57,12 +57,23 @@ window.MA.modules.kanban = (function() {
     return lines.join('\n');
   }
 
-  function addCard(text, columnName, cardText, metaStr) {
+  // addCard: columnLine を渡すと、その行のカラムに入れる。
+  //
+  // 以前はカラムを**ラベル文字列の一致**でしか探していなかったので、同名のカラムが
+  // 2つあると常に先頭側へ入る。利用者が2つ目を選んでも、選んだカラムにはカードが
+  // 増えない (無言の誤操作)。行番号なら同名でも一意に決まる。
+  function addCard(text, columnName, cardText, metaStr, columnLine) {
     var lines = text.split('\n');
     // Find column line
     var colIdx = -1;
-    for (var i = 0; i < lines.length; i++) {
-      if (lines[i].trim() === columnName) { colIdx = i; break; }
+    if (columnLine !== undefined && columnLine !== null && !isNaN(columnLine)) {
+      var ci = columnLine - 1;
+      if (ci >= 0 && ci < lines.length) colIdx = ci;
+    }
+    if (colIdx < 0) {
+      for (var i = 0; i < lines.length; i++) {
+        if (lines[i].trim() === columnName) { colIdx = i; break; }
+      }
     }
     if (colIdx < 0) return text;
     // Find end of column's cards (next column or end)
@@ -132,7 +143,9 @@ window.MA.modules.kanban = (function() {
     var cards = parsedData.elements.filter(function(e) { return e.kind === 'card'; });
 
     if (!selData || selData.length === 0) {
-      var colOpts = columns.map(function(c) { return { value: c.id, label: c.id }; });
+      // 同名カラムを区別できるよう、value に行番号を持たせる。
+      // id (= ラベル) だけだと 2つ目の Todo を選んでも value が同じになる。
+      var colOpts = columns.map(function(c) { return { value: String(c.line), label: c.id }; });
       if (colOpts.length === 0) colOpts = [{ value: '', label: '（カラムを先に追加）' }];
 
       var colList = '';
@@ -195,7 +208,7 @@ window.MA.modules.kanban = (function() {
         var m = document.getElementById('kb-add-c-meta').value.trim();
         if (!col || !t) { alert('Column と Text 必須'); return; }
         window.MA.history.pushHistory();
-        ctx.setMmdText(addCard(ctx.getMmdText(), col, t, m));
+        ctx.setMmdText(addCard(ctx.getMmdText(), '', t, m, parseInt(col, 10)));
         ctx.onUpdate();
       });
 

@@ -361,7 +361,7 @@ window.MA.modules.c4 = (function() {
     } else {
       lines.splice(insertAt, 0, indentUnit + formatArgs(kind, id, label, descr, tech));
     }
-    return lines.join('\n');
+    return window.MA.textUpdater.matchEol(text, lines.join(String.fromCharCode(10)));
   }
 
   function addRel(text, kind, from, to, label, tech) {
@@ -371,7 +371,7 @@ window.MA.modules.c4 = (function() {
     var parts = [from, to, '"' + encodeArg(label) + '"'];
     if (tech) parts.push('"' + encodeArg(tech) + '"');
     lines.splice(insertAt, 0, '    ' + (kind || 'Rel') + '(' + parts.join(', ') + ')');
-    return lines.join('\n');
+    return window.MA.textUpdater.matchEol(text, lines.join(String.fromCharCode(10)));
   }
 
   function deleteLine(text, lineNum) { return window.MA.textUpdater.deleteLine(text, lineNum); }

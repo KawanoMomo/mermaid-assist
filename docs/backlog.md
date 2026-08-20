@@ -41,6 +41,16 @@
 | A30 | エラー表示が拡大率のまま出て右端で切れる | 済 |
 | A31 | flowchart/state: ラベル欄・ID欄・形状が無言で効かない (Blocker) | 済 |
 | A32 | flowchart: 記号を含むラベルで parse 失敗 / 引用符が落ちる | 済 |
+| A33 | kanban: 同名カラムでカードが選んだ先と違う場所に入る | 済 |
+| A34 | block: style/classDef/class/click を幽霊ブロック化 | 済 |
+| A35 | block: 菱形 {"..."} が2ブロックに割れる | 済 |
+| A36 | flowchart: o--o / x--x / <--> で幽霊ノード (`A o`) | 済 |
+| A37 | flowchart: 直上がエッジ行だと ↑ が無言で空振り | 済 |
+| A38 | 非 gantt で Ctrl+A / Ctrl+C / Delete が例外または無反応 | 済 |
+| A39 | 打鍵途中の構文エラーで図が丸ごと消える | 済 |
+| A40 | 未保存のまま離脱しても警告が無い | 済 |
+| A41 | Ctrl+Shift+Z が Undo 側に吸われ Redo にならない | 済 |
+| A42 | CRLF 文書への挿入で改行コードが混在 | 済 |
 
 ## B. 仕様として着手した機能
 

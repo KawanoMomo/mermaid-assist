@@ -27,6 +27,19 @@ window.MA.textUpdater = (function() {
   }
 
   // deleteLine: 1-based lineNum の行を削除
+  // matchEol: 元の文書の改行コードに結果を合わせる。
+  //
+  // どのモジュールも split → splice → join で行を入れるので、CRLF の文書に
+  // 挿入した行だけが復帰文字を持たない。mermaid は通るが、ファイルに書き出すと
+  // diff にノイズが乗る (混在した改行コードはレビューで見えないだけにたちが悪い)。
+  function matchEol(original, result) {
+    if (typeof original !== 'string' || typeof result !== 'string') return result;
+    var CR = String.fromCharCode(13);
+    var LF = String.fromCharCode(10);
+    if (original.indexOf(CR + LF) < 0) return result;
+    return result.split(CR + LF).join(LF).split(LF).join(CR + LF);
+  }
+
   function deleteLine(text, lineNum) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
@@ -60,6 +73,7 @@ window.MA.textUpdater = (function() {
     insertAfter: insertAfter,
     insertBefore: insertBefore,
     deleteLine: deleteLine,
+    matchEol: matchEol,
     swapLines: swapLines,
     appendToFile: appendToFile,
   };

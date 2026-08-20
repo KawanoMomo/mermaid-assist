@@ -9,7 +9,9 @@ window.MA.modules.blockBeta = (function() {
   // a depth counter and an identity check that disagree will pair the wrong
   // braces and delete the wrong range.
   var GROUP_START_RE = /^block:([A-Za-z_][A-Za-z0-9_-]*)(?::\d+)?\s*(?:columns\s+\d+)?\s*$/;
-  var BLOCK_TOKEN_RE = /([A-Za-z_][A-Za-z0-9_-]*)(?:\["([^"]*)"\]|\(\("([^"]*)"\)\)|\("([^"]*)"\))?/g;
+  // 形状付きトークン。菱形 `{"..."}` と六角 `{{"..."}}` を知らないと、
+  // `c{"Actuator"}` が `c` と `Actuator` の2ブロックに割れて幽霊が出る。
+  var BLOCK_TOKEN_RE = /([A-Za-z_][A-Za-z0-9_-]*)(?:\["([^"]*)"\]|\(\("([^"]*)"\)\)|\("([^"]*)"\)|\{\{"([^"]*)"\}\}|\{"([^"]*)"\})?/g;
   var LINK_RE = /^([A-Za-z_][A-Za-z0-9_-]*)\s*(?:--\s*"?([^"]*?)"?\s*)?-->\s*([A-Za-z_][A-Za-z0-9_-]*)\s*$/;
 
   // 追加フォームの親グループ選択。renderProps は毎回パネルを作り直すので、
@@ -27,6 +29,14 @@ window.MA.modules.blockBeta = (function() {
       var trimmed = lines[i].trim();
       if (!trimmed || trimmed.indexOf('%%') === 0) continue;
       if (/^block-beta/.test(trimmed)) continue;
+      // 装飾行はブロックではない。
+      //
+      // 以前は `style a fill:#f9f` をトークン分解して `style` `a` `fill` `f9f` の
+      // 4つをブロックとして登録していた。幽霊項目の ✕ を押すと style 行が消え、
+      // リンクの端点候補に `fill` や `f9f` が並ぶ。既存の .mmd を GUI で開いた
+      // 瞬間に起きるので、手書き Mermaid を GUI で触るという前提が崩れていた。
+      // 本文にはそのまま残す (編集対象にしないだけ)。
+      if (/^(style|classDef|class|click|linkStyle)\s/.test(trimmed)) continue;
 
       var cm = trimmed.match(COLUMNS_RE);
       if (cm) { result.meta.columns = parseInt(cm[1], 10); continue; }
@@ -56,7 +66,7 @@ window.MA.modules.blockBeta = (function() {
       BLOCK_TOKEN_RE.lastIndex = 0;
       while ((m = BLOCK_TOKEN_RE.exec(trimmed)) !== null) {
         var id = m[1];
-        var label = decodeLabel(m[2] || m[3] || m[4] || id);
+        var label = decodeLabel(m[2] || m[3] || m[4] || m[5] || m[6] || id);
         // Skip tokens that are actually link keywords (shouldn't happen here but guard)
         if (id === 'block' || id === 'end' || id === 'columns') continue;
         result.elements.push({ kind: 'block', id: id, label: label, parentId: parent2, line: lineNum });

@@ -406,6 +406,21 @@ html, body {
   white-space: nowrap;
 }
 
+#parse-error-banner {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(190, 60, 60, 0.92);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 12px;
+  z-index: 50;
+  pointer-events: none;
+}
+#parse-error-banner[hidden] { display: none; }
+
 #statusbar {
   display: flex;
   align-items: center;
@@ -600,7 +615,7 @@ html, body {
         <tr><td>Ctrl+S</td><td>保存</td></tr>
         <tr><td>Ctrl+Shift+S</td><td>保存先を指定して上書き (Chrome / Edge)</td></tr>
         <tr><td>Ctrl+O</td><td>開く</td></tr>
-        <tr><td>Ctrl+Z / Ctrl+Y</td><td>元に戻す / やり直す</td></tr>
+        <tr><td>Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z</td><td>元に戻す / やり直す</td></tr>
         <tr><td>↑ ↓ ← →</td><td>要素を順に選ぶ (図にフォーカスがあるとき)</td></tr>
         <tr><td>Delete</td><td>選んでいる要素を削除</td></tr>
         <tr><td>Ctrl+A</td><td>すべて選択</td></tr>
