@@ -201,10 +201,23 @@ window.MA.modules.mindmap = (function() {
     return lines.join('\n');
   }
 
-  function deleteNode(text, lineNum) {
+  // Delete a node and its descendants.
+  //
+  // The root is refused. Removing it takes the whole tree with it and leaves the
+  // bare keyword `mindmap`, which mermaid rejects — so one press of ✕ on the
+  // first row of the list emptied the diagram and put the status bar into Error.
+  // A mindmap without a root is not a state the user can be in, so the operation
+  // has nothing valid to produce.
+  function deleteNode(text, lineNum, nodeId) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
+    var parsedNodes = parseMindmap(text).elements;
+    for (var pi = 0; pi < parsedNodes.length; pi++) {
+      var n = parsedNodes[pi];
+      var matches = nodeId ? (n.id === nodeId) : (n.line === lineNum);
+      if (matches && n.parentId === null) return text;
+    }
     var curIndent = lines[idx].match(/^(\s*)/)[1].length;
     var endIdx = idx + 1;
     while (endIdx < lines.length) {
@@ -234,10 +247,15 @@ window.MA.modules.mindmap = (function() {
       var nodesList = '';
       for (var i = 0; i < nodes.length; i++) {
         var n = nodes[i];
+        // ルートには ✕ を出さない。mindmap はルートの無い状態を持てないので
+        // 削除は必ず拒否される。押せるボタンが何もしないのは、押せないことが
+        // 分かるより悪い
+        var isRoot = n.parentId === null;
         nodesList += P.listItemHtml({
           label: ' '.repeat(n.level * 2) + n.text + (n.shape !== 'default' ? ' [' + n.shape + ']' : '') + (n.icon ? ' (' + n.icon + ')' : ''),
-          sublabel: 'L' + n.level,
-          selectClass: 'mm-select-node', deleteClass: 'mm-delete-node',
+          sublabel: 'L' + n.level + (isRoot ? ' ルート' : ''),
+          selectClass: 'mm-select-node',
+          deleteClass: isRoot ? null : 'mm-delete-node',
           dataElementId: n.id, dataLine: n.line, mono: true,
         });
       }
@@ -278,7 +296,9 @@ window.MA.modules.mindmap = (function() {
       });
 
       P.bindSelectButtons(propsEl, 'mm-select-node', 'node');
-      P.bindDeleteButtons(propsEl, 'mm-delete-node', ctx, deleteNode);
+      P.bindDeleteButtons(propsEl, 'mm-delete-node', ctx, function(t, ln, elId) {
+        return deleteNode(t, ln, elId);
+      });
       return;
     }
 

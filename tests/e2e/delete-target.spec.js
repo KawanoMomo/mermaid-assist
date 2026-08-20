@@ -63,3 +63,77 @@ test.describe('一覧の ✕ が押した要素を消す', () => {
     expect(await page.locator('#status-parse').textContent()).toBe('OK');
   });
 });
+
+// 並行レビュー (実UIを回すレビュアー) が見つけた、✕ を1回押すだけで
+// status が Error になる3件。
+test.describe('削除で図が壊れない', () => {
+  async function deleteFirst(page, type) {
+    page.on('dialog', d => d.accept());
+    await page.goto(HTML_URL);
+    await page.waitForSelector('#preview-svg svg', { timeout: 15000 });
+    await page.waitForTimeout(600);
+    await page.locator('#diagram-type').selectOption(type);
+    await page.waitForTimeout(1700);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(500);
+    const del = page.locator('#props-content button[class*="delete"]').first();
+    await expect(del).toHaveCount(1);
+    await del.click();
+    await page.waitForTimeout(1400);
+  }
+
+  // ビット範囲は 0 から隙間なく並ぶ必要がある。先頭を消すと 16 から始まって
+  // しまい mermaid が拒否していた。
+  test('packet-beta: フィールドを消しても範囲に穴が空かない', async ({ page }) => {
+    await deleteFirst(page, 'packet-beta');
+    expect(await page.locator('#status-parse').textContent()).toBe('OK');
+    const text = await page.locator('#editor').inputValue();
+    expect(text).toMatch(/^\s*0[-:]/m);   // 0 から始まる
+  });
+
+  // group を消しても `in api` が残り、存在しないグループを指していた。
+  test('architecture-beta: グループを消すと in 参照も消える', async ({ page }) => {
+    await deleteFirst(page, 'architecture-beta');
+    expect(await page.locator('#status-parse').textContent()).toBe('OK');
+    const text = await page.locator('#editor').inputValue();
+    expect(text).not.toContain('in api');
+    // 中のサービスはグループから出るだけで残る
+    expect(text).toContain('service db');
+  });
+
+  // ルートを消すと図が丸ごと消えて `mindmap` の1行だけになり Error だった。
+  // 削除させないのが正しいので、ルート行には ✕ を出さない
+  // (押せるのに何もしないボタンは、押せないと分かるより悪い)。
+  test('mindmap: ルート行には削除ボタンが無い', async ({ page }) => {
+    page.on('dialog', d => d.accept());
+    await page.goto(HTML_URL);
+    await page.waitForSelector('#preview-svg svg', { timeout: 15000 });
+    await page.waitForTimeout(600);
+    await page.locator('#diagram-type').selectOption('mindmap');
+    await page.waitForTimeout(1700);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(500);
+
+    const rootRow = page.locator('#props-content button.mm-select-node').first();
+    const rootId = await rootRow.getAttribute('data-element-id');
+    expect(await page.locator('.mm-delete-node[data-element-id="' + rootId + '"]').count()).toBe(0);
+    // 子ノードには出る
+    expect(await page.locator('.mm-delete-node').count()).toBeGreaterThan(0);
+  });
+
+  test('mindmap: 子ノードを消しても図は壊れない', async ({ page }) => {
+    page.on('dialog', d => d.accept());
+    await page.goto(HTML_URL);
+    await page.waitForSelector('#preview-svg svg', { timeout: 15000 });
+    await page.waitForTimeout(600);
+    await page.locator('#diagram-type').selectOption('mindmap');
+    await page.waitForTimeout(1700);
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(500);
+
+    await page.locator('.mm-delete-node').first().click();
+    await page.waitForTimeout(1400);
+    expect(await page.locator('#status-parse').textContent()).toBe('OK');
+    expect(await page.locator('#editor').inputValue()).toContain('root((');
+  });
+});

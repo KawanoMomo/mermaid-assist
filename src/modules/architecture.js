@@ -80,6 +80,42 @@ window.MA.modules.architectureBeta = (function() {
 
   function deleteLine(text, lineNum) { return window.MA.textUpdater.deleteLine(text, lineNum); }
 
+  // Delete a group or service together with everything that names it.
+  //
+  // Deleting the line on its own left `service db(database)[DB] in api` pointing
+  // at a group that no longer exists, and mermaid refused the whole diagram.
+  // Same for a service: the edges naming it stayed behind.
+  //
+  // A group's members are not deleted — they just leave the group. Removing
+  // someone's boxes because the box around them went away is not what the ✕ on
+  // the group row promises.
+  function deleteElement(text, lineNum, elementId) {
+    if (!elementId) return deleteLine(text, lineNum);
+    var lines = text.split('\n');
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var indent = lines[i].match(/^(\s*)/)[1];
+      var trimmed = lines[i].trim();
+
+      var decl = trimmed.match(/^(group|service)\s+(\S+)\s*\(([^)]+)\)\s*\[([^\]]*)\]\s*(?:in\s+(\S+))?\s*$/);
+      if (decl) {
+        if (decl[2] === elementId) continue;              // 本体
+        if (decl[5] === elementId) {                      // 消えたグループの中身
+          out.push(indent + decl[1] + ' ' + decl[2] + '(' + decl[3] + ')[' + decl[4] + ']');
+          continue;
+        }
+        out.push(lines[i]);
+        continue;
+      }
+
+      var edge = trimmed.match(/^(\S+):([TBLR])(\s+--\s+)([TBLR]):(\S+)\s*$/);
+      if (edge && (edge[1] === elementId || edge[5] === elementId)) continue;
+
+      out.push(lines[i]);
+    }
+    return out.join('\n');
+  }
+
   function updateElement(text, lineNum, field, value) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
@@ -272,8 +308,14 @@ window.MA.modules.architectureBeta = (function() {
       P.bindSelectButtons(propsEl, 'arch-select-group', 'group');
       P.bindSelectButtons(propsEl, 'arch-select-service', 'service');
       P.bindSelectButtons(propsEl, 'arch-select-edge', 'edge');
-      P.bindDeleteButtons(propsEl, 'arch-delete-group', ctx, deleteLine);
-      P.bindDeleteButtons(propsEl, 'arch-delete-service', ctx, deleteLine);
+      // 3引数目は data-element-id。無いと `in <group>` やエッジが残り、
+      // 存在しない要素を指したまま mermaid が図全体を拒否する
+      P.bindDeleteButtons(propsEl, 'arch-delete-group', ctx, function(t, ln, elId) {
+        return deleteElement(t, ln, elId);
+      });
+      P.bindDeleteButtons(propsEl, 'arch-delete-service', ctx, function(t, ln, elId) {
+        return deleteElement(t, ln, elId);
+      });
       P.bindDeleteButtons(propsEl, 'arch-delete-edge', ctx, deleteLine);
       return;
     }
@@ -413,6 +455,7 @@ window.MA.modules.architectureBeta = (function() {
       },
     },
     addGroup: addGroup, addService: addService, addEdge: addEdge,
-    deleteLine: deleteLine, updateElement: updateElement, updateEdge: updateEdge,
+    deleteLine: deleteLine,
+    deleteElement: deleteElement, updateElement: updateElement, updateEdge: updateEdge,
   };
 })();

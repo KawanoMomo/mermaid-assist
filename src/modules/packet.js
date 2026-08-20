@@ -81,7 +81,38 @@ window.MA.modules.packetBeta = (function() {
     return lines.join('\n');
   }
 
-  function deleteField(text, lineNum) { return window.MA.textUpdater.deleteLine(text, lineNum); }
+  // Delete a field and close the gap it leaves.
+  //
+  // packet-beta's bit ranges have to start at 0 and run without holes. Deleting
+  // the line on its own left the next field starting at 16, and mermaid refused
+  // the diagram — pressing ✕ once produced a packet with a hole in it, which is
+  // not a packet.
+  //
+  // Each remaining field keeps its own width; only the offsets shift down.
+  function deleteField(text, lineNum, fieldId) {
+    var removed = window.MA.textUpdater.deleteLine(text, lineNum);
+    var parsed = parsePacket(removed);
+    var fields = parsed.elements || [];
+    if (fields.length === 0) return removed;
+
+    var lines = removed.split('\n');
+    var next = 0;
+    for (var i = 0; i < fields.length; i++) {
+      var f = fields[i];
+      var width = f.endBit - f.startBit;      // 0 なら単一ビット
+      var start = next;
+      var end = next + width;
+      lines[f.line - 1] = lines[f.line - 1].replace(/^(\s*)\S+\s*:/, '$1' + formatRange(start, end) + ':');
+      next = end + 1;
+    }
+    return lines.join('\n');
+  }
+
+  // `0` と `0-15` を書き分ける。mermaid はどちらも受け付けるが、単一ビットを
+  // `0-0` と書くと図のラベルがその通りに出て読みにくい。
+  function formatRange(start, end) {
+    return start === end ? String(start) : (start + '-' + end);
+  }
 
   function updateField(text, lineNum, field, value) {
     var lines = text.split('\n');
@@ -160,7 +191,9 @@ window.MA.modules.packetBeta = (function() {
       });
 
       P.bindSelectButtons(propsEl, 'pk-select-field', 'field');
-      P.bindDeleteButtons(propsEl, 'pk-delete-field', ctx, deleteField);
+      P.bindDeleteButtons(propsEl, 'pk-delete-field', ctx, function(t, ln, elId) {
+        return deleteField(t, ln, elId);
+      });
       return;
     }
 
