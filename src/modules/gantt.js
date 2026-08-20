@@ -986,6 +986,719 @@ window.MA.modules.gantt = (function() {
     }
   }
 
+  // 追加フォームの状態。gantt 固有なので app.js ではなくここで持つ。
+  var addForm = { label: '', id: '', start: '', end: '', kind: 'task', focus: null };
+  function setAddFormFocus(field) { addForm.focus = field; }
+  function addFormSectionIndex(parsedData) {
+    var count = (parsedData && parsedData.sections) ? parsedData.sections.length : 0;
+    if (count === 0) return -1;
+    var want = parseInt(addForm.section, 10);
+    if (isNaN(want) || want < 0 || want >= count) return 0;
+    return want;
+  }
+
+  // gantt のプロパティ欄。他の20図種と同じ 4引数契約 (ADR-012)。
+  //
+  // app.js に残っていたのは、mmdText / editorEl / suppressSync / syncLineNumbers といった
+  // アプリの状態を直接触っていたから。実測すると同じ形の同期ブロックが19箇所あり、
+  // すべて ctx.setMmdText に1対1で対応した。外部依存は ctx の5つに収まる。
+  function renderProps(selData, parsedData, propsEl, ctx) {
+    if (!propsEl) return;
+
+    // No selection
+    if (!selData || selData.length === 0) {
+      var sectionOptions = '';
+      if (parsedData && parsedData.sections) {
+        var keepSec = addFormSectionIndex(parsedData);
+        for (var si = 0; si < parsedData.sections.length; si++) {
+          // The chosen section has to survive the rebuild too, otherwise every
+          // keystroke drops the user back to the first section.
+          var selAttr = (String(si) === String(keepSec)) ? ' selected' : '';
+          sectionOptions += '<option value="' + si + '"' + selAttr + '>' + window.MA.htmlUtils.escHtml(parsedData.sections[si].name) + '</option>';
+        }
+      }
+      if (!sectionOptions) {
+        sectionOptions = '<option value="-1">（セクションなし）</option>';
+      }
+
+      var sectionListHtml = '';
+      if (parsedData && parsedData.sections && parsedData.sections.length > 0) {
+        sectionListHtml += '<div id="prop-section-list" style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:12px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">セクション一覧</label>';
+        for (var sli = 0; sli < parsedData.sections.length; sli++) {
+          var sec = parsedData.sections[sli];
+          var taskCount = 0;
+          for (var sti = 0; sti < parsedData.tasks.length; sti++) {
+            if (parsedData.tasks[sti].sectionIndex === sli) taskCount++;
+          }
+          sectionListHtml +=
+            '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;">' +
+              '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + window.MA.htmlUtils.escHtml(sec.name) + '">' + window.MA.htmlUtils.escHtml(sec.name) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + taskCount + ')</span></div>' +
+              '<button class="prop-section-up" data-section-line="' + sec.line + '" title="上のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:10px;padding:0;">↑</button>' +
+              '<button class="prop-section-down" data-section-line="' + sec.line + '" title="下のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:10px;padding:0;">↓</button>' +
+              // 巻き添えの件数をボタン自体に出す (block と同じ手)。
+              // 以前はここだけ confirm を出していて、同じ画面のタスク ✕ は無言、
+              // block は件数表示と、3通りの作法が混在していた。押す前に何が起きるかを
+              // ボタンの文字で示し、確認は出さない (Undo で戻せる)。
+              '<button class="prop-section-delete" data-section-name="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-line="' + sec.line + '" data-task-count="' + taskCount + '" title="セクション「' + window.MA.htmlUtils.escHtml(sec.name) + '」と含まれるタスク' + taskCount + '件を削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">✕' + (taskCount > 0 ? taskCount : '') + '</button>' +
+            '</div>';
+
+          // セクションの下にタスクを並べる。
+          //
+          // gantt だけプロパティ欄にタスク一覧が無く、タスクを選ぶ手段が
+          // 「チャート上のバーをクリックする」しか無かった。他の20図種には一覧がある。
+          // 4件なら困らないが、100件になるとバーを目で探すしかなくなり、
+          // 一覧を持つ他の図種との差が実務で効いてくる (R8 スケール耐性)。
+          for (var tli = 0; tli < parsedData.tasks.length; tli++) {
+            var tk = parsedData.tasks[tli];
+            if (tk.sectionIndex !== sli) continue;
+            var tkLabel = window.MA.htmlUtils.escHtml(tk.label || tk.id || '');
+            var tkId = window.MA.htmlUtils.escHtml(tk.id || '');
+            sectionListHtml +=
+              '<div class="ma-list-row" style="display:flex;align-items:center;gap:4px;margin:0 0 3px 14px;padding:2px 4px;background:var(--bg-primary);border-radius:3px;">' +
+                '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + tkLabel + '">' + tkLabel + '</div>' +
+                '<button class="prop-task-select" data-element-id="' + tkId + '" data-line="' + tk.line + '" title="「' + tkLabel + '」を選択" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' +
+                '<button class="prop-task-delete" data-element-id="' + tkId + '" data-line="' + tk.line + '" title="「' + tkLabel + '」を削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
+              '</div>';
+          }
+        }
+        sectionListHtml += '</div>';
+      } else {
+        sectionListHtml = '<div id="prop-section-list" style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:12px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:4px;">セクション一覧</label>' +
+          '<div style="font-size:11px;color:var(--text-secondary);">（セクションなし）</div>' +
+        '</div>';
+      }
+
+      var G = window.MA.modules.gantt;
+      var addSecIdx = parseInt(addFormSectionIndex(parsedData), 10);
+      var isMilestone = addForm.kind === 'milestone';
+      // Only used to prefill an empty field: a value the user typed wins.
+      var autoStart = G.nextStartDate(ctx.getMmdText(), addSecIdx);
+      var autoDays = G.nextDurationDays(ctx.getMmdText(), addSecIdx);
+      var autoEnd = (autoStart && autoDays !== null)
+        ? window.MA.dateUtils.addDays(autoStart, autoDays) : '';
+      var fStart = addForm.start || autoStart || '';
+      var fEnd = addForm.end || autoEnd || '';
+      var inputStyle = 'width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;';
+      var esc = window.MA.htmlUtils.escHtml;
+
+      propsEl.innerHTML =
+        '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">タスクを選択するか、新規追加</div>' +
+        // 種別トグル。status を唯一の真とし、これはその入力手段でしかない。
+        '<div style="margin-bottom:8px;display:flex;gap:2px;">' +
+          '<button id="prop-add-kind-task" style="flex:1;background:' + (isMilestone ? 'var(--bg-tertiary)' : 'var(--accent)') + ';color:' + (isMilestone ? 'var(--text-primary)' : '#fff') + ';border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">タスク</button>' +
+          '<button id="prop-add-kind-milestone" style="flex:1;background:' + (isMilestone ? 'var(--accent)' : 'var(--bg-tertiary)') + ';color:' + (isMilestone ? '#fff' : 'var(--text-primary)') + ';border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">マイルストーン</button>' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label>' +
+          '<input id="prop-add-label" type="text" value="' + esc(addForm.label || '新規タスク') + '" style="' + inputStyle + '">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ID</label>' +
+          '<input id="prop-add-id" type="text" value="' + esc(addForm.id) + '" placeholder="' + esc(G.nextTaskId(ctx.getMmdText())) + '" style="' + inputStyle + '">' +
+        '</div>' +
+        (isMilestone
+          ? '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">日付</label>' +
+              '<input id="prop-add-start" type="date" value="' + esc(fStart) + '" style="' + inputStyle + '">' +
+            '</div>'
+          : '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
+              '<input id="prop-add-start" type="date" value="' + esc(fStart) + '" style="' + inputStyle + '">' +
+            '</div>' +
+            '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
+              '<input id="prop-add-end" type="date" value="' + esc(fEnd) + '" style="' + inputStyle + '">' +
+            '</div>') +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション</label>' +
+          '<select id="prop-add-section" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + sectionOptions + '</select>' +
+        '</div>' +
+        '<button id="prop-add-btn" style="width:100%;background:var(--accent);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-bottom:12px;">+ タスク追加</button>' +
+        '<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px;margin-bottom:12px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション追加</label>' +
+          '<div style="display:flex;gap:4px;">' +
+            '<input id="prop-add-sec-name" type="text" placeholder="セクション名" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '<button id="prop-add-sec-btn" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:12px;">+</button>' +
+          '</div>' +
+        '</div>' +
+        sectionListHtml +
+        '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:6px;font-weight:bold;">グローバル設定</label>' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">title</label>' +
+          '<input id="prop-global-title" type="text" value="' + window.MA.htmlUtils.escHtml(parsedData.title || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:6px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">dateFormat</label>' +
+          '<input id="prop-global-dateformat" type="text" value="' + window.MA.htmlUtils.escHtml(parsedData.dateFormat || 'YYYY-MM-DD') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:6px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">axisFormat</label>' +
+          (function() {
+            var presets = [
+              { v: '%Y-%m-%d', label: '2026-04-14' },
+              { v: '%Y/%m/%d', label: '2026/04/14' },
+              { v: '%m/%d',    label: '04/14' },
+              { v: '%m月%d日', label: '04月14日' },
+              { v: '%b %d',    label: 'Apr 14' },
+              { v: '%d %b',    label: '14 Apr' },
+              { v: '%a',       label: 'Tue (曜日)' }
+            ];
+            var current = parsedData.axisFormat || '';
+            // No axisFormat line means the app picks the granularity from the
+            // project span (ganttAxisFor). That is a real, named state — showing
+            // "カスタム…" with an empty box says the user chose something custom
+            // and then failed to type it, which is the opposite of what is
+            // happening.
+            var auto = !current;
+            var matched = false;
+            var opts = '<option value="__auto__"' + (auto ? ' selected' : '') +
+              '>自動 (期間に合わせる)</option>';
+            for (var pi = 0; pi < presets.length; pi++) {
+              var sel = (presets[pi].v === current) ? ' selected' : '';
+              if (sel) matched = true;
+              opts += '<option value="' + window.MA.htmlUtils.escHtml(presets[pi].v) + '"' + sel + '>' + window.MA.htmlUtils.escHtml(presets[pi].label + '  (' + presets[pi].v + ')') + '</option>';
+            }
+            var customSel = (matched || auto) ? '' : ' selected';
+            opts += '<option value="__custom__"' + customSel + '>カスタム…</option>';
+            var customDisplay = (matched || auto) ? 'none' : 'block';
+            return '<select id="prop-axisformat-preset" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:4px;">' + opts + '</select>' +
+              '<input id="prop-axisformat-custom" type="text" value="' + window.MA.htmlUtils.escHtml(current) + '" placeholder="%m/%d" style="display:' + customDisplay + ';width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">';
+          })() +
+        '</div>';
+
+      // Keep every field in addForm as it is typed, so the next rebuild restores
+      // it instead of resetting to the hardcoded defaults.
+      ['label', 'id', 'start', 'end'].forEach(function(field) {
+        var el = document.getElementById('prop-add-' + field);
+        if (!el) return;
+        el.addEventListener('input', function() { addForm[field] = this.value; });
+        // Enter anywhere in the form adds the task — the add button is below the
+        // fold on a short panel and the round trip to it is the whole friction.
+        el.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') { e.preventDefault(); doAddTask(); }
+        });
+      });
+      var secSel = document.getElementById('prop-add-section');
+      if (secSel) {
+        secSel.addEventListener('change', function() { addForm.section = this.value; });
+      }
+
+      window.MA.properties.bindEvent('prop-add-kind-task', 'click', function() {
+        addForm.kind = 'task';
+        setAddFormFocus('label');
+        renderProps();
+      });
+      window.MA.properties.bindEvent('prop-add-kind-milestone', 'click', function() {
+        addForm.kind = 'milestone';
+        setAddFormFocus('label');
+        renderProps();
+      });
+
+      function doAddTask() {
+        var labelEl = document.getElementById('prop-add-label');
+        var idEl = document.getElementById('prop-add-id');
+        var startEl = document.getElementById('prop-add-start');
+        var endEl = document.getElementById('prop-add-end');
+        var secEl = document.getElementById('prop-add-section');
+        var label = (labelEl && labelEl.value) || '新規タスク';
+        var id = (idEl && idEl.value) ? idEl.value : window.MA.modules.gantt.nextTaskId(ctx.getMmdText());
+        var start = startEl ? startEl.value : '';
+        var secIdx = secEl ? parseInt(secEl.value, 10) : -1;
+        var milestone = addForm.kind === 'milestone';
+        // Without a date there is nothing to place the bar at; mermaid resolves a
+        // missing start to the chart origin, which reads as a task that silently
+        // jumped to the beginning of the project.
+        if (!start) {
+          // フォーカスを移すだけでは何が起きたのか分からない。
+          // 押しても何も起きないのが一番困る (C4 は「ID と Label は必須」と言うのに
+          // こちらだけ無言だった) ので、理由をその場で言う。
+          if (startEl) startEl.focus();
+          ctx.showTransient('開始日を入れてください — 日付が無いとバーを置く位置が決まりません', 4000);
+          return;
+        }
+        var end = milestone ? '0d' : ((endEl && endEl.value) || start);
+        window.MA.history.pushHistory();
+        var _t0 = addTask(ctx.getMmdText(), secIdx, label, id, start, end, milestone ? 'milestone' : null);
+        // 追加したタスクを自動選択しない。
+        //
+        // 選択するとプロパティパネルが詳細表示に切り替わり、**追加フォームごと
+        // 消える**。「ラベル欄へフォーカスを戻して連続入力」と真正面から
+        // 矛盾していて、実測でも追加直後のパネルは詳細表示になり
+        // prop-add-label が存在しなかった。5本続けて足したいときに毎回
+        // Escape を押して戻る必要がある。
+        //
+        // 追加した結果は図とエディタに出るので、確認手段は失われない。
+        window.MA.selection.clearSelection();
+        // Clear only what identifies this task. The section and the kind are the
+        // user's current context and carry over to the next add; the dates are
+        // recomputed from the task just added.
+        addForm.label = '';
+        addForm.id = '';
+        addForm.start = '';
+        addForm.end = '';
+        addForm.section = secEl ? secEl.value : addForm.section;
+        setAddFormFocus('label');
+        ctx.setMmdText(_t0);
+        ctx.onUpdate();
+        // renderPropsは scheduleRefresh → refresh → renderProps で自動的に呼ばれるので、追加呼び出しは不要
+      }
+
+      window.MA.properties.bindEvent('prop-add-btn', 'click', doAddTask);
+
+      // Restore focus after the rebuild that follows an add or a kind switch.
+      if (addForm.focus) {
+        var focusEl = document.getElementById('prop-add-' + addForm.focus);
+        addForm.focus = null;
+        if (focusEl) {
+          focusEl.focus();
+          if (focusEl.select) focusEl.select();
+        }
+      }
+
+      // Bind add section button
+      var addSecBtn = document.getElementById('prop-add-sec-btn');
+      if (addSecBtn) {
+        addSecBtn.addEventListener('click', function() {
+          var name = document.getElementById('prop-add-sec-name').value.trim();
+          if (!name) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(addSection(ctx.getMmdText(), name));
+          ctx.onUpdate();
+        });
+      }
+
+      // Bind section move buttons. Sections own the tasks between their header and
+      // the next one, so moving a section carries its tasks along — the task-level
+      // ↑↓ only reorders within a section.
+      ['up', 'down'].forEach(function(dir) {
+        var btns = propsEl.querySelectorAll('.prop-section-' + dir);
+        for (var mi = 0; mi < btns.length; mi++) {
+          btns[mi].addEventListener('click', function() {
+            var ln = parseInt(this.getAttribute('data-section-line'), 10);
+            if (isNaN(ln)) return;
+            var moved = window.MA.modules.gantt.moveSection(ctx.getMmdText(), ln, dir === 'up' ? -1 : 1);
+            if (moved === ctx.getMmdText()) return; // at the edge — nothing to do
+            window.MA.history.pushHistory();
+            ctx.setMmdText(moved);
+            ctx.onUpdate();
+          });
+        }
+      });
+
+      // Bind section delete buttons
+      var sectionDeleteBtns = propsEl.querySelectorAll('.prop-section-delete');
+      for (var sdbi = 0; sdbi < sectionDeleteBtns.length; sdbi++) {
+        (function(btn) {
+          btn.addEventListener('click', function() {
+            var secName = btn.getAttribute('data-section-name');
+            var secLine = parseInt(btn.getAttribute('data-section-line'), 10);
+            var secTasks = parseInt(btn.getAttribute('data-task-count'), 10) || 0;
+            window.MA.history.pushHistory();
+            var _t1 = deleteSection(ctx.getMmdText(), secLine);
+            ctx.setMmdText(_t1);
+            window.MA.selection.setSelected([]);
+            ctx.showTransient('セクション「' + secName + '」とタスク' + secTasks +
+              '件を削除 — Ctrl+Z で戻せます');
+            ctx.onUpdate();
+          });
+        })(sectionDeleteBtns[sdbi]);
+      }
+
+      // Bind task list (select / delete)
+      //
+      // 選択は他の図種と同じく selection に載せるだけ。バーをクリックした場合と
+      // 同じ状態にしたいので、id で選ぶ (行番号は編集で動く)。
+      var taskSelBtns = propsEl.querySelectorAll('.prop-task-select');
+      for (var tsi = 0; tsi < taskSelBtns.length; tsi++) {
+        (function(btn) {
+          btn.addEventListener('click', function() {
+            var id = btn.getAttribute('data-element-id');
+            if (!id) return;
+            window.MA.selection.setSelected([{ type: 'task', id: id }]);
+            ctx.onUpdate();
+          });
+        })(taskSelBtns[tsi]);
+      }
+      var taskDelBtns = propsEl.querySelectorAll('.prop-task-delete');
+      for (var tdi = 0; tdi < taskDelBtns.length; tdi++) {
+        (function(btn) {
+          btn.addEventListener('click', function() {
+            var ln = parseInt(btn.getAttribute('data-line'), 10);
+            if (isNaN(ln)) return;
+            window.MA.history.pushHistory();
+            var _t2 = deleteTask(ctx.getMmdText(), ln);
+            ctx.setMmdText(_t2);
+            window.MA.selection.setSelected([]);
+            ctx.onUpdate();
+          });
+        })(taskDelBtns[tdi]);
+      }
+
+      // Bind global settings
+      function bindGlobal(elId, key) {
+        var el = document.getElementById(elId);
+        if (el) {
+          el.addEventListener('change', function() {
+            window.MA.history.pushHistory();
+            ctx.setMmdText(updateGlobalSetting(ctx.getMmdText(), key, el.value));
+            ctx.onUpdate();
+          });
+        }
+      }
+      bindGlobal('prop-global-title', 'title');
+      bindGlobal('prop-global-dateformat', 'dateFormat');
+      // axisFormat: preset dropdown + custom input
+      var afPreset = document.getElementById('prop-axisformat-preset');
+      var afCustom = document.getElementById('prop-axisformat-custom');
+      if (afPreset) {
+        afPreset.addEventListener('change', function() {
+          var v = afPreset.value;
+          if (v === '__custom__') {
+            if (afCustom) {
+              afCustom.style.display = 'block';
+              afCustom.focus();
+            }
+            return; // don't update text yet — wait for custom input change
+          }
+          if (afCustom) afCustom.style.display = 'none';
+          window.MA.history.pushHistory();
+          // 自動 = the axisFormat line is absent, so the app derives the tick
+          // granularity from the project span. Writing a value here would pin it
+          // again, because the DSL line beats the config.
+          if (v === '__auto__') {
+            ctx.setMmdText(window.MA.modules.gantt.removeGlobalSetting(ctx.getMmdText(), 'axisFormat'));
+            ctx.onUpdate();
+            return;
+          }
+          ctx.setMmdText(updateGlobalSetting(ctx.getMmdText(), 'axisFormat', v));
+          ctx.onUpdate();
+        });
+      }
+      if (afCustom) {
+        afCustom.addEventListener('change', function() {
+          window.MA.history.pushHistory();
+          ctx.setMmdText(updateGlobalSetting(ctx.getMmdText(), 'axisFormat', afCustom.value));
+          ctx.onUpdate();
+        });
+      }
+      return;
+    }
+
+    // Single task selected
+    if (selData.length === 1 && selData[0].type === 'task') {
+      var taskId = selData[0].id;
+      var task = null;
+      if (parsedData && parsedData.tasks) {
+        for (var ti = 0; ti < parsedData.tasks.length; ti++) {
+          if (parsedData.tasks[ti].id === taskId) { task = parsedData.tasks[ti]; break; }
+        }
+      }
+      if (!task) {
+        propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">タスクが見つかりません</p>';
+        return;
+      }
+
+      var statusBtns = ['none', 'done', 'active', 'crit', 'milestone'].map(function(s) {
+        var isActive = (s === 'none' && !task.status) || (task.status === s);
+        var bg = isActive ? 'var(--accent)' : 'var(--bg-tertiary)';
+        var val = s === 'none' ? '' : s;
+        return '<button class="prop-status-btn" data-status="' + val + '" style="flex:1;background:' + bg + ';color:var(--text-primary);border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">' + s + '</button>';
+      }).join('');
+
+      var moveSecOpts = '';
+      if (parsedData && parsedData.sections) {
+        for (var msi = 0; msi < parsedData.sections.length; msi++) {
+          var selAttr = (msi === task.sectionIndex) ? ' selected' : '';
+          moveSecOpts += '<option value="' + msi + '"' + selAttr + '>' + window.MA.htmlUtils.escHtml(parsedData.sections[msi].name) + '</option>';
+        }
+      }
+      if (!moveSecOpts) {
+        moveSecOpts = '<option value="-1">（セクションなし）</option>';
+      }
+
+      propsEl.innerHTML =
+        '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;">' +
+          '<div style="flex:1;font-weight:bold;color:var(--text-primary);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + window.MA.htmlUtils.escHtml(task.label) + '</div>' +
+          '<button id="prop-move-up" title="同一セクション内で上へ移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↑</button>' +
+          '<button id="prop-move-down" title="同一セクション内で下へ移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↓</button>' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label>' +
+          '<input id="prop-label" type="text" value="' + window.MA.htmlUtils.escHtml(task.label) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ID</label>' +
+          '<input id="prop-id" type="text" value="' + window.MA.htmlUtils.escHtml(window.MA.parserUtils.isAutoId(task.id) ? '' : task.id) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        // A milestone is a point in time; the second date field has nothing to
+        // hold. status is the single source of truth for what a task is, so the
+        // panel folds purely on it — the add form's kind toggle only ever writes
+        // status, it never gets its own opinion.
+        (task.status === 'milestone'
+          ? '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">日付</label>' +
+              '<input id="prop-start" type="date" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '</div>'
+          : '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
+              '<input id="prop-start" type="date" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '</div>' +
+            '<div style="margin-bottom:8px;">' +
+              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
+              '<input id="prop-end" type="date" value="' + window.MA.htmlUtils.escHtml(task.endDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '</div>') +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ステータス</label>' +
+          '<div style="display:flex;gap:2px;">' + statusBtns + '</div>' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">after依存</label>' +
+          '<input id="prop-after" type="text" value="' + window.MA.htmlUtils.escHtml(task.after || '') + '" placeholder="タスクID (例: a1)" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション移動</label>' +
+          '<select id="prop-move-section" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + moveSecOpts + '</select>' +
+        '</div>' +
+        '<button id="prop-delete-btn" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">タスク削除</button>';
+
+      // Bind handlers
+      window.MA.properties.bindTextField('prop-label', task.line, 'label');
+      window.MA.properties.bindTextField('prop-id', task.line, 'id');
+      window.MA.properties.bindTextField('prop-after', task.line, 'after');
+      window.MA.properties.bindDateField('prop-start', 'prop-end', task.line, updateTaskDates);
+
+      // Move up/down handlers
+      var moveUpBtn = document.getElementById('prop-move-up');
+      if (moveUpBtn) {
+        moveUpBtn.addEventListener('click', function() {
+          var newText = moveTaskWithinSection(ctx.getMmdText(), task.line, -1);
+          if (newText === ctx.getMmdText()) return; // no-op (boundary)
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
+          ctx.onUpdate();
+        });
+      }
+      var moveDownBtn = document.getElementById('prop-move-down');
+      if (moveDownBtn) {
+        moveDownBtn.addEventListener('click', function() {
+          var newText = moveTaskWithinSection(ctx.getMmdText(), task.line, 1);
+          if (newText === ctx.getMmdText()) return;
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
+          ctx.onUpdate();
+        });
+      }
+
+      var moveSectionEl = document.getElementById('prop-move-section');
+      if (moveSectionEl) {
+        moveSectionEl.addEventListener('change', function() {
+          var targetIdx = parseInt(moveSectionEl.value, 10);
+          if (isNaN(targetIdx)) return;
+          var newText = moveTaskToSection(ctx.getMmdText(), task.line, targetIdx);
+          if (newText === ctx.getMmdText()) return; // no-op
+          window.MA.history.pushHistory();
+          ctx.setMmdText(newText);
+          ctx.onUpdate();
+        });
+      }
+
+      // Status buttons
+      var statusBtnEls = propsEl.querySelectorAll('.prop-status-btn');
+      for (var sbi = 0; sbi < statusBtnEls.length; sbi++) {
+        (function(btn) {
+          btn.addEventListener('click', function() {
+            window.MA.history.pushHistory();
+            ctx.setMmdText(updateTaskField(ctx.getMmdText(), task.line, 'status', btn.getAttribute('data-status')));
+            ctx.onUpdate();
+          });
+        })(statusBtnEls[sbi]);
+      }
+
+      // Delete button
+      var delBtn = document.getElementById('prop-delete-btn');
+      if (delBtn) {
+        delBtn.addEventListener('click', function() {
+          window.MA.history.pushHistory();
+          var _t3 = deleteTask(ctx.getMmdText(), task.line);
+          ctx.setMmdText(_t3);
+          window.MA.selection.setSelected([]);
+          ctx.onUpdate();
+        });
+      }
+      return;
+    }
+
+    // Multiple tasks selected
+    if (selData.length > 1) {
+      var selectedTasks = [];
+      if (parsedData && parsedData.tasks) {
+        for (var mi = 0; mi < selData.length; mi++) {
+          for (var mj = 0; mj < parsedData.tasks.length; mj++) {
+            if (parsedData.tasks[mj].id === selData[mi].id) {
+              selectedTasks.push(parsedData.tasks[mj]);
+              break;
+            }
+          }
+        }
+      }
+
+      var batchStatusBtns = ['done', 'active', 'crit', 'none'].map(function(s) {
+        var val = s === 'none' ? '' : s;
+        return '<button class="batch-status-btn" data-status="' + val + '" style="flex:1;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">' + s + '</button>';
+      }).join('');
+
+      propsEl.innerHTML =
+        '<div style="margin-bottom:8px;font-size:11px;color:var(--text-secondary);">' + selData.length + ' タスク選択中</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">一括ステータス変更</label>' +
+          '<div style="display:flex;gap:2px;">' + batchStatusBtns + '</div>' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">一括日付シフト（日数）</label>' +
+          '<div style="display:flex;gap:4px;">' +
+            '<input id="batch-shift-days" type="number" value="0" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+            '<button id="batch-shift-btn" style="background:var(--accent);color:#fff;border:none;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:11px;">適用</button>' +
+          '</div>' +
+        '</div>' +
+        '<button id="batch-delete-btn" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">一括削除</button>';
+
+      // Batch status change
+      var batchBtnEls = propsEl.querySelectorAll('.batch-status-btn');
+      for (var bbi = 0; bbi < batchBtnEls.length; bbi++) {
+        (function(btn) {
+          btn.addEventListener('click', function() {
+            window.MA.history.pushHistory();
+            var statusVal = btn.getAttribute('data-status');
+            // ループの中では結果を積み上げる。毎回 ctx.getMmdText() から読み直すと
+            // 最後の1件しか残らない (移設作業で実際にそうなった)。
+            var _t4 = ctx.getMmdText();
+            for (var bti = 0; bti < selectedTasks.length; bti++) {
+              _t4 = updateTaskField(_t4, selectedTasks[bti].line, 'status', statusVal);
+            }
+            ctx.setMmdText(_t4);
+            ctx.onUpdate();
+          });
+        })(batchBtnEls[bbi]);
+      }
+
+      // Batch date shift
+      var shiftBtn = document.getElementById('batch-shift-btn');
+      if (shiftBtn) {
+        shiftBtn.addEventListener('click', function() {
+          var daysVal = parseInt(document.getElementById('batch-shift-days').value, 10);
+          if (isNaN(daysVal) || daysVal === 0) return;
+          window.MA.history.pushHistory();
+          var _t5 = ctx.getMmdText();
+          for (var sti = 0; sti < selectedTasks.length; sti++) {
+            var st = selectedTasks[sti];
+            var newStart = st.startDate && DATE_RE.test(st.startDate) ? window.MA.dateUtils.addDays(st.startDate, daysVal) : null;
+            var newEnd = st.endDate && DATE_RE.test(st.endDate) ? window.MA.dateUtils.addDays(st.endDate, daysVal) : null;
+            if (newStart || newEnd) {
+              _t5 = updateTaskDates(_t5, st.line, newStart, newEnd);
+            }
+          }
+          ctx.setMmdText(_t5);
+          ctx.onUpdate();
+        });
+      }
+
+      // Batch delete (reverse line order to preserve line numbers)
+      var batchDelBtn = document.getElementById('batch-delete-btn');
+      if (batchDelBtn) {
+        batchDelBtn.addEventListener('click', function() {
+          window.MA.history.pushHistory();
+          // Sort by line number descending so deletion doesn't shift lines
+          var sorted = selectedTasks.slice().sort(function(a, b) { return b.line - a.line; });
+          // 同上。行番号の大きい方から消すので、積み上げても行がずれない。
+          var _t6 = ctx.getMmdText();
+          for (var di = 0; di < sorted.length; di++) {
+            _t6 = deleteTask(_t6, sorted[di].line);
+          }
+          ctx.setMmdText(_t6);
+          window.MA.selection.setSelected([]);
+          ctx.onUpdate();
+        });
+      }
+      return;
+    }
+
+    // Section selected
+    if (selData.length === 1 && selData[0].type === 'section') {
+      var secId = selData[0].id;
+      var section = null;
+      if (parsedData && parsedData.sections) {
+        for (var sci = 0; sci < parsedData.sections.length; sci++) {
+          if (parsedData.sections[sci].name === secId) {
+            section = parsedData.sections[sci];
+            break;
+          }
+        }
+      }
+      if (!section) {
+        propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">セクションが見つかりません</p>';
+        return;
+      }
+
+      // Tasks in this section
+      var secTasks = [];
+      if (parsedData && parsedData.tasks) {
+        var secIndex = parsedData.sections.indexOf(section);
+        for (var sti2 = 0; sti2 < parsedData.tasks.length; sti2++) {
+          if (parsedData.tasks[sti2].sectionIndex === secIndex) {
+            secTasks.push(parsedData.tasks[sti2]);
+          }
+        }
+      }
+
+      var taskList = secTasks.map(function(t) {
+        return '<div style="padding:2px 4px;font-size:11px;color:var(--text-primary);">' + window.MA.htmlUtils.escHtml(t.label) + '</div>';
+      }).join('');
+
+      propsEl.innerHTML =
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション名</label>' +
+          '<input id="prop-sec-name" type="text" value="' + window.MA.htmlUtils.escHtml(section.name) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+        '</div>' +
+        '<div style="margin-bottom:8px;">' +
+          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:4px;">タスク一覧 (' + secTasks.length + '件)</label>' +
+          taskList +
+        '</div>' +
+        '<button id="prop-sec-delete-btn" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">セクション削除 (タスクごと)</button>';
+
+      // Bind section name change
+      var secNameEl = document.getElementById('prop-sec-name');
+      if (secNameEl) {
+        secNameEl.addEventListener('change', function() {
+          window.MA.history.pushHistory();
+          var lines = ctx.getMmdText().split('\n');
+          var idx = section.line - 1;
+          if (idx >= 0 && idx < lines.length) {
+            var indent = lines[idx].match(/^(\s*)/)[1];
+            lines[idx] = indent + 'section ' + secNameEl.value;
+            var _t7 = lines.join('\n');
+            ctx.setMmdText(_t7);
+            window.MA.selection.setSelected([{ type: 'section', id: secNameEl.value }]);
+            ctx.onUpdate();
+          }
+        });
+      }
+
+      // Bind section delete
+      var secDelBtn = document.getElementById('prop-sec-delete-btn');
+      if (secDelBtn) {
+        secDelBtn.addEventListener('click', function() {
+          window.MA.history.pushHistory();
+          var _t8 = deleteSection(ctx.getMmdText(), section.line);
+          ctx.setMmdText(_t8);
+          window.MA.selection.setSelected([]);
+          ctx.onUpdate();
+        });
+      }
+      return;
+    }
+
+    // Default fallback
+    propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">タスクを選択してください</p>';
+  }
+
   return {
     type: 'gantt',
     displayName: 'Gantt',
@@ -1026,6 +1739,9 @@ window.MA.modules.gantt = (function() {
     moveTaskWithinSection: moveTaskWithinSection,
     moveTaskToSection: moveTaskToSection,
     buildOverlay: buildOverlay,
+    renderProps: renderProps,
+    addForm: addForm,
+    setAddFormFocus: setAddFormFocus,
     calibrateScale: calibrateScale,
     isMilestoneRect: isMilestoneRect,
     pxToDate: pxToDate,
