@@ -747,14 +747,6 @@ modules.gantt = {
     // Default fallback
     propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">タスクを選択してください</p>';
   },
-  updateText: function(text, change) {
-    if (change.type === 'dates')  return updateTaskDates(text, change.line, change.startDate, change.endDate);
-    if (change.type === 'field')  return updateTaskField(text, change.line, change.field, change.value);
-    if (change.type === 'add')    return addTask(text, change.sectionIndex, change.label, change.id, change.startDate, change.endDate);
-    if (change.type === 'delete') return deleteTask(text, change.line);
-    return text;
-  },
-  exportMmd: function(parsedData) { return mmdText; },
 };
 
 // Register window.MA.modules (sequence, etc.) into local modules dict
