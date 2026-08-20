@@ -411,7 +411,16 @@ modules.gantt = {
         var end = milestone ? '0d' : ((endEl && endEl.value) || start);
         window.MA.history.pushHistory();
         mmdText = addTask(mmdText, secIdx, label, id, start, end, milestone ? 'milestone' : null);
-        window.MA.selection.setSelected([{ type: 'task', id: id }]); // 追加したタスクを自動選択
+        // 追加したタスクを自動選択しない。
+        //
+        // 選択するとプロパティパネルが詳細表示に切り替わり、**追加フォームごと
+        // 消える**。「ラベル欄へフォーカスを戻して連続入力」と真正面から
+        // 矛盾していて、実測でも追加直後のパネルは詳細表示になり
+        // prop-add-label が存在しなかった。5本続けて足したいときに毎回
+        // Escape を押して戻る必要がある。
+        //
+        // 追加した結果は図とエディタに出るので、確認手段は失われない。
+        window.MA.selection.clearSelection();
         // Clear only what identifies this task. The section and the kind are the
         // user's current context and carry over to the next add; the dates are
         // recomputed from the task just added.
