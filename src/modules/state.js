@@ -202,8 +202,33 @@ window.MA.modules.state = (function() {
   function moveStateUp(text, lineNum) { return _moveStateStep(text, lineNum, -1); }
   function moveStateDown(text, lineNum) { return _moveStateStep(text, lineNum, 1); }
 
-  function deleteState(text, lineNum) {
-    return window.MA.textUpdater.deleteLine(text, lineNum);
+  // Delete a state and every transition that touches it.
+  //
+  // Transitions declare both of their endpoints, so deleting "the line the state
+  // was first seen on" removed one transition and left the state itself on the
+  // canvas — every other transition still named it, and mermaid re-declares from
+  // those. Pressing ✕ on Idle removed `[*] --> Idle` and Idle stayed.
+  //
+  // `stateId` is optional so older single-argument callers keep working.
+  function deleteState(text, lineNum, stateId) {
+    if (!stateId) return window.MA.textUpdater.deleteLine(text, lineNum);
+    var lines = text.split('\n');
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var trimmed = lines[i].trim();
+      var tr = trimmed.match(/^(\S+|\[\*\])\s+-->\s+(\S+|\[\*\])(?:\s*:\s*(.*))?$/);
+      if (tr && (tr[1] === stateId || tr[2] === stateId)) continue;
+      var alias = trimmed.match(/^state\s+"[^"]+"\s+as\s+(\S+)\s*$/);
+      if (alias && alias[1] === stateId) continue;
+      var special = trimmed.match(/^state\s+(\S+)\s+<<(?:fork|join|choice)>>/);
+      if (special && special[1] === stateId) continue;
+      var decl = trimmed.match(/^state\s+(\S+)\s*$/);
+      if (decl && decl[1] === stateId) continue;
+      var note = trimmed.match(/^note\s+(?:left of|right of|above|below)\s+(\S+)\s*:/);
+      if (note && note[1] === stateId) continue;
+      out.push(lines[i]);
+    }
+    return out.join('\n');
   }
 
   function updateStateLabel(text, lineNum, newLabel) {
@@ -402,7 +427,10 @@ window.MA.modules.state = (function() {
       });
       P.bindSelectButtons(propsEl, 'st-select-state', 'state');
       P.bindSelectButtons(propsEl, 'st-select-trans', 'transition');
-      P.bindDeleteButtons(propsEl, 'st-delete-state', ctx, deleteState);
+      // 遷移行が両端の状態を宣言するので、id なしだと押した状態が残る
+      P.bindDeleteButtons(propsEl, 'st-delete-state', ctx, function(t, ln, elId) {
+        return deleteState(t, ln, elId);
+      });
       P.bindDeleteButtons(propsEl, 'st-delete-trans', ctx, deleteTransition);
       P.bindDeleteButtons(propsEl, 'st-delete-comp', ctx, deleteComposite, true);
       return;
@@ -454,7 +482,7 @@ window.MA.modules.state = (function() {
         },
         'delete': function() {
           window.MA.history.pushHistory();
-          ctx.setMmdText(deleteState(ctx.getMmdText(), st.line));
+          ctx.setMmdText(deleteState(ctx.getMmdText(), st.line, st.id));
           window.MA.selection.clearSelection();
           ctx.onUpdate();
         },

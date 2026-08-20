@@ -142,23 +142,48 @@ window.MA.modules.erDiagram = (function() {
   function moveEntityUp(text, lineNum) { return _moveEntityStep(text, lineNum, -1); }
   function moveEntityDown(text, lineNum) { return _moveEntityStep(text, lineNum, 1); }
 
-  function deleteEntity(text, lineNum) {
-    // Find the entity block boundary (close brace) and remove block
-    var lines = text.split('\n');
-    var idx = lineNum - 1;
-    if (idx < 0 || idx >= lines.length) return text;
-    // If the line is `ENTITY {`, find the matching `}`
-    var trimmed = lines[idx].trim();
-    if (/\{\s*$/.test(trimmed)) {
-      var endIdx = idx;
-      for (var j = idx + 1; j < lines.length; j++) {
-        if (lines[j].trim() === '}') { endIdx = j; break; }
+  // Delete an entity: its attribute block and every relationship naming it.
+  //
+  // A relationship line declares *both* of its entities, so on the standard
+  // template both CUSTOMER and ORDER report line 2. Deleting "the line" removed
+  // the relationship and left `CUSTOMER { ... }` in place: the entity the user
+  // clicked stayed on the canvas and the relationship they did not click
+  // disappeared instead.
+  //
+  // `entityId` is optional so older single-argument callers keep working.
+  function deleteEntity(text, lineNum, entityId) {
+    if (!entityId) {
+      var lines0 = text.split('\n');
+      var idx0 = lineNum - 1;
+      if (idx0 < 0 || idx0 >= lines0.length) return text;
+      var t0 = lines0[idx0].trim();
+      if (/\{\s*$/.test(t0)) {
+        var endIdx = idx0;
+        for (var j = idx0 + 1; j < lines0.length; j++) {
+          if (lines0[j].trim() === '}') { endIdx = j; break; }
+        }
+        lines0.splice(idx0, (endIdx - idx0 + 1));
+        return lines0.join('\n');
       }
-      lines.splice(idx, (endIdx - idx + 1));
-      return lines.join('\n');
+      return window.MA.textUpdater.deleteLine(text, lineNum);
     }
-    // Otherwise just delete the single line
-    return window.MA.textUpdater.deleteLine(text, lineNum);
+
+    var lines = text.split('\n');
+    var out = [];
+    var skipToBrace = false;
+    for (var i = 0; i < lines.length; i++) {
+      var trimmed = lines[i].trim();
+      if (skipToBrace) {
+        if (trimmed === '}') skipToBrace = false;
+        continue;
+      }
+      var block = trimmed.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*\{\s*$/);
+      if (block && block[1] === entityId) { skipToBrace = true; continue; }
+      var rel = trimmed.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s+([|}o]{2})(--|\.\.)([|{o]{2})\s+([A-Za-z_][A-Za-z0-9_-]*)\s*(?::\s*(.+))?$/);
+      if (rel && (rel[1] === entityId || rel[5] === entityId)) continue;
+      out.push(lines[i]);
+    }
+    return out.join('\n');
   }
 
   function addAttribute(text, entityId, type, name, key, comment) {
@@ -337,7 +362,11 @@ window.MA.modules.erDiagram = (function() {
       });
 
       P.bindSelectButtons(propsEl, 'er-select-entity', 'entity');
-      P.bindDeleteButtons(propsEl, 'er-delete-entity', ctx, deleteEntity);
+      // 関係行は両端のエンティティを宣言するので、id なしだと
+      // 押していない方が消える
+      P.bindDeleteButtons(propsEl, 'er-delete-entity', ctx, function(t, ln, elId) {
+        return deleteEntity(t, ln, elId);
+      });
       P.bindSelectButtons(propsEl, 'er-select-rel', 'relationship');
       P.bindDeleteButtons(propsEl, 'er-delete-rel', ctx, deleteRelationship);
       return;
@@ -392,7 +421,7 @@ window.MA.modules.erDiagram = (function() {
         },
         'delete': function() {
           window.MA.history.pushHistory();
-          ctx.setMmdText(deleteEntity(ctx.getMmdText(), ent.line));
+          ctx.setMmdText(deleteEntity(ctx.getMmdText(), ent.line, ent.id));
           window.MA.selection.clearSelection();
           ctx.onUpdate();
         },
