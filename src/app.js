@@ -36,11 +36,8 @@ function rebuildOverlay() {
   if (!currentModule || !overlayEl) return;
   var svgEl = previewSvgEl ? previewSvgEl.querySelector('svg') : null;
   if (svgEl) {
-    if (currentModule.type === 'gantt') {
-      currentModule.buildOverlay(svgEl, parsed);
-    } else {
-      currentModule.buildOverlay(svgEl, parsed, overlayEl);
-    }
+    // 図種による場合分けは不要になった。gantt も他の20図種と同じ 3引数契約。
+    currentModule.buildOverlay(svgEl, parsed, overlayEl);
   }
 }
 
@@ -182,98 +179,10 @@ modules.gantt = {
   type: 'gantt',
   detect: function(text) { return text.trim().startsWith('gantt'); },
   parse: parseGantt,
-  buildOverlay: function(svgEl, parsedData) {
-    if (!overlayEl) return;
-    // Clear previous overlay content
-    while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
-
-    if (!svgEl || !parsedData || !parsedData.tasks || parsedData.tasks.length === 0) return;
-
-    // Calibrate scale
-    calibrateScale(svgEl, parsedData);
-
-    // Match overlay SVG dimensions/viewBox to the mermaid SVG
-    var viewBox = svgEl.getAttribute('viewBox');
-    if (viewBox) {
-      overlayEl.setAttribute('viewBox', viewBox);
-    }
-    var svgW = svgEl.getAttribute('width');
-    var svgH = svgEl.getAttribute('height');
-    if (svgW) overlayEl.setAttribute('width', svgW);
-    if (svgH) overlayEl.setAttribute('height', svgH);
-
-    var NS = 'http://www.w3.org/2000/svg';
-    var barRects = window.MA.modules.gantt.getCalibration().barRects;
-
-    for (var i = 0; i < parsedData.tasks.length; i++) {
-      var task = parsedData.tasks[i];
-      var br = i < barRects.length ? barRects[i] : null;
-      if (!br) continue; // skip tasks we couldn't match to SVG rects
-      var selected = window.MA.selection.isSelected(task.id);
-
-      // If selected: add green dashed highlight rect
-      if (selected) {
-        var hlRect = document.createElementNS(NS, 'rect');
-        hlRect.setAttribute('x', br.x - 2);
-        hlRect.setAttribute('y', br.y - 2);
-        hlRect.setAttribute('width', br.width + 4);
-        hlRect.setAttribute('height', br.height + 4);
-        hlRect.setAttribute('fill', 'none');
-        hlRect.setAttribute('stroke', '#7ee787');
-        hlRect.setAttribute('stroke-width', '2');
-        hlRect.setAttribute('stroke-dasharray', '4');
-        hlRect.setAttribute('rx', '3');
-        overlayEl.appendChild(hlRect);
-      }
-
-      // Transparent overlay bar rect
-      var overlayRect = document.createElementNS(NS, 'rect');
-      overlayRect.setAttribute('x', br.x);
-      overlayRect.setAttribute('y', br.y);
-      overlayRect.setAttribute('width', br.width);
-      overlayRect.setAttribute('height', br.height);
-      overlayRect.setAttribute('fill', 'transparent');
-      overlayRect.setAttribute('cursor', 'move');
-      overlayRect.setAttribute('class', 'overlay-bar');
-      overlayRect.setAttribute('data-task-id', task.id);
-      overlayRect.setAttribute('data-type', 'task');
-      overlayRect.setAttribute('data-line', task.line);
-      overlayRect.setAttribute('data-index', i);
-      overlayEl.appendChild(overlayRect);
-
-      // Left resize handle
-      var leftHandle = document.createElementNS(NS, 'rect');
-      leftHandle.setAttribute('x', br.x);
-      leftHandle.setAttribute('y', br.y);
-      leftHandle.setAttribute('width', '6');
-      leftHandle.setAttribute('height', br.height);
-      leftHandle.setAttribute('fill', selected ? '#7ee787' : 'transparent');
-      leftHandle.setAttribute('opacity', selected ? '0.7' : '0');
-      leftHandle.setAttribute('cursor', 'w-resize');
-      leftHandle.setAttribute('class', 'resize-handle');
-      leftHandle.setAttribute('data-task-id', task.id);
-      leftHandle.setAttribute('data-handle', 'left');
-      leftHandle.setAttribute('data-line', task.line);
-      leftHandle.setAttribute('data-index', i);
-      overlayEl.appendChild(leftHandle);
-
-      // Right resize handle
-      var rightHandle = document.createElementNS(NS, 'rect');
-      rightHandle.setAttribute('x', br.x + br.width - 6);
-      rightHandle.setAttribute('y', br.y);
-      rightHandle.setAttribute('width', '6');
-      rightHandle.setAttribute('height', br.height);
-      rightHandle.setAttribute('fill', selected ? '#7ee787' : 'transparent');
-      rightHandle.setAttribute('opacity', selected ? '0.7' : '0');
-      rightHandle.setAttribute('cursor', 'e-resize');
-      rightHandle.setAttribute('class', 'resize-handle');
-      rightHandle.setAttribute('data-task-id', task.id);
-      rightHandle.setAttribute('data-handle', 'right');
-      rightHandle.setAttribute('data-line', task.line);
-      rightHandle.setAttribute('data-index', i);
-      overlayEl.appendChild(rightHandle);
-    }
-  },
+  // buildOverlay は gantt.js へ移した (M2 / ADR-012 の 3引数契約)。
+  // ここに残していたのは app.js のクロージャ変数 overlayEl を見ていたからで、
+  // 引数で受ける形に揃えたことで依存が消えた。
+  buildOverlay: window.MA.modules.gantt.buildOverlay,
   renderProps: function(selData, parsedData) {
     if (!propsEl) return;
 
@@ -1187,11 +1096,8 @@ async function refresh(skipRender) {
 
     // Build overlay (skip during drag to prevent jitter)
     if (currentModule && svgEl && !dragState) {
-      if (currentModule.type === 'gantt') {
-        currentModule.buildOverlay(svgEl, parsed);
-      } else {
-        currentModule.buildOverlay(svgEl, parsed, overlayEl);
-      }
+      // 図種による場合分けは不要 (gantt も 3引数契約に揃えた)
+      currentModule.buildOverlay(svgEl, parsed, overlayEl);
     }
 
     statusParseEl.textContent = 'OK';
