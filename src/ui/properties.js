@@ -264,7 +264,14 @@ window.MA.properties = (function() {
         if (isNaN(endLn) || endLn <= 0) return;
       }
       window.MA.history.pushHistory();
-      var newText = useEndLine ? deleteFn(ctx.getMmdText(), ln, endLn) : deleteFn(ctx.getMmdText(), ln);
+      // The row already carries which element it stands for; hand it to the module.
+      // block-beta puts several blocks on one line (`a["Sensor"] b["MCU"] c["Actuator"]`),
+      // so a line number alone cannot say which one the user pressed — resolving by
+      // line picks the first every time, and pressing b's ✕ deletes a.
+      var elId = btn.getAttribute('data-element-id');
+      var newText = useEndLine
+        ? deleteFn(ctx.getMmdText(), ln, endLn)
+        : deleteFn(ctx.getMmdText(), ln, elId);
       ctx.setMmdText(newText);
       ctx.onUpdate();
     });

@@ -445,15 +445,14 @@ window.MA.modules.blockBeta = (function() {
         P.bindSelectButtons(propsEl, 'block-select-block', 'block');
         P.bindSelectButtons(propsEl, 'block-select-group', 'group');
         P.bindSelectButtons(propsEl, 'block-select-link', 'link');
-        P.bindDeleteButtons(propsEl, 'block-delete-block', ctx, function(t, ln) {
-          var bid = '';
-          for (var di = 0; di < parsedData.elements.length; di++) if (parsedData.elements[di].line === ln) { bid = parsedData.elements[di].id; break; }
-          return deleteBlock(t, ln, bid);
+        // Use the id the row was rendered for. Looking it up by line number picks
+        // the first block on that line, and block-beta normally puts several on
+        // one line — so pressing b's ✕ used to delete a, silently.
+        P.bindDeleteButtons(propsEl, 'block-delete-block', ctx, function(t, ln, elId) {
+          return elId ? deleteBlock(t, ln, elId) : t;
         });
-        P.bindDeleteButtons(propsEl, 'block-delete-group', ctx, function(t, ln) {
-          var gid = '';
-          for (var di = 0; di < parsedData.elements.length; di++) if (parsedData.elements[di].line === ln) { gid = parsedData.elements[di].id; break; }
-          return deleteBlock(t, ln, gid);
+        P.bindDeleteButtons(propsEl, 'block-delete-group', ctx, function(t, ln, elId) {
+          return elId ? deleteBlock(t, ln, elId) : t;
         });
         P.bindDeleteButtons(propsEl, 'block-delete-link', ctx, deleteLink);
         return;
