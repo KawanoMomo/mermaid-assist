@@ -400,6 +400,11 @@ html, body {
 }
 #shortcut-help-table { border-collapse: collapse; font-size: 12px; }
 #shortcut-help-table td { padding: 3px 14px 3px 0; color: var(--text-primary); vertical-align: top; }
+#shortcut-help-table .sc-scope {
+  color: var(--text-secondary);
+  font-size: 10px;
+  margin-left: 6px;
+}
 #shortcut-help-table td:first-child {
   font-family: var(--font-mono);
   color: var(--accent);
@@ -625,13 +630,13 @@ html, body {
       </div>
       <table id="shortcut-help-table">
         <tr><td>Ctrl+S</td><td>保存</td></tr>
-        <tr><td>Ctrl+Shift+S</td><td>保存先を指定して上書き (Chrome / Edge)</td></tr>
+        <tr><td>Ctrl+Shift+S</td><td>保存先を指定して上書き <span class="sc-scope">Chrome / Edge のみ</span></td></tr>
         <tr><td>Ctrl+O</td><td>開く</td></tr>
         <tr><td>Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z</td><td>元に戻す / やり直す</td></tr>
         <tr><td>↑ ↓ ← →</td><td>要素を順に選ぶ (図にフォーカスがあるとき)</td></tr>
-        <tr><td>Delete</td><td>選んでいる要素を削除</td></tr>
-        <tr><td>Ctrl+A</td><td>すべて選択</td></tr>
-        <tr><td>Ctrl+C / Ctrl+V</td><td>選んでいる要素を複写 / 貼り付け</td></tr>
+        <tr><td>Delete</td><td>選んでいる要素を削除 <span class="sc-scope">Gantt のみ</span></td></tr>
+        <tr><td>Ctrl+A</td><td>すべて選択 <span class="sc-scope">Gantt のみ</span></td></tr>
+        <tr><td>Ctrl+C / Ctrl+V</td><td>選んでいる要素を複写 / 貼り付け <span class="sc-scope">Gantt のみ</span></td></tr>
         <tr><td>Ctrl+Shift+C</td><td>図をクリップボードへ</td></tr>
         <tr><td>Ctrl+0 / Ctrl+9</td><td>等倍 / 幅に合わせる</td></tr>
         <tr><td>Ctrl++ / Ctrl+-</td><td>拡大 / 縮小</td></tr>

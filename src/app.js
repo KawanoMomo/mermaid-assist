@@ -1369,6 +1369,12 @@ function updateDocumentTitle() {
 }
 
 function renderStatus() {
+  // タイトルはステータス行の中身とは独立なので、早期 return の前に更新する。
+  //
+  // 以前は関数の末尾で呼んでいたので、一時メッセージが出ている4秒間はそこまで
+  // 到達しなかった。保存直後に編集しても未保存マークが付かない。
+  // 保存した直後はまさに編集を再開する時間帯なので、一番当たりやすい穴だった。
+  if (typeof updateDocumentTitle === 'function') updateDocumentTitle();
   if (!statusInfoEl) return;
   if (transientMsg && Date.now() < transientUntil) {
     statusInfoEl.textContent = transientMsg;
@@ -1390,7 +1396,6 @@ function renderStatus() {
     return;
   }
   statusInfoEl.textContent = statusInfoText(parsed, currentModule && currentModule.type);
-  updateDocumentTitle();
 }
 
 // ── Properties Panel ───────────────────────────────────────────────────────
@@ -1673,7 +1678,18 @@ var savedText = null;
 // 起動時のサンプル読み込み・ファイルを開いたとき・図種切替でも呼ばれるので、
 // ここに「保存: HH:MM」を出すと**保存していないのに保存したと言う**ことになる
 // (実機のスクリーンショットで発覚した)。表示は保存動作の側で行う。
-function markSaved() { savedText = mmdText; }
+function markSaved() {
+  savedText = mmdText;
+  // 未保存マークはここで更新する。
+  //
+  // タイトルは renderStatus() 経由でしか更新されず、保存は再描画を起こさないので
+  // 保存しても `●` が消えなかった。マークを付けた目的は「保存し忘れを防ぐ」こと
+  // なのに、消えないマークは情報を持たない。入れた機能が目的を果たしていなかった。
+  //
+  // markSaved は起動時・ファイルを開いたとき・図種切替でも呼ばれるが、
+  // どの場合も「いまの本文が基準」になるので、マークが消えるのが正しい。
+  if (typeof updateDocumentTitle === 'function') updateDocumentTitle();
+}
 
 // A diagram is worth warning about only when it differs from what was last
 // saved *and* from the template it started as. Prompting on an untouched
@@ -1752,7 +1768,7 @@ function saveFile() {
   if (saveHandle) { overwriteSaved(); return; }
   downloadAsFile();
   markSaved();
-  showTransient(savedMessage(new Date()) + ' (ダウンロード)');
+  showTransient(savedMessage(new Date()) + ' — ダウンロードしました');
 }
 
 async function overwriteSaved() {
@@ -1768,7 +1784,7 @@ async function overwriteSaved() {
     saveHandle = null;
     downloadAsFile();
     markSaved();
-    showTransient('上書きに失敗したのでダウンロードしました');
+    showTransient('上書きに失敗 — 代わりにダウンロードしました');
   }
 }
 
@@ -1777,7 +1793,7 @@ async function overwriteSaved() {
 // できないことをその場で言う。黙ってダウンロードすると「指定できた」と誤解される。
 async function saveFileAs() {
   if (!window.showSaveFilePicker) {
-    showTransient('このブラウザは上書き保存に対応していません (Chrome / Edge なら可能)', 5000);
+    showTransient('このブラウザは上書き保存に非対応 — Chrome / Edge なら使えます', 5000);
     return;
   }
   try {
@@ -1786,7 +1802,7 @@ async function saveFileAs() {
       types: [{ description: 'Mermaid', accept: { 'text/plain': ['.mmd', '.mermaid'] } }],
     });
   } catch (e) {
-    showTransient('保存先の指定を中止しました', 2500);
+    showTransient('保存先の指定を中止 — 本文はそのままです', 2500);
     return;
   }
   if (saveHandle && saveHandle.name) loadedFileName = saveHandle.name;
@@ -1801,7 +1817,7 @@ async function saveFileAs() {
 // 書き出しはそれを見ていなかった (前回の修正が作った副作用)。
 function blockExportIfStale() {
   if (!previewStale) return false;
-  showTransient('構文エラー中です。表示しているのは直前の図なので書き出しません', 5000);
+  showTransient('構文エラー中のため書き出していません — 本文を直すか .mmd で保存してください', 5000);
   return true;
 }
 
@@ -2862,7 +2878,7 @@ function init() {
       e.preventDefault(); openFile();
     } else if (e.key === 'Delete' && !inInput && !inEditor) {
       if (sel.length === 0) return;
-      if (!parsed || !parsed.tasks) { showTransient('この図種では Delete キーの削除は未対応です (一覧の ✕ を使ってください)', 3000); return; }
+      if (!parsed || !parsed.tasks) { showTransient('Delete キーの削除は未対応 — 一覧の ✕ を使ってください', 3000); return; }
       window.MA.history.pushHistory();
       var lines = sel.map(function(s) {
         var t = parsed.tasks.find(function(tk) { return tk.id === s.id; });
@@ -2915,13 +2931,13 @@ function init() {
       // コンソールにしか出ないので利用者には「押しても何も起きない」としか見えない。
       // 未対応なら例外を出さず、その旨をステータスに出す。
       e.preventDefault();
-      if (!parsed || !parsed.tasks) { showTransient('この図種ではすべて選択は未対応です', 2500); return; }
+      if (!parsed || !parsed.tasks) { showTransient('すべて選択は未対応 — この図種では一覧から選んでください', 3000); return; }
       window.MA.selection.setSelected(parsed.tasks.map(function(t) { return { type: 'task', id: t.id }; }));
     } else if (e.ctrlKey && e.shiftKey && e.key === 'C') {
       e.preventDefault(); exportClipboard();
     } else if (e.ctrlKey && e.key === 'c' && !inEditor && !inInput && sel.length > 0) {
       e.preventDefault();
-      if (!parsed || !parsed.tasks) { showTransient('この図種では要素の複写は未対応です', 2500); return; }
+      if (!parsed || !parsed.tasks) { showTransient('要素の複写は未対応 — エディタで行をコピーしてください', 3000); return; }
       clipboard = sel.map(function(s) {
         return parsed.tasks.find(function(t) { return t.id === s.id; });
       }).filter(Boolean);
