@@ -107,3 +107,28 @@ describe('architecture-beta: グループ削除', function() {
     expect(out).not.toContain('db2:L -- R:db');
   });
 });
+
+// 削除で差分を汚さない。
+//
+// R9 (ワークフロー適合) が見つけたもの。requirementDiagram で末尾の要素を消すと、
+// その要素を区切っていた空行が残り、ファイルが空行で終わる。図としては同じだが、
+// Git の差分には無意味な行が乗る。テンプレートは21図種すべて末尾改行なしで
+// 揃っているので、削除だけがその規約を破っていた。
+describe('削除が末尾に空行を残さない', function() {
+  var R = window.MA.modules.requirementDiagram;
+
+  test('DI-N1: 末尾の要素を消しても空行で終わらない', function() {
+    var t = R.template();
+    var els = R.parse(t).elements;
+    var last = els[els.length - 1];
+    var out = R.deleteElement(t, last.line, last.name || last.id);
+    expect(/\n\s*$/.test(out)).toBe(false);
+  });
+
+  test('DI-N2: 途中の要素を消しても本文は末尾改行なしのまま', function() {
+    var t = R.template();
+    var els = R.parse(t).elements;
+    var out = R.deleteElement(t, els[0].line, els[0].name || els[0].id);
+    expect(/\n\s*$/.test(out)).toBe(false);
+  });
+});

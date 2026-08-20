@@ -150,6 +150,11 @@ window.MA.modules.requirementDiagram = (function() {
         return m[1] !== elementName && m[2] !== elementName;
       });
     }
+    // 末尾に空行を残さない。
+    // 末尾の要素を消すと、それを区切っていた空行だけが残る。図としては同じでも
+    // Git の差分には無意味な行が乗る。テンプレートは21図種すべて末尾改行なしで
+    // 揃っているので、削除だけがその規約を破っていた (R9 ワークフロー適合)。
+    while (lines.length > 1 && lines[lines.length - 1].trim() === '') lines.pop();
     return lines.join('\n');
   }
 
