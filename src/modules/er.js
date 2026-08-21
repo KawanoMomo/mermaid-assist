@@ -581,7 +581,15 @@ window.MA.modules.erDiagram = (function() {
         return text;
       },
       delete: function(text, lineNum) { return window.MA.textUpdater.deleteLine(text, lineNum); },
-      update: function(text, lineNum, field, value) {
+      update: function(text, lineNum, field, value, opts) {
+        opts = opts || {};
+        // エンティティ名の変更も統一入口から使えるようにする (class と同じ理由)。
+        if (field === 'name' || field === 'id' || field === 'label') {
+          var trimmed = (text.split('\n')[lineNum - 1] || '').trim();
+          var decl = trimmed.match(/^(\S+)\s*\{\s*$/);
+          var oldId = opts.id || (decl ? decl[1] : null);
+          if (oldId) return updateEntityName(text, lineNum, oldId, value);
+        }
         return updateRelationship(text, lineNum, field, value);
       },
       moveUp: function(text, lineNum) {

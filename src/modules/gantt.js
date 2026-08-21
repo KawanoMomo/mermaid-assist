@@ -182,6 +182,33 @@ window.MA.modules.gantt = (function() {
       });
     }
 
+    // elements を返す。
+    //
+    // gantt だけ `{title, dateFormat, axisFormat, sections, tasks}` を返しており、
+    // `elements` を持っていなかった。並行レビュー機構は全体が `parse().elements` を
+    // 前提にしているので、**gantt は18観点すべてから静かに素通りしていた**。
+    // 実際 operations.update を無効化する変異を入れても r12 は0件のままだった。
+    //
+    // 「表から漏れたモジュールは検査対象から静かに外れる」と ADR ドラフトに書いた懸念が、
+    // 関数名の表ではなくパースの返り値の形で起きていた。最も使う図種が、最も多くの
+    // 検査から外れていたことになる。
+    //
+    // tasks / sections はそのまま残す (既存の呼び出しが全部それを見ている)。
+    result.elements = [];
+    for (var si2 = 0; si2 < result.sections.length; si2++) {
+      var sec2 = result.sections[si2];
+      result.elements.push({
+        kind: 'section', id: sec2.name, label: sec2.name, line: sec2.line,
+      });
+    }
+    for (var ti2 = 0; ti2 < result.tasks.length; ti2++) {
+      var tk2 = result.tasks[ti2];
+      result.elements.push({
+        kind: 'task', id: tk2.id, label: tk2.label, line: tk2.line,
+        parentId: (result.sections[tk2.sectionIndex] || {}).name || null,
+      });
+    }
+
     return result;
   }
 
@@ -1760,6 +1787,53 @@ window.MA.modules.gantt = (function() {
     addForm: addForm,
     setAddFormFocus: setAddFormFocus,
     resetTransientState: resetTransientState,
+    // 統一入口。
+    //
+    // 他の20モジュールは最初から operations を持っていたが、gantt だけ無かった。
+    // 統一入口が無いと、呼び出し側とレビュー機構は関数名の表を手で持つことになり、
+    // 表から漏れたモジュールは検査対象から静かに外れる (ADR ドラフトに書いた懸念)。
+    // 最も使う図種が契約の外にあった。
+    operations: {
+      add: function(text, kind, props) {
+        props = props || {};
+        if (kind === 'section') return addSection(text, props.name || props.label);
+        var secIdx = (props.sectionIndex === undefined) ? -1 : props.sectionIndex;
+        return addTask(text, secIdx, props.label, props.id, props.start, props.end,
+                       kind === 'milestone' ? 'milestone' : props.status || null);
+      },
+      delete: function(text, lineNum) {
+        var trimmed = (text.split('\n')[lineNum - 1] || '').trim();
+        if (/^section\s/.test(trimmed)) return deleteSection(text, lineNum);
+        return deleteTask(text, lineNum);
+      },
+      update: function(text, lineNum, field, value) {
+        var trimmed = (text.split('\n')[lineNum - 1] || '').trim();
+        if (/^section\s/.test(trimmed)) {
+          if (field !== 'name' && field !== 'label') return text;
+          var lines = text.split('\n');
+          var indent = lines[lineNum - 1].match(/^(\s*)/)[1];
+          lines[lineNum - 1] = indent + 'section ' + value;
+          return lines.join('\n');
+        }
+        if (field === 'startDate' || field === 'start') return updateTaskDates(text, lineNum, value, null);
+        if (field === 'endDate' || field === 'end') return updateTaskDates(text, lineNum, null, value);
+        if (field === 'label' || field === 'id' || field === 'status') {
+          return updateTaskField(text, lineNum, field, value);
+        }
+        // 知らない field で何かを変えると、呼び出し側の間違いが無言で通る。
+        return text;
+      },
+      moveUp: function(text, lineNum) {
+        var trimmed = (text.split('\n')[lineNum - 1] || '').trim();
+        if (/^section\s/.test(trimmed)) return moveSection(text, lineNum, -1);
+        return moveTaskWithinSection(text, lineNum, -1);
+      },
+      moveDown: function(text, lineNum) {
+        var trimmed = (text.split('\n')[lineNum - 1] || '').trim();
+        if (/^section\s/.test(trimmed)) return moveSection(text, lineNum, 1);
+        return moveTaskWithinSection(text, lineNum, 1);
+      },
+    },
     calibrateScale: calibrateScale,
     isMilestoneRect: isMilestoneRect,
     pxToDate: pxToDate,

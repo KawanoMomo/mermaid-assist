@@ -716,11 +716,20 @@ window.MA.modules.classDiagram = (function() {
         return text;
       },
       delete: function(text, lineNum) { return window.MA.textUpdater.deleteLine(text, lineNum); },
-      update: function(text, lineNum, field, value) {
+      update: function(text, lineNum, field, value, opts) {
+        opts = opts || {};
         var lines = text.split('\n');
         var trimmed = (lines[lineNum - 1] || '').trim();
         for (var i = 0; i < RELATION_TYPES.length; i++) {
           if (trimmed.indexOf(RELATION_TYPES[i]) > 0) return updateRelation(text, lineNum, field, value);
+        }
+        // クラス名の変更を統一入口からも使えるようにする。
+        // 関数は追加したのに入口へ繋いでいなかった。r12 を契約ベースに書き換えたら
+        // 「どの field を渡しても本文が変わらない」として出てきた。
+        if (field === 'name' || field === 'id' || field === 'label') {
+          var decl = trimmed.match(/^class\s+(\S+)/);
+          var oldId = opts.id || (decl ? decl[1] : null);
+          if (oldId) return updateClassName(text, lineNum, oldId, value);
         }
         return text;
       },
