@@ -95,6 +95,18 @@ const PREMISES = {
                    : 'r13 が未実行' };
     },
   },
+  G8: {
+    what: 'エッジの端点が絞り込みの無い <select> のまま',
+    human: true,
+    check: () => {
+      // 絞り込み付きの部品 (datalist / combobox) に替わったら、この項目は不要になる。
+      const s3 = read('src/modules/flowchart.js') + read('src/ui/properties.js');
+      const filtered = /datalist|combobox|role="combobox"/i.test(s3);
+      return { ok: true,
+        detail: filtered ? '**絞り込み付きに替わった → G8 を見直す**'
+                         : '<select> のまま・先頭一致の効きは実機で未測定' };
+    },
+  },
 };
 
 const md = read('docs/backlog.md');
