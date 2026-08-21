@@ -1117,11 +1117,69 @@ function blockExportIfStale() {
   return true;
 }
 
+// 書き出す SVG の id を、そのファイル固有のものに付け替える。
+//
+// mermaid が付ける id は `mermaid-svg-<セッション内の連番>` で、
+// **別々のセッションで書き出した2枚が同じ id を持つ**。実測: 2つの .mmd を
+// それぞれ開いて書き出すと、どちらも `mermaid-svg-2` になった。
+//
+// スタイルは `#mermaid-svg-2 .node rect { … }` の形で id に紐付いており
+// (flowchart で64箇所、gantt で109箇所)、同じ id の SVG を1つの文書に並べると
+// 2枚目が `getElementById` で参照できない (実測)。数十〜数百枚を wiki や
+// 設計書に貼る運用では、id で参照する仕組みが静かに1枚目だけを指す。
+//
+// ファイル名から作るので、同じ図を何度書き出しても同じ id になる
+// (Git の差分に無意味な変化を出さない)。
+function uniqueSvgId(baseName) {
+  var safe = String(baseName || 'diagram').replace(/[^A-Za-z0-9_-]/g, '_');
+  return 'ma-' + safe;
+}
+
+function retargetSvgId(clone, newId) {
+  var oldId = clone.getAttribute('id');
+  if (!oldId || oldId === newId) return;
+  clone.setAttribute('id', newId);
+
+  // スタイル側の参照を付け替える。付け替えないと、書き出した SVG が
+  // 自分のスタイルを1つも受け取れなくなる (色も字も既定に戻る)。
+  var styles = clone.querySelectorAll('style');
+  for (var i = 0; i < styles.length; i++) {
+    styles[i].textContent = styles[i].textContent.split('#' + oldId).join('#' + newId);
+  }
+
+  // 矢印マーカーの id も同じ接頭辞を持つ (`mermaid-svg-2_flowchart-v2-pointEnd`)。
+  //
+  // `url(#…)` は文書内で**最初に見つかった id** を拾うので、同じ接頭辞の SVG を
+  // 2枚並べると、2枚目の矢印が1枚目のマーカーを使う。線の種類が違えば矢印の形が
+  // 入れ替わり、しかもエラーは出ない。id 本体だけ直しても、ここが残ると意味がない。
+  var all = clone.querySelectorAll('[id]');
+  for (var j = 0; j < all.length; j++) {
+    var v = all[j].getAttribute('id');
+    if (v && v.indexOf(oldId) === 0) all[j].setAttribute('id', newId + v.slice(oldId.length));
+  }
+  // url(#…) で参照している側 (marker-start / marker-end / fill / clip-path など)
+  var refAttrs = ['marker-start', 'marker-end', 'marker-mid', 'fill', 'stroke', 'clip-path', 'mask', 'filter'];
+  var users = clone.querySelectorAll('*');
+  for (var k = 0; k < users.length; k++) {
+    for (var a = 0; a < refAttrs.length; a++) {
+      var av = users[k].getAttribute(refAttrs[a]);
+      if (av && av.indexOf('url(#' + oldId) >= 0) {
+        users[k].setAttribute(refAttrs[a], av.split('url(#' + oldId).join('url(#' + newId));
+      }
+    }
+    var st = users[k].getAttribute('style');
+    if (st && st.indexOf('url(#' + oldId) >= 0) {
+      users[k].setAttribute('style', st.split('url(#' + oldId).join('url(#' + newId));
+    }
+  }
+}
+
 function exportSVG() {
   if (blockExportIfStale()) return;
   var svgEl = previewSvgEl.querySelector('svg');
   if (!svgEl) return;
   var clone = svgEl.cloneNode(true);
+  retargetSvgId(clone, uniqueSvgId(currentBaseName()));
   var blob = new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -1130,38 +1188,54 @@ function exportSVG() {
   URL.revokeObjectURL(a.href);
 }
 
-function svgToCanvas(transparent, callback) {
+// scale は書き出す画素の倍率。
+//
+// これまで等倍しか無かった (実測: viewBox 788x196 → PNG 788x196)。
+// 設計書や wiki に貼ると、拡大表示や印刷で字がつぶれる。姉妹プロジェクトの
+// 01_StableBlock では同じ理由で 2倍を入れている。
+//
+// Chrome は幅 65,535px を超える canvas を作れないので、超える倍率は落とす。
+// 黙って小さい画像を返すより、要求した倍率で出せないことを告げる。
+function svgToCanvas(transparent, callback, scale) {
   var svgEl = previewSvgEl.querySelector('svg');
   if (!svgEl) return;
   var clone = svgEl.cloneNode(true);
   var svgData = new XMLSerializer().serializeToString(clone);
   var img = new Image();
   img.onload = function() {
+    var s = scale || 1;
+    var MAX = 65535;
+    if (img.width * s > MAX || img.height * s > MAX) {
+      var fit = Math.min(MAX / img.width, MAX / img.height);
+      showTransient('図が大きすぎるため ' + s + '倍では書き出せません — ' +
+        fit.toFixed(2) + '倍にしました', 5000);
+      s = fit;
+    }
     var canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
+    canvas.width = Math.round(img.width * s);
+    canvas.height = Math.round(img.height * s);
     var ctx = canvas.getContext('2d');
     if (!transparent) {
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
-    ctx.drawImage(img, 0, 0);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     callback(canvas);
   };
   img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData);
 }
 
-function exportPNG(transparent) {
+function exportPNG(transparent, scale) {
   if (blockExportIfStale()) return;
   svgToCanvas(transparent, function(canvas) {
     canvas.toBlob(function(blob) {
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = currentBaseName() + '.png';
+      a.download = currentBaseName() + (scale && scale !== 1 ? '@' + scale + 'x' : '') + '.png';
       a.click();
       URL.revokeObjectURL(a.href);
     });
-  });
+  }, scale);
 }
 
 function exportClipboard() {
@@ -1511,6 +1585,14 @@ function init() {
   document.getElementById('exp-png').addEventListener('click', function() {
     exportMenu.classList.remove('open');
     exportPNG(false);
+  });
+
+  // 等倍だけだと設計書に貼ったとき拡大や印刷で字がつぶれる。
+  // 既定は等倍のまま残し、2倍を別項目として足す (既定を変えると、いま
+  // 等倍を前提にしている書き出しの寸法が黙って変わる)。
+  document.getElementById('exp-png-2x').addEventListener('click', function() {
+    exportMenu.classList.remove('open');
+    exportPNG(false, 2);
   });
 
   document.getElementById('exp-png-transparent').addEventListener('click', function() {
