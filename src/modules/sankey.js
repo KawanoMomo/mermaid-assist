@@ -85,6 +85,29 @@ window.MA.modules.sankeyBeta = (function() {
     return window.MA.textUpdater.deleteLine(text, lineNum);
   }
 
+  // ノードを消す。そのノードを端点に持つ流れをすべて落とす。
+  //
+  // sankey のノードは宣言されない。流れ (`A,B,10`) の両端から導出される。
+  // そのため「ノードの行」を1本消しても、他の流れがまだ名前を挙げていれば
+  // ノードは残る。一覧の ✕ を押したのに消えない、という形になっていた。
+  //
+  // flowchart がノードを消すときにエッジも落とすのと同じ約束にする:
+  // **押した要素と、それだけのために存在していたものを一度に消す**。
+  function deleteNode(text, lineNum, nodeId) {
+    if (!nodeId) return deleteFlow(text, lineNum);
+    var lines = text.split('\n');
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var trimmed = lines[i].trim();
+      if (trimmed && trimmed.indexOf('%%') !== 0 && !/^sankey-beta/.test(trimmed)) {
+        var f = parseCsvLine(trimmed);
+        if (f && f.length === 3 && (f[0] === nodeId || f[1] === nodeId)) continue;
+      }
+      out.push(lines[i]);
+    }
+    return out.join('\n');
+  }
+
   function updateFlow(text, lineNum, field, value) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
@@ -242,7 +265,14 @@ window.MA.modules.sankeyBeta = (function() {
         if (kind === 'flow') return addFlow(text, props.from, props.to, props.value);
         return text;
       },
-      delete: function(text, lineNum) { return deleteFlow(text, lineNum); },
+      // 契約経由では kind を見て分ける。ノードは流れごと落とす。
+      delete: function(text, lineNum, opts) {
+        opts = opts || {};
+        if (opts.kind === 'node' || (opts.id && !/^__f_/.test(String(opts.id)))) {
+          return deleteNode(text, lineNum, opts.id);
+        }
+        return deleteFlow(text, lineNum);
+      },
       update: function(text, lineNum, field, value) { return updateFlow(text, lineNum, field, value); },
       moveUp: function(text, lineNum) {
         if (lineNum <= 1) return text;

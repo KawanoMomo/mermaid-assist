@@ -162,11 +162,23 @@ window.MA.modules.requirementDiagram = (function() {
     return window.MA.textUpdater.deleteLine(text, lineNum);
   }
 
-  function updateRequirementField(text, lineNum, field, value) {
+  // mermaid が受け付ける本文キー。ここに無いキーを書くと図が壊れる。
+  //
+  // 以前は渡された field をそのまま `field: value` として本文に書き込んでいた。
+  // パネルに無い field 名 (label / title など) が来ると、mermaid が知らないキーが
+  // 本文に入り、**その図は以後 parse を通らなくなる**。契約 (ADR-012) では知らない
+  // field は無変化を返すのが正しく、本文を壊すのは契約違反。
+  // requirement ブロックと element ブロックで使えるキーは別。
+  // 混ぜて許すと、element に text: を書いてしまい図が parse を通らなくなる。
+  var KNOWN_REQ_FIELDS = { id: 1, text: 1, risk: 1, verifymethod: 1 };
+  var KNOWN_ELEM_FIELDS = { type: 1, docref: 1 };
+
+  function updateRequirementField(text, lineNum, field, value, allowed) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
-    var fieldKey = field.toLowerCase();
+    var fieldKey = String(field || '').toLowerCase();
+    if (!(allowed || KNOWN_REQ_FIELDS)[fieldKey]) return text;
     var quotedFields = { id: 1, text: 1, type: 1, docref: 1 };
     var formatted = value;
     if (quotedFields[fieldKey]) {
@@ -201,7 +213,7 @@ window.MA.modules.requirementDiagram = (function() {
   }
 
   function updateElementField(text, lineNum, field, value) {
-    return updateRequirementField(text, lineNum, field, value);
+    return updateRequirementField(text, lineNum, field, value, KNOWN_ELEM_FIELDS);
   }
 
   function updateRelation(text, lineNum, field, value) {
@@ -575,14 +587,14 @@ window.MA.modules.requirementDiagram = (function() {
       delete: function(text, lineNum, opts) {
         opts = opts || {};
         if (opts.kind === 'relation') return deleteRelation(text, lineNum);
-        return deleteElement(text, lineNum, opts.elementName);
+        return deleteElement(text, lineNum, opts.elementName || opts.id);
       },
       update: function(text, lineNum, field, value, opts) {
         opts = opts || {};
         if (opts.kind === 'relation') return updateRelation(text, lineNum, field, value);
         if (opts.kind === 'element') return updateElementField(text, lineNum, field, value);
         if (field === 'reqType') return updateRequirementType(text, lineNum, value);
-        if (field === 'name') return updateName(text, lineNum, opts.oldName, value);
+        if (field === 'name') return updateName(text, lineNum, opts.oldName || opts.name || opts.id, value);
         return updateRequirementField(text, lineNum, field, value);
       },
       moveUp: function(text, lineNum) {

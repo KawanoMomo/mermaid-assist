@@ -17,25 +17,17 @@ const { loadModules, elementsOf, report } = require('./lib');
 const ROOT = process.argv[2];
 const M = loadModules(ROOT);
 
-// (text, line, field, value) 形式。field 名はモジュールごとに違うので候補を持つ。
-const FIELD_FNS = {
-  updateNode: ['label', 'id', 'shape'],
-  updateElement: ['label', 'name'],
-  updateParticipant: ['label', 'id'],
-  updateCard: ['text', 'meta'],
-  updateField: ['label'],        // packet は startBit/endBit/label
-  updateSlice: ['label', 'value'],
-  updatePoint: ['label'],
-  updateCurve: ['label'],
-  updateTaskField: ['label', 'id'],
-  updateSection: ['name'],
-  updatePeriod: ['period'],      // timeline は period/event
-  updateCommit: ['id'],
-};
-// (text, line, value) 形式
-const VALUE_FNS = ['updateStateLabel', 'updateNodeText', 'updateColumn'];
-// (text, line, id, value) 形式
-const ID_FNS = ['updateBlockLabel'];
+// 全モジュールが `operations.update(text, line, field, value)` を持つので、
+// 関数名の表を手で持たない。
+//
+// 以前は FIELD_FNS / VALUE_FNS / ID_FNS の3つの表を持っていたが、表から漏れた
+// モジュールは検査対象から静かに外れる。実際 2箇所で field 名を間違えて
+// 偽陽性を出している (packet の `name` / timeline の `label`)。
+// 表を消して契約に寄せる。
+
+// 図種を問わず試す field。モジュールが知らない field は何もしないのが正しいので、
+// **どれか1つでも本文が変われば良し**とする。
+const FIELDS = ['label', 'text', 'name', 'id', 'period', 'value', 'startDate', 'kind', 'values'];
 
 const NEW = 'ZZ更新済ZZ';
 const findings = [];
@@ -43,40 +35,35 @@ const findings = [];
 Object.keys(M).forEach((key) => {
   const mod = M[key];
   if (!mod || !mod.template || !mod.parse) return;
+  if (!mod.operations || typeof mod.operations.update !== 'function') {
+    findings.push({ module: key, fn: 'operations.update',
+      what: '統一入口が無い (検査から静かに外れる)' });
+    return;
+  }
   const t0 = mod.template();
   const els = elementsOf(mod, t0);
   if (!els || !els.length) return;
 
-  const call = (el, kind, fn, field) => {
-    try {
-      if (kind === 'field') return mod[fn](t0, el.line, field, NEW, el.id !== undefined ? el.id : el.key);
-      if (kind === 'value') return mod[fn](t0, el.line, NEW, el.id !== undefined ? el.id : el.key);
-      return mod[fn](t0, el.line, el.id !== undefined ? el.id : el.key, NEW);
-    } catch (e) { return { err: String(e.message).slice(0, 50) }; }
-  };
-
-  const check = (fn, kind, field) => {
-    const dead = [];
-    els.forEach((el) => {
-      const out = call(el, kind, fn, field);
-      if (out && out.err) { dead.push((el.key || '?') + '(例外:' + out.err + ')'); return; }
-      if (!out || out === t0) dead.push(el.key || String(el.i));
+  // どの要素でも、いずれかの field で本文が変わること。
+  // 全要素・全 field で空振りなら、その図種は編集できない。
+  const dead = [];
+  els.forEach((el) => {
+    const changed = FIELDS.some((f) => {
+      try {
+        // 契約の第5引数 opts は「どの種類の行か」を伝える。渡さないと
+        // block / gitGraph / timeline は分岐に入れず、実装が正しくても空振りに見える
+        // (実際これで3件の偽陽性を出した)。
+        const opts = { kind: el.kind, id: el.id, blockId: el.id, name: el.name };
+        const out = mod.operations.update(t0, el.line, f, NEW, opts);
+        return out && out !== t0;
+      } catch (e) { return false; }
     });
-    // 全要素で空振りなら、その欄は死んでいる。
-    // 一部だけ空振りなのは「その要素には無い属性」でありうるので、全滅のときだけ言う。
-    if (dead.length === els.length) {
-      findings.push({ module: key, fn: fn + (field ? '/' + field : ''),
-        what: '違う値を渡しても本文が変わらない (' + els.length + '要素すべて空振り)' });
-    }
-  };
-
-  Object.keys(FIELD_FNS).forEach((fn) => {
-    if (typeof mod[fn] !== 'function') return;
-    // 代表として1つ目の field だけ見る。全部見ると「その図種に無い属性」で騒がしくなる。
-    check(fn, 'field', FIELD_FNS[fn][0]);
+    if (!changed) dead.push(el.key || String(el.i));
   });
-  VALUE_FNS.forEach((fn) => { if (typeof mod[fn] === 'function') check(fn, 'value'); });
-  ID_FNS.forEach((fn) => { if (typeof mod[fn] === 'function') check(fn, 'id'); });
+  if (dead.length === els.length) {
+    findings.push({ module: key, fn: 'operations.update',
+      what: 'どの field を渡しても本文が変わらない (' + els.length + '要素すべて空振り)' });
+  }
 });
 
 report('r12-noop', findings);

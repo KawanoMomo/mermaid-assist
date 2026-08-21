@@ -11,7 +11,7 @@ const path = require('path');
 global.window = { MA: { modules: {} } };
 [ 'core/text-updater', 'core/parser-utils', 'core/date-utils',
   'modules/c4', 'modules/flowchart', 'modules/architecture',
-  'modules/gantt', 'modules/gitgraph', 'modules/sequence', 'modules/block',
+  'modules/gantt', 'modules/gitgraph', 'modules/sequence', 'modules/block', 'modules/state',
 ].forEach(m => require(path.join(__dirname, '..', 'src', m + '.js')));
 
 const M = window.MA.modules;
@@ -64,6 +64,21 @@ pair('flowchart-delete-edge', t, M.flowchart.deleteEdge(t, 2), { expectText: '�
 
 t = 'flowchart TD\n    subgraph G[群]\n    X[x]\n    Y[y]\n    end\n    X --> Z[z]\n';
 pair('flowchart-delete-subgraph', t, M.flowchart.deleteSubgraph(t, 2, 5), { expectText: 'z' });
+
+// state は ID 欄が繋がっておらず、そもそもリネームできなかった (R18 で判明)。
+// 状態は遷移行で宣言されるので、片側だけ書き換えると mermaid は残った参照から
+// 古い ID の状態を作り直す。「消えたはずの状態が図に残る」のと同じ形なので、
+// 描画テキストで固定する。
+t = 'stateDiagram-v2\n    [*] --> Idle\n    Idle --> Running : start\n' +
+    '    Running --> Idle : stop\n    Running --> [*]\n';
+pair('state-id-rename', t, M.state.updateStateId(t, 'Idle', '待機'),
+  // 並びは mermaid が決める (遷移ラベルが先に来る)。肝は Idle が1つも残らないこと。
+  { expectText: 'startstop待機Running', expectAbsent: ['Idle'] });
+
+// 別名宣言を持つ状態。ID を変えてもラベルは動かないこと。
+t = 'stateDiagram-v2\n    state "実行中" as Running\n    [*] --> Running\n    Running --> [*]\n';
+pair('state-id-rename-alias', t, M.state.updateStateId(t, 'Running', 'Active'),
+  { expectText: '実行中' });
 
 const out = path.join(__dirname, 'render-cases', 'rename-cascade.json');
 fs.writeFileSync(out, JSON.stringify(cases, null, 1) + '\n');

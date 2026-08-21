@@ -164,7 +164,7 @@ window.MA.modules.packetBeta = (function() {
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">フィールドを追加</label>' +
           P.fieldHtml('開始 bit', 'pk-add-start', '0') +
           P.fieldHtml('終了 bit', 'pk-add-end', '0', '同じ値なら単一 bit') +
-          P.fieldHtml('Label', 'pk-add-label', '', '例: Source Port') +
+          P.fieldHtml('ラベル', 'pk-add-label', '', '例: Source Port') +
           P.primaryButtonHtml('pk-add-btn', '+ フィールド追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
@@ -205,7 +205,7 @@ window.MA.modules.packetBeta = (function() {
         P.panelHeaderHtml(f.label) +
         P.fieldHtml('開始 bit', 'pk-edit-start', String(f.startBit)) +
         P.fieldHtml('終了 bit', 'pk-edit-end', String(f.endBit)) +
-        P.fieldHtml('Label', 'pk-edit-label', f.label) +
+        P.fieldHtml('ラベル', 'pk-edit-label', f.label) +
         P.dangerButtonHtml('pk-edit-delete', 'フィールド削除');
       var ln = f.line;
       ['start', 'end', 'label'].forEach(function(field) {

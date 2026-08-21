@@ -9,7 +9,9 @@ window.MA.modules.blockBeta = (function() {
   // a depth counter and an identity check that disagree will pair the wrong
   // braces and delete the wrong range.
   var GROUP_START_RE = /^block:([A-Za-z_][A-Za-z0-9_-]*)(?::\d+)?\s*(?:columns\s+\d+)?\s*$/;
-  var BLOCK_TOKEN_RE = /([A-Za-z_][A-Za-z0-9_-]*)(?:\["([^"]*)"\]|\(\("([^"]*)"\)\)|\("([^"]*)"\))?/g;
+  // 形状付きトークン。菱形 `{"..."}` と六角 `{{"..."}}` を知らないと、
+  // `c{"Actuator"}` が `c` と `Actuator` の2ブロックに割れて幽霊が出る。
+  var BLOCK_TOKEN_RE = /([A-Za-z_][A-Za-z0-9_-]*)(?:\["([^"]*)"\]|\(\("([^"]*)"\)\)|\("([^"]*)"\)|\{\{"([^"]*)"\}\}|\{"([^"]*)"\})?/g;
   var LINK_RE = /^([A-Za-z_][A-Za-z0-9_-]*)\s*(?:--\s*"?([^"]*?)"?\s*)?-->\s*([A-Za-z_][A-Za-z0-9_-]*)\s*$/;
 
   // 追加フォームの親グループ選択。renderProps は毎回パネルを作り直すので、
@@ -27,6 +29,14 @@ window.MA.modules.blockBeta = (function() {
       var trimmed = lines[i].trim();
       if (!trimmed || trimmed.indexOf('%%') === 0) continue;
       if (/^block-beta/.test(trimmed)) continue;
+      // 装飾行はブロックではない。
+      //
+      // 以前は `style a fill:#f9f` をトークン分解して `style` `a` `fill` `f9f` の
+      // 4つをブロックとして登録していた。幽霊項目の ✕ を押すと style 行が消え、
+      // リンクの端点候補に `fill` や `f9f` が並ぶ。既存の .mmd を GUI で開いた
+      // 瞬間に起きるので、手書き Mermaid を GUI で触るという前提が崩れていた。
+      // 本文にはそのまま残す (編集対象にしないだけ)。
+      if (/^(style|classDef|class|click|linkStyle)\s/.test(trimmed)) continue;
 
       var cm = trimmed.match(COLUMNS_RE);
       if (cm) { result.meta.columns = parseInt(cm[1], 10); continue; }
@@ -56,7 +66,7 @@ window.MA.modules.blockBeta = (function() {
       BLOCK_TOKEN_RE.lastIndex = 0;
       while ((m = BLOCK_TOKEN_RE.exec(trimmed)) !== null) {
         var id = m[1];
-        var label = decodeLabel(m[2] || m[3] || m[4] || id);
+        var label = decodeLabel(m[2] || m[3] || m[4] || m[5] || m[6] || id);
         // Skip tokens that are actually link keywords (shouldn't happen here but guard)
         if (id === 'block' || id === 'end' || id === 'columns') continue;
         result.elements.push({ kind: 'block', id: id, label: label, parentId: parent2, line: lineNum });
@@ -473,7 +483,7 @@ window.MA.modules.blockBeta = (function() {
           '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
             '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">ブロックを追加</label>' +
             P.fieldHtml('ID', 'block-add-id', '', '例: sensor') +
-            P.fieldHtml('Label', 'block-add-label', '', '省略可、IDと同じ') +
+            P.fieldHtml('ラベル', 'block-add-label', '', '省略可、IDと同じ') +
             P.selectFieldHtml('親グループ', 'block-add-parent', groupOpts) +
             P.primaryButtonHtml('block-add-btn', '+ ブロック追加') +
           '</div>' +
@@ -574,7 +584,7 @@ window.MA.modules.blockBeta = (function() {
             P.panelHeaderHtml(el.kind === 'group' ? 'block:' + el.id : el.id) +
             '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">種別: ' + escHtml(el.kind) + (el.parentId ? ' (親: ' + escHtml(el.parentId) + ')' : '') + '</div>' +
             P.fieldHtml('ID', 'block-edit-id', el.id) +
-            (el.kind === 'block' ? P.fieldHtml('Label', 'block-edit-label', el.label !== el.id ? el.label : '') : '') +
+            (el.kind === 'block' ? P.fieldHtml('ラベル', 'block-edit-label', el.label !== el.id ? el.label : '') : '') +
             P.connectButtonHtml('block-edit-connect') +
             P.dangerButtonHtml('block-edit-delete', '削除');
 
@@ -674,13 +684,16 @@ window.MA.modules.blockBeta = (function() {
       delete: function(text, lineNum, opts) {
         opts = opts || {};
         if (opts.kind === 'link') return deleteLink(text, lineNum);
-        return deleteBlock(text, lineNum, opts.blockId);
+        return deleteBlock(text, lineNum, opts.blockId || opts.id);
       },
       update: function(text, lineNum, field, value, opts) {
         opts = opts || {};
+        // 契約 (ADR-012) の識別子は opts.id。この図種だけ独自キーを要求していたため、
+        // 契約通り opts.id で呼ぶと黙って空振りしていた。既存呼出しを壊さず受ける。
+        var blockId = opts.blockId || opts.id;
         if (opts.kind === 'link') return updateLink(text, lineNum, field, value);
         if (field === 'columns') return setColumns(text, value);
-        if (field === 'label') return updateBlockLabel(text, lineNum, opts.blockId, value);
+        if (field === 'label') return updateBlockLabel(text, lineNum, blockId, value);
         return text;
       },
       moveUp: function(text, lineNum) {

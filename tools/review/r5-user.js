@@ -7,6 +7,14 @@ const path = require('path');
 const { chromium } = require('E:/00_Git/05_MermaidAssist/node_modules/playwright');
 const { report } = require('./lib');
 const ROOT = process.argv[2];
+// 測定条件も検査対象。
+//
+// これまで 1400x900 で測っていた。実利用は 13インチのノートPC (1366x768) が
+// 普通で、132px 低い。この差でプロパティパネルの収まりが 8/21 → 15/21 に
+// 変わっていた (UI-011)。**観点が足りなかったのではなく、測る場所が
+// 実利用と違っていた**。指摘が出ないのは、出ない条件で測っているからかもしれない。
+const VIEWPORT = { width: 1366, height: 768 };
+
 const HTML = 'file:///' + path.resolve(ROOT, 'mermaid-assist.html').split(path.sep).join('/');
 
 // 高頻度操作の許容手数。これを超えたら指摘。
@@ -22,7 +30,7 @@ const TYPES = ['gantt', 'flowchart', 'block-beta', 'classDiagram', 'erDiagram', 
   const b = await chromium.launch();
 
   for (const t of TYPES) {
-    const p = await b.newPage({ viewport: { width: 1400, height: 900 } });
+    const p = await b.newPage({ viewport: { width: VIEWPORT.width, height: VIEWPORT.height } });
     p.on('dialog', d => d.accept());
     await p.goto(HTML);
     await p.waitForSelector('#preview-svg svg', { timeout: 15000 });
@@ -104,7 +112,7 @@ const TYPES = ['gantt', 'flowchart', 'block-beta', 'classDiagram', 'erDiagram', 
                    ['classDiagram', 'sel-class-connect', 'Animal', 'Dog'],
                    ['block-beta', 'block-edit-connect', 'a', 'c']];
   for (const [t, btn, from, to] of CONNECT) {
-    const p = await b.newPage({ viewport: { width: 1400, height: 900 } });
+    const p = await b.newPage({ viewport: { width: VIEWPORT.width, height: VIEWPORT.height } });
     p.on('dialog', d => d.accept());
     await p.goto(HTML);
     await p.waitForSelector('#preview-svg svg', { timeout: 15000 });
@@ -135,5 +143,5 @@ const TYPES = ['gantt', 'flowchart', 'block-beta', 'classDiagram', 'erDiagram', 
   }
 
   await b.close();
-  report('r5-user', findings);
+  report('r5-user', findings, { examined: TYPES.length, total: 21 });
 })();

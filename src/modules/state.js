@@ -4,6 +4,12 @@ window.MA.modules = window.MA.modules || {};
 
 window.MA.modules.state = (function() {
   // State diagram transition syntax: "A --> B : event" or "A --> B"
+  // 書き出すときに &quot; へ逃がした " を、読むときに戻す。
+  // 戻さないと、入れたラベルと一覧に出るラベルが食い違う。
+  function decQuote(v) {
+    return String(v == null ? '' : v).replace(/&quot;/g, '"');
+  }
+
   function parseState(text) {
     var result = {
       meta: { version: 'v2' },
@@ -49,7 +55,7 @@ window.MA.modules.state = (function() {
       var compMatch = trimmed.match(/^state\s+(?:"([^"]+)"\s+as\s+)?(\S+)\s*\{\s*$/);
       if (compMatch) {
         var id = compMatch[2];
-        var label = compMatch[1] || id;
+        var label = decQuote(compMatch[1]) || id;
         var grp = {
           kind: 'composite',
           id: id,
@@ -86,7 +92,7 @@ window.MA.modules.state = (function() {
       if (aliasMatch) {
         var aid = aliasMatch[2];
         if (!stateMap[aid]) {
-          var sea = { kind: 'state', id: aid, label: aliasMatch[1], type: 'simple', line: lineNum };
+          var sea = { kind: 'state', id: aid, label: decQuote(aliasMatch[1]), type: 'simple', line: lineNum };
           result.elements.push(sea);
           stateMap[aid] = sea;
         }
@@ -231,6 +237,12 @@ window.MA.modules.state = (function() {
     return out.join('\n');
   }
 
+  // mermaid はラベル中の " をエスケープできないが、&quot; はそのまま " として
+  // 描かれる (v11.13 実測)。別名の中に " が入ると parse が落ちるので逃がす。
+  function encQuote(v) {
+    return String(v == null ? '' : v).replace(/"/g, '&quot;');
+  }
+
   function updateStateLabel(text, lineNum, newLabel, stateId) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
@@ -240,13 +252,13 @@ window.MA.modules.state = (function() {
 
     var aliasMatch = trimmed.match(/^state\s+"([^"]+)"\s+as\s+(\S+)\s*$/);
     if (aliasMatch) {
-      lines[idx] = indent + 'state "' + newLabel + '" as ' + aliasMatch[2];
+      lines[idx] = indent + 'state "' + encQuote(newLabel) + '" as ' + aliasMatch[2];
       return lines.join('\n');
     }
     var simpleMatch = trimmed.match(/^state\s+(\S+)\s*$/);
     if (simpleMatch) {
       // Need to convert to aliased form
-      lines[idx] = indent + 'state "' + newLabel + '" as ' + simpleMatch[1];
+      lines[idx] = indent + 'state "' + encQuote(newLabel) + '" as ' + simpleMatch[1];
       return lines.join('\n');
     }
     // 宣言行が無い状態。
@@ -256,6 +268,12 @@ window.MA.modules.state = (function() {
     // 無いなら作る — 別名宣言を先頭 (図種宣言の直後) に挿してラベルを与える。
     // 遷移側は id のままなので、図の形は変わらない。
     if (stateId) {
+      // 同じ値の書き戻しでは何もしない。
+      //
+      // 宣言行が無い状態のラベルは id と同じ文字が出ている。そこへ同じ文字を
+      // 書き戻すと別名宣言が1行増え、図は変わらないのに一覧の並びだけがずれる。
+      // 押していない要素を動かさないのが R1 の約束なので、ここで止める。
+      if (String(newLabel) === String(stateId)) return text;
       var insertAt = 1;
       for (var k = 0; k < lines.length; k++) {
         if (/^(stateDiagram(-v2)?)/.test(lines[k].trim())) { insertAt = k + 1; break; }
@@ -265,10 +283,72 @@ window.MA.modules.state = (function() {
         var t2 = lines[k2];
         if (t2.trim()) { baseIndent = t2.match(/^(\s*)/)[1]; break; }
       }
-      lines.splice(insertAt, 0, baseIndent + 'state "' + newLabel + '" as ' + stateId);
+      lines.splice(insertAt, 0, baseIndent + 'state "' + encQuote(newLabel) + '" as ' + stateId);
       return lines.join('\n');
     }
     return text;
+  }
+
+  // 状態の ID を変える。参照している行をすべて追従させる。
+  //
+  // パネルには ID 欄が出ているのに、イベントが繋がっておらず**打鍵しても何も
+  // 起きなかった** (R18 キーボード完結の走査を全21図種に広げて出た)。
+  // 欄があるのに効かないのは、無いより悪い。効いたと思って先へ進んでしまう。
+  //
+  // 参照の追従が要るのは削除と同じ理由。宣言だけ変えると遷移が古い ID を指した
+  // まま残り、mermaid は参照だけで状態を作るので**幽霊状態が生える**。
+  function updateStateId(text, oldId, newId) {
+    if (!oldId || newId == null) return text;
+    newId = String(newId).trim();
+    if (!newId || newId === oldId || newId === '[*]') return text;
+    // 既にある ID へは変えない (黙って2つの状態を1つに統合させない)
+    var existing = parseState(text).elements
+      .filter(function(e) { return e.kind === 'state'; })
+      .map(function(e) { return e.id; });
+    if (existing.indexOf(newId) >= 0) return text;
+
+    var lines = text.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      var indent = lines[i].match(/^(\s*)/)[1];
+      var trimmed = lines[i].trim();
+      if (!trimmed) continue;
+
+      var tr = trimmed.match(/^(\S+|\[\*\])\s+-->\s+(\S+|\[\*\])(\s*:\s*.*)?$/);
+      if (tr) {
+        var from = tr[1] === oldId ? newId : tr[1];
+        var to = tr[2] === oldId ? newId : tr[2];
+        if (from !== tr[1] || to !== tr[2]) {
+          lines[i] = indent + from + ' --> ' + to + (tr[3] || '');
+        }
+        continue;
+      }
+      var alias = trimmed.match(/^state\s+("[^"]*")\s+as\s+(\S+)\s*$/);
+      if (alias && alias[2] === oldId) {
+        lines[i] = indent + 'state ' + alias[1] + ' as ' + newId;
+        continue;
+      }
+      var special = trimmed.match(/^state\s+(\S+)\s+(<<(?:fork|join|choice)>>.*)$/);
+      if (special && special[1] === oldId) {
+        lines[i] = indent + 'state ' + newId + ' ' + special[2];
+        continue;
+      }
+      var comp = trimmed.match(/^state\s+(\S+)\s*\{\s*$/);
+      if (comp && comp[1] === oldId) {
+        lines[i] = indent + 'state ' + newId + ' {';
+        continue;
+      }
+      var decl = trimmed.match(/^state\s+(\S+)\s*$/);
+      if (decl && decl[1] === oldId) {
+        lines[i] = indent + 'state ' + newId;
+        continue;
+      }
+      var note = trimmed.match(/^note\s+(left of|right of|above|below)\s+(\S+)(\s*:.*)$/);
+      if (note && note[2] === oldId) {
+        lines[i] = indent + 'note ' + note[1] + ' ' + newId + note[3];
+        continue;
+      }
+    }
+    return lines.join('\n');
   }
 
   function addTransition(text, from, to, event) {
@@ -486,6 +566,21 @@ window.MA.modules.state = (function() {
         ctx.setMmdText(updateStateLabel(ctx.getMmdText(), st.line, this.value, st.id));
         ctx.onUpdate();
       });
+      // ID 欄。以前は欄だけ出ていて何も繋がっておらず、打鍵しても無反応だった。
+      // 欄があるのに効かないのは無いより悪い (効いたと思って先へ進む)。
+      document.getElementById('sel-state-id').addEventListener('change', function() {
+        var next = updateStateId(ctx.getMmdText(), st.id, this.value);
+        if (next === ctx.getMmdText()) {
+          // 空・重複・[*] は拒否する。黙って戻すと「効かない欄」に見えるので告げる。
+          this.value = st.id;
+          if (ctx.showTransient) ctx.showTransient('その ID は使えません (空・重複・[*] は不可)');
+          return;
+        }
+        window.MA.history.pushHistory();
+        ctx.setMmdText(next);
+        window.MA.selection.setSelected([{ type: 'state', id: String(this.value).trim() }]);
+        ctx.onUpdate();
+      });
       P.bindActionBar('sel-state', {
         up: function() {
           var newText = moveStateUp(ctx.getMmdText(), st.line);
@@ -583,8 +678,31 @@ window.MA.modules.state = (function() {
         if (kind === 'note') return addNote(text, props.position, props.target, props.text);
         return text;
       },
-      delete: function(text, lineNum) { return window.MA.textUpdater.deleteLine(text, lineNum); },
-      update: function(text, lineNum, field, value) {
+      delete: function(text, lineNum, opts) {
+        opts = opts || {};
+        // id を渡されたら id 認識の削除を使う。
+        //
+        // ここは単なる deleteLine だったので、宣言行だけ消えて参照が残る。
+        // mermaid は参照だけで状態を作るので、**一覧から消えても図には残る**。
+        // A10 で UI の経路は直したが、契約の経路が古いままだった (r2 を契約ベースにして発覚)。
+        if (opts.id) return deleteState(text, lineNum, opts.id);
+        return window.MA.textUpdater.deleteLine(text, lineNum);
+      },
+      update: function(text, lineNum, field, value, opts) {
+        opts = opts || {};
+        // 分岐は opts.kind で行う。
+        //
+        // 以前は行の中身に '-->' があるかだけで判定していた。ただ stateDiagram では
+        // 状態は遷移行で宣言されるのが普通なので (`[*] --> Idle`)、**状態を選んで
+        // ラベルを変えると遷移のラベルが書き換わっていた**。状態の名前は変わらず、
+        // 矢印に覚えの無い文字が出る。エラーは出ないので気付きにくい。
+        if (opts.kind === 'state') {
+          if (field === 'id' || field === 'name') return updateStateId(text, opts.id, value);
+          if (field !== 'label') return text;
+          return updateStateLabel(text, lineNum, value, opts.id);
+        }
+        if (opts.kind === 'transition') return updateTransition(text, lineNum, field, value);
+        // kind が無い呼び方 (旧い呼出し) は従来どおり行の中身で判定する
         var lines = text.split('\n');
         var trimmed = (lines[lineNum - 1] || '').trim();
         if (trimmed.indexOf('-->') > 0) return updateTransition(text, lineNum, field, value);
@@ -611,6 +729,7 @@ window.MA.modules.state = (function() {
     moveStateUp: moveStateUp,
     moveStateDown: moveStateDown,
     updateStateLabel: updateStateLabel,
+    updateStateId: updateStateId,
     addTransition: addTransition,
     deleteTransition: deleteTransition,
     updateTransition: updateTransition,

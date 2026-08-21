@@ -135,7 +135,7 @@ window.MA.modules.pie = (function() {
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">スライスを追加</label>' +
-          P.fieldHtml('Label', 'pie-add-label', '', '例: Dogs') +
+          P.fieldHtml('ラベル', 'pie-add-label', '', '例: Dogs') +
           P.fieldHtml('Value', 'pie-add-value', '', '数値') +
           P.primaryButtonHtml('pie-add-btn', '+ スライス追加') +
         '</div>' +
@@ -177,7 +177,7 @@ window.MA.modules.pie = (function() {
 
       propsEl.innerHTML =
         P.panelHeaderHtml(sl.label) +
-        P.fieldHtml('Label', 'pie-edit-label', sl.label) +
+        P.fieldHtml('ラベル', 'pie-edit-label', sl.label) +
         P.fieldHtml('Value', 'pie-edit-value', String(sl.value)) +
         P.dangerButtonHtml('pie-edit-delete', 'スライス削除');
 

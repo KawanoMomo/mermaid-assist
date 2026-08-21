@@ -36,11 +36,8 @@ function rebuildOverlay() {
   if (!currentModule || !overlayEl) return;
   var svgEl = previewSvgEl ? previewSvgEl.querySelector('svg') : null;
   if (svgEl) {
-    if (currentModule.type === 'gantt') {
-      currentModule.buildOverlay(svgEl, parsed);
-    } else {
-      currentModule.buildOverlay(svgEl, parsed, overlayEl);
-    }
+    // 図種による場合分けは不要になった。gantt も他の20図種と同じ 3引数契約。
+    currentModule.buildOverlay(svgEl, parsed, overlayEl);
   }
 }
 
@@ -132,22 +129,13 @@ function pruneStaleSelection(parsedData) {
 // work is parallel" was not a workflow the panel could support.
 //
 // Cleared on a successful add and on a diagram-type switch, nowhere else.
-var addForm = { label: '', id: '', start: '', end: '', kind: 'task', focus: null };
 
 // Which field to focus after the panel is rebuilt, so a continuous run of adds
 // does not need a click between each one.
-function setAddFormFocus(field) { addForm.focus = field; }
 
 // The section the add form should be pointing at. Falls back to the first
 // section when the remembered one no longer exists (the user deleted it), and to
 // -1 when there are no sections at all.
-function addFormSectionIndex(parsedData) {
-  var count = (parsedData && parsedData.sections) ? parsedData.sections.length : 0;
-  if (count === 0) return -1;
-  var want = parseInt(addForm.section, 10);
-  if (isNaN(want) || want < 0 || want >= count) return 0;
-  return want;
-}
 var modules = {};
 var currentModule = null;
 
@@ -182,851 +170,12 @@ modules.gantt = {
   type: 'gantt',
   detect: function(text) { return text.trim().startsWith('gantt'); },
   parse: parseGantt,
-  buildOverlay: function(svgEl, parsedData) {
-    if (!overlayEl) return;
-    // Clear previous overlay content
-    while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
-
-    if (!svgEl || !parsedData || !parsedData.tasks || parsedData.tasks.length === 0) return;
-
-    // Calibrate scale
-    calibrateScale(svgEl, parsedData);
-
-    // Match overlay SVG dimensions/viewBox to the mermaid SVG
-    var viewBox = svgEl.getAttribute('viewBox');
-    if (viewBox) {
-      overlayEl.setAttribute('viewBox', viewBox);
-    }
-    var svgW = svgEl.getAttribute('width');
-    var svgH = svgEl.getAttribute('height');
-    if (svgW) overlayEl.setAttribute('width', svgW);
-    if (svgH) overlayEl.setAttribute('height', svgH);
-
-    var NS = 'http://www.w3.org/2000/svg';
-    var barRects = window.MA.modules.gantt.getCalibration().barRects;
-
-    for (var i = 0; i < parsedData.tasks.length; i++) {
-      var task = parsedData.tasks[i];
-      var br = i < barRects.length ? barRects[i] : null;
-      if (!br) continue; // skip tasks we couldn't match to SVG rects
-      var selected = window.MA.selection.isSelected(task.id);
-
-      // If selected: add green dashed highlight rect
-      if (selected) {
-        var hlRect = document.createElementNS(NS, 'rect');
-        hlRect.setAttribute('x', br.x - 2);
-        hlRect.setAttribute('y', br.y - 2);
-        hlRect.setAttribute('width', br.width + 4);
-        hlRect.setAttribute('height', br.height + 4);
-        hlRect.setAttribute('fill', 'none');
-        hlRect.setAttribute('stroke', '#7ee787');
-        hlRect.setAttribute('stroke-width', '2');
-        hlRect.setAttribute('stroke-dasharray', '4');
-        hlRect.setAttribute('rx', '3');
-        overlayEl.appendChild(hlRect);
-      }
-
-      // Transparent overlay bar rect
-      var overlayRect = document.createElementNS(NS, 'rect');
-      overlayRect.setAttribute('x', br.x);
-      overlayRect.setAttribute('y', br.y);
-      overlayRect.setAttribute('width', br.width);
-      overlayRect.setAttribute('height', br.height);
-      overlayRect.setAttribute('fill', 'transparent');
-      overlayRect.setAttribute('cursor', 'move');
-      overlayRect.setAttribute('class', 'overlay-bar');
-      overlayRect.setAttribute('data-task-id', task.id);
-      overlayRect.setAttribute('data-type', 'task');
-      overlayRect.setAttribute('data-line', task.line);
-      overlayRect.setAttribute('data-index', i);
-      overlayEl.appendChild(overlayRect);
-
-      // Left resize handle
-      var leftHandle = document.createElementNS(NS, 'rect');
-      leftHandle.setAttribute('x', br.x);
-      leftHandle.setAttribute('y', br.y);
-      leftHandle.setAttribute('width', '6');
-      leftHandle.setAttribute('height', br.height);
-      leftHandle.setAttribute('fill', selected ? '#7ee787' : 'transparent');
-      leftHandle.setAttribute('opacity', selected ? '0.7' : '0');
-      leftHandle.setAttribute('cursor', 'w-resize');
-      leftHandle.setAttribute('class', 'resize-handle');
-      leftHandle.setAttribute('data-task-id', task.id);
-      leftHandle.setAttribute('data-handle', 'left');
-      leftHandle.setAttribute('data-line', task.line);
-      leftHandle.setAttribute('data-index', i);
-      overlayEl.appendChild(leftHandle);
-
-      // Right resize handle
-      var rightHandle = document.createElementNS(NS, 'rect');
-      rightHandle.setAttribute('x', br.x + br.width - 6);
-      rightHandle.setAttribute('y', br.y);
-      rightHandle.setAttribute('width', '6');
-      rightHandle.setAttribute('height', br.height);
-      rightHandle.setAttribute('fill', selected ? '#7ee787' : 'transparent');
-      rightHandle.setAttribute('opacity', selected ? '0.7' : '0');
-      rightHandle.setAttribute('cursor', 'e-resize');
-      rightHandle.setAttribute('class', 'resize-handle');
-      rightHandle.setAttribute('data-task-id', task.id);
-      rightHandle.setAttribute('data-handle', 'right');
-      rightHandle.setAttribute('data-line', task.line);
-      rightHandle.setAttribute('data-index', i);
-      overlayEl.appendChild(rightHandle);
-    }
-  },
-  renderProps: function(selData, parsedData) {
-    if (!propsEl) return;
-
-    // No selection
-    if (!selData || selData.length === 0) {
-      var sectionOptions = '';
-      if (parsedData && parsedData.sections) {
-        var keepSec = addFormSectionIndex(parsedData);
-        for (var si = 0; si < parsedData.sections.length; si++) {
-          // The chosen section has to survive the rebuild too, otherwise every
-          // keystroke drops the user back to the first section.
-          var selAttr = (String(si) === String(keepSec)) ? ' selected' : '';
-          sectionOptions += '<option value="' + si + '"' + selAttr + '>' + window.MA.htmlUtils.escHtml(parsedData.sections[si].name) + '</option>';
-        }
-      }
-      if (!sectionOptions) {
-        sectionOptions = '<option value="-1">（セクションなし）</option>';
-      }
-
-      var sectionListHtml = '';
-      if (parsedData && parsedData.sections && parsedData.sections.length > 0) {
-        sectionListHtml += '<div id="prop-section-list" style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:12px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">セクション一覧</label>';
-        for (var sli = 0; sli < parsedData.sections.length; sli++) {
-          var sec = parsedData.sections[sli];
-          var taskCount = 0;
-          for (var sti = 0; sti < parsedData.tasks.length; sti++) {
-            if (parsedData.tasks[sti].sectionIndex === sli) taskCount++;
-          }
-          sectionListHtml +=
-            '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;">' +
-              '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + window.MA.htmlUtils.escHtml(sec.name) + '">' + window.MA.htmlUtils.escHtml(sec.name) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + taskCount + ')</span></div>' +
-              '<button class="prop-section-up" data-section-line="' + sec.line + '" title="上のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:10px;padding:0;">↑</button>' +
-              '<button class="prop-section-down" data-section-line="' + sec.line + '" title="下のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:10px;padding:0;">↓</button>' +
-              // 巻き添えの件数をボタン自体に出す (block と同じ手)。
-              // 以前はここだけ confirm を出していて、同じ画面のタスク ✕ は無言、
-              // block は件数表示と、3通りの作法が混在していた。押す前に何が起きるかを
-              // ボタンの文字で示し、確認は出さない (Undo で戻せる)。
-              '<button class="prop-section-delete" data-section-name="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-line="' + sec.line + '" data-task-count="' + taskCount + '" title="セクション「' + window.MA.htmlUtils.escHtml(sec.name) + '」と含まれるタスク' + taskCount + '件を削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">✕' + (taskCount > 0 ? taskCount : '') + '</button>' +
-            '</div>';
-
-          // セクションの下にタスクを並べる。
-          //
-          // gantt だけプロパティ欄にタスク一覧が無く、タスクを選ぶ手段が
-          // 「チャート上のバーをクリックする」しか無かった。他の20図種には一覧がある。
-          // 4件なら困らないが、100件になるとバーを目で探すしかなくなり、
-          // 一覧を持つ他の図種との差が実務で効いてくる (R8 スケール耐性)。
-          for (var tli = 0; tli < parsedData.tasks.length; tli++) {
-            var tk = parsedData.tasks[tli];
-            if (tk.sectionIndex !== sli) continue;
-            var tkLabel = window.MA.htmlUtils.escHtml(tk.label || tk.id || '');
-            var tkId = window.MA.htmlUtils.escHtml(tk.id || '');
-            sectionListHtml +=
-              '<div class="ma-list-row" style="display:flex;align-items:center;gap:4px;margin:0 0 3px 14px;padding:2px 4px;background:var(--bg-primary);border-radius:3px;">' +
-                '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + tkLabel + '">' + tkLabel + '</div>' +
-                '<button class="prop-task-select" data-element-id="' + tkId + '" data-line="' + tk.line + '" title="「' + tkLabel + '」を選択" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' +
-                '<button class="prop-task-delete" data-element-id="' + tkId + '" data-line="' + tk.line + '" title="「' + tkLabel + '」を削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
-              '</div>';
-          }
-        }
-        sectionListHtml += '</div>';
-      } else {
-        sectionListHtml = '<div id="prop-section-list" style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:12px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:4px;">セクション一覧</label>' +
-          '<div style="font-size:11px;color:var(--text-secondary);">（セクションなし）</div>' +
-        '</div>';
-      }
-
-      var G = window.MA.modules.gantt;
-      var addSecIdx = parseInt(addFormSectionIndex(parsedData), 10);
-      var isMilestone = addForm.kind === 'milestone';
-      // Only used to prefill an empty field: a value the user typed wins.
-      var autoStart = G.nextStartDate(mmdText, addSecIdx);
-      var autoDays = G.nextDurationDays(mmdText, addSecIdx);
-      var autoEnd = (autoStart && autoDays !== null)
-        ? window.MA.dateUtils.addDays(autoStart, autoDays) : '';
-      var fStart = addForm.start || autoStart || '';
-      var fEnd = addForm.end || autoEnd || '';
-      var inputStyle = 'width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;';
-      var esc = window.MA.htmlUtils.escHtml;
-
-      propsEl.innerHTML =
-        '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">タスクを選択するか、新規追加</div>' +
-        // 種別トグル。status を唯一の真とし、これはその入力手段でしかない。
-        '<div style="margin-bottom:8px;display:flex;gap:2px;">' +
-          '<button id="prop-add-kind-task" style="flex:1;background:' + (isMilestone ? 'var(--bg-tertiary)' : 'var(--accent)') + ';color:' + (isMilestone ? 'var(--text-primary)' : '#fff') + ';border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">タスク</button>' +
-          '<button id="prop-add-kind-milestone" style="flex:1;background:' + (isMilestone ? 'var(--accent)' : 'var(--bg-tertiary)') + ';color:' + (isMilestone ? '#fff' : 'var(--text-primary)') + ';border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">マイルストーン</button>' +
-        '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label>' +
-          '<input id="prop-add-label" type="text" value="' + esc(addForm.label || '新規タスク') + '" style="' + inputStyle + '">' +
-        '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ID</label>' +
-          '<input id="prop-add-id" type="text" value="' + esc(addForm.id) + '" placeholder="' + esc(G.nextTaskId(mmdText)) + '" style="' + inputStyle + '">' +
-        '</div>' +
-        (isMilestone
-          ? '<div style="margin-bottom:8px;">' +
-              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">日付</label>' +
-              '<input id="prop-add-start" type="date" value="' + esc(fStart) + '" style="' + inputStyle + '">' +
-            '</div>'
-          : '<div style="margin-bottom:8px;">' +
-              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
-              '<input id="prop-add-start" type="date" value="' + esc(fStart) + '" style="' + inputStyle + '">' +
-            '</div>' +
-            '<div style="margin-bottom:8px;">' +
-              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
-              '<input id="prop-add-end" type="date" value="' + esc(fEnd) + '" style="' + inputStyle + '">' +
-            '</div>') +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション</label>' +
-          '<select id="prop-add-section" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + sectionOptions + '</select>' +
-        '</div>' +
-        '<button id="prop-add-btn" style="width:100%;background:var(--accent);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-bottom:12px;">+ タスク追加</button>' +
-        '<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px;margin-bottom:12px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション追加</label>' +
-          '<div style="display:flex;gap:4px;">' +
-            '<input id="prop-add-sec-name" type="text" placeholder="セクション名" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-            '<button id="prop-add-sec-btn" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:12px;">+</button>' +
-          '</div>' +
-        '</div>' +
-        sectionListHtml +
-        '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:6px;font-weight:bold;">グローバル設定</label>' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">title</label>' +
-          '<input id="prop-global-title" type="text" value="' + window.MA.htmlUtils.escHtml(parsedData.title || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:6px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">dateFormat</label>' +
-          '<input id="prop-global-dateformat" type="text" value="' + window.MA.htmlUtils.escHtml(parsedData.dateFormat || 'YYYY-MM-DD') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:6px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">axisFormat</label>' +
-          (function() {
-            var presets = [
-              { v: '%Y-%m-%d', label: '2026-04-14' },
-              { v: '%Y/%m/%d', label: '2026/04/14' },
-              { v: '%m/%d',    label: '04/14' },
-              { v: '%m月%d日', label: '04月14日' },
-              { v: '%b %d',    label: 'Apr 14' },
-              { v: '%d %b',    label: '14 Apr' },
-              { v: '%a',       label: 'Tue (曜日)' }
-            ];
-            var current = parsedData.axisFormat || '';
-            // No axisFormat line means the app picks the granularity from the
-            // project span (ganttAxisFor). That is a real, named state — showing
-            // "カスタム…" with an empty box says the user chose something custom
-            // and then failed to type it, which is the opposite of what is
-            // happening.
-            var auto = !current;
-            var matched = false;
-            var opts = '<option value="__auto__"' + (auto ? ' selected' : '') +
-              '>自動 (期間に合わせる)</option>';
-            for (var pi = 0; pi < presets.length; pi++) {
-              var sel = (presets[pi].v === current) ? ' selected' : '';
-              if (sel) matched = true;
-              opts += '<option value="' + window.MA.htmlUtils.escHtml(presets[pi].v) + '"' + sel + '>' + window.MA.htmlUtils.escHtml(presets[pi].label + '  (' + presets[pi].v + ')') + '</option>';
-            }
-            var customSel = (matched || auto) ? '' : ' selected';
-            opts += '<option value="__custom__"' + customSel + '>カスタム…</option>';
-            var customDisplay = (matched || auto) ? 'none' : 'block';
-            return '<select id="prop-axisformat-preset" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;margin-bottom:4px;">' + opts + '</select>' +
-              '<input id="prop-axisformat-custom" type="text" value="' + window.MA.htmlUtils.escHtml(current) + '" placeholder="%m/%d" style="display:' + customDisplay + ';width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">';
-          })() +
-        '</div>';
-
-      // Keep every field in addForm as it is typed, so the next rebuild restores
-      // it instead of resetting to the hardcoded defaults.
-      ['label', 'id', 'start', 'end'].forEach(function(field) {
-        var el = document.getElementById('prop-add-' + field);
-        if (!el) return;
-        el.addEventListener('input', function() { addForm[field] = this.value; });
-        // Enter anywhere in the form adds the task — the add button is below the
-        // fold on a short panel and the round trip to it is the whole friction.
-        el.addEventListener('keydown', function(e) {
-          if (e.key === 'Enter') { e.preventDefault(); doAddTask(); }
-        });
-      });
-      var secSel = document.getElementById('prop-add-section');
-      if (secSel) {
-        secSel.addEventListener('change', function() { addForm.section = this.value; });
-      }
-
-      window.MA.properties.bindEvent('prop-add-kind-task', 'click', function() {
-        addForm.kind = 'task';
-        setAddFormFocus('label');
-        renderProps();
-      });
-      window.MA.properties.bindEvent('prop-add-kind-milestone', 'click', function() {
-        addForm.kind = 'milestone';
-        setAddFormFocus('label');
-        renderProps();
-      });
-
-      function doAddTask() {
-        var labelEl = document.getElementById('prop-add-label');
-        var idEl = document.getElementById('prop-add-id');
-        var startEl = document.getElementById('prop-add-start');
-        var endEl = document.getElementById('prop-add-end');
-        var secEl = document.getElementById('prop-add-section');
-        var label = (labelEl && labelEl.value) || '新規タスク';
-        var id = (idEl && idEl.value) ? idEl.value : window.MA.modules.gantt.nextTaskId(mmdText);
-        var start = startEl ? startEl.value : '';
-        var secIdx = secEl ? parseInt(secEl.value, 10) : -1;
-        var milestone = addForm.kind === 'milestone';
-        // Without a date there is nothing to place the bar at; mermaid resolves a
-        // missing start to the chart origin, which reads as a task that silently
-        // jumped to the beginning of the project.
-        if (!start) {
-          if (startEl) startEl.focus();
-          return;
-        }
-        var end = milestone ? '0d' : ((endEl && endEl.value) || start);
-        window.MA.history.pushHistory();
-        mmdText = addTask(mmdText, secIdx, label, id, start, end, milestone ? 'milestone' : null);
-        // 追加したタスクを自動選択しない。
-        //
-        // 選択するとプロパティパネルが詳細表示に切り替わり、**追加フォームごと
-        // 消える**。「ラベル欄へフォーカスを戻して連続入力」と真正面から
-        // 矛盾していて、実測でも追加直後のパネルは詳細表示になり
-        // prop-add-label が存在しなかった。5本続けて足したいときに毎回
-        // Escape を押して戻る必要がある。
-        //
-        // 追加した結果は図とエディタに出るので、確認手段は失われない。
-        window.MA.selection.clearSelection();
-        // Clear only what identifies this task. The section and the kind are the
-        // user's current context and carry over to the next add; the dates are
-        // recomputed from the task just added.
-        addForm.label = '';
-        addForm.id = '';
-        addForm.start = '';
-        addForm.end = '';
-        addForm.section = secEl ? secEl.value : addForm.section;
-        setAddFormFocus('label');
-        suppressSync = true;
-        editorEl.value = mmdText;
-        suppressSync = false;
-        syncLineNumbers();
-        scheduleRefresh();
-        // renderPropsは scheduleRefresh → refresh → renderProps で自動的に呼ばれるので、追加呼び出しは不要
-      }
-
-      window.MA.properties.bindEvent('prop-add-btn', 'click', doAddTask);
-
-      // Restore focus after the rebuild that follows an add or a kind switch.
-      if (addForm.focus) {
-        var focusEl = document.getElementById('prop-add-' + addForm.focus);
-        addForm.focus = null;
-        if (focusEl) {
-          focusEl.focus();
-          if (focusEl.select) focusEl.select();
-        }
-      }
-
-      // Bind add section button
-      var addSecBtn = document.getElementById('prop-add-sec-btn');
-      if (addSecBtn) {
-        addSecBtn.addEventListener('click', function() {
-          var name = document.getElementById('prop-add-sec-name').value.trim();
-          if (!name) return;
-          window.MA.history.pushHistory();
-          mmdText = addSection(mmdText, name);
-          suppressSync = true;
-          editorEl.value = mmdText;
-          suppressSync = false;
-          syncLineNumbers();
-          scheduleRefresh();
-        });
-      }
-
-      // Bind section move buttons. Sections own the tasks between their header and
-      // the next one, so moving a section carries its tasks along — the task-level
-      // ↑↓ only reorders within a section.
-      ['up', 'down'].forEach(function(dir) {
-        var btns = propsEl.querySelectorAll('.prop-section-' + dir);
-        for (var mi = 0; mi < btns.length; mi++) {
-          btns[mi].addEventListener('click', function() {
-            var ln = parseInt(this.getAttribute('data-section-line'), 10);
-            if (isNaN(ln)) return;
-            var moved = window.MA.modules.gantt.moveSection(mmdText, ln, dir === 'up' ? -1 : 1);
-            if (moved === mmdText) return; // at the edge — nothing to do
-            window.MA.history.pushHistory();
-            mmdText = moved;
-            suppressSync = true;
-            editorEl.value = mmdText;
-            suppressSync = false;
-            syncLineNumbers();
-            scheduleRefresh();
-          });
-        }
-      });
-
-      // Bind section delete buttons
-      var sectionDeleteBtns = propsEl.querySelectorAll('.prop-section-delete');
-      for (var sdbi = 0; sdbi < sectionDeleteBtns.length; sdbi++) {
-        (function(btn) {
-          btn.addEventListener('click', function() {
-            var secName = btn.getAttribute('data-section-name');
-            var secLine = parseInt(btn.getAttribute('data-section-line'), 10);
-            var secTasks = parseInt(btn.getAttribute('data-task-count'), 10) || 0;
-            window.MA.history.pushHistory();
-            mmdText = deleteSection(mmdText, secLine);
-            suppressSync = true;
-            editorEl.value = mmdText;
-            suppressSync = false;
-            window.MA.selection.setSelected([]);
-            syncLineNumbers();
-            showTransient('セクション「' + secName + '」とタスク' + secTasks +
-              '件を削除 — Ctrl+Z で戻せます');
-            scheduleRefresh();
-          });
-        })(sectionDeleteBtns[sdbi]);
-      }
-
-      // Bind task list (select / delete)
-      //
-      // 選択は他の図種と同じく selection に載せるだけ。バーをクリックした場合と
-      // 同じ状態にしたいので、id で選ぶ (行番号は編集で動く)。
-      var taskSelBtns = propsEl.querySelectorAll('.prop-task-select');
-      for (var tsi = 0; tsi < taskSelBtns.length; tsi++) {
-        (function(btn) {
-          btn.addEventListener('click', function() {
-            var id = btn.getAttribute('data-element-id');
-            if (!id) return;
-            window.MA.selection.setSelected([{ type: 'task', id: id }]);
-            scheduleRefresh();
-          });
-        })(taskSelBtns[tsi]);
-      }
-      var taskDelBtns = propsEl.querySelectorAll('.prop-task-delete');
-      for (var tdi = 0; tdi < taskDelBtns.length; tdi++) {
-        (function(btn) {
-          btn.addEventListener('click', function() {
-            var ln = parseInt(btn.getAttribute('data-line'), 10);
-            if (isNaN(ln)) return;
-            window.MA.history.pushHistory();
-            mmdText = deleteTask(mmdText, ln);
-            suppressSync = true;
-            editorEl.value = mmdText;
-            suppressSync = false;
-            window.MA.selection.setSelected([]);
-            syncLineNumbers();
-            scheduleRefresh();
-          });
-        })(taskDelBtns[tdi]);
-      }
-
-      // Bind global settings
-      function bindGlobal(elId, key) {
-        var el = document.getElementById(elId);
-        if (el) {
-          el.addEventListener('change', function() {
-            window.MA.history.pushHistory();
-            mmdText = updateGlobalSetting(mmdText, key, el.value);
-            suppressSync = true;
-            editorEl.value = mmdText;
-            suppressSync = false;
-            syncLineNumbers();
-            scheduleRefresh();
-          });
-        }
-      }
-      bindGlobal('prop-global-title', 'title');
-      bindGlobal('prop-global-dateformat', 'dateFormat');
-      // axisFormat: preset dropdown + custom input
-      var afPreset = document.getElementById('prop-axisformat-preset');
-      var afCustom = document.getElementById('prop-axisformat-custom');
-      if (afPreset) {
-        afPreset.addEventListener('change', function() {
-          var v = afPreset.value;
-          if (v === '__custom__') {
-            if (afCustom) {
-              afCustom.style.display = 'block';
-              afCustom.focus();
-            }
-            return; // don't update text yet — wait for custom input change
-          }
-          if (afCustom) afCustom.style.display = 'none';
-          window.MA.history.pushHistory();
-          // 自動 = the axisFormat line is absent, so the app derives the tick
-          // granularity from the project span. Writing a value here would pin it
-          // again, because the DSL line beats the config.
-          if (v === '__auto__') {
-            mmdText = window.MA.modules.gantt.removeGlobalSetting(mmdText, 'axisFormat');
-            suppressSync = true;
-            editorEl.value = mmdText;
-            suppressSync = false;
-            syncLineNumbers();
-            scheduleRefresh();
-            return;
-          }
-          mmdText = updateGlobalSetting(mmdText, 'axisFormat', v);
-          suppressSync = true;
-          editorEl.value = mmdText;
-          suppressSync = false;
-          syncLineNumbers();
-          scheduleRefresh();
-        });
-      }
-      if (afCustom) {
-        afCustom.addEventListener('change', function() {
-          window.MA.history.pushHistory();
-          mmdText = updateGlobalSetting(mmdText, 'axisFormat', afCustom.value);
-          suppressSync = true;
-          editorEl.value = mmdText;
-          suppressSync = false;
-          syncLineNumbers();
-          scheduleRefresh();
-        });
-      }
-      return;
-    }
-
-    // Single task selected
-    if (selData.length === 1 && selData[0].type === 'task') {
-      var taskId = selData[0].id;
-      var task = null;
-      if (parsedData && parsedData.tasks) {
-        for (var ti = 0; ti < parsedData.tasks.length; ti++) {
-          if (parsedData.tasks[ti].id === taskId) { task = parsedData.tasks[ti]; break; }
-        }
-      }
-      if (!task) {
-        propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">タスクが見つかりません</p>';
-        return;
-      }
-
-      var statusBtns = ['none', 'done', 'active', 'crit', 'milestone'].map(function(s) {
-        var isActive = (s === 'none' && !task.status) || (task.status === s);
-        var bg = isActive ? 'var(--accent)' : 'var(--bg-tertiary)';
-        var val = s === 'none' ? '' : s;
-        return '<button class="prop-status-btn" data-status="' + val + '" style="flex:1;background:' + bg + ';color:var(--text-primary);border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">' + s + '</button>';
-      }).join('');
-
-      var moveSecOpts = '';
-      if (parsedData && parsedData.sections) {
-        for (var msi = 0; msi < parsedData.sections.length; msi++) {
-          var selAttr = (msi === task.sectionIndex) ? ' selected' : '';
-          moveSecOpts += '<option value="' + msi + '"' + selAttr + '>' + window.MA.htmlUtils.escHtml(parsedData.sections[msi].name) + '</option>';
-        }
-      }
-      if (!moveSecOpts) {
-        moveSecOpts = '<option value="-1">（セクションなし）</option>';
-      }
-
-      propsEl.innerHTML =
-        '<div style="margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;">' +
-          '<div style="flex:1;font-weight:bold;color:var(--text-primary);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + window.MA.htmlUtils.escHtml(task.label) + '</div>' +
-          '<button id="prop-move-up" title="同一セクション内で上へ移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↑</button>' +
-          '<button id="prop-move-down" title="同一セクション内で下へ移動" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);width:24px;height:22px;border-radius:3px;cursor:pointer;font-size:12px;padding:0;">↓</button>' +
-        '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ラベル</label>' +
-          '<input id="prop-label" type="text" value="' + window.MA.htmlUtils.escHtml(task.label) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ID</label>' +
-          '<input id="prop-id" type="text" value="' + window.MA.htmlUtils.escHtml(window.MA.parserUtils.isAutoId(task.id) ? '' : task.id) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' +
-        // A milestone is a point in time; the second date field has nothing to
-        // hold. status is the single source of truth for what a task is, so the
-        // panel folds purely on it — the add form's kind toggle only ever writes
-        // status, it never gets its own opinion.
-        (task.status === 'milestone'
-          ? '<div style="margin-bottom:8px;">' +
-              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">日付</label>' +
-              '<input id="prop-start" type="date" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-            '</div>'
-          : '<div style="margin-bottom:8px;">' +
-              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
-              '<input id="prop-start" type="date" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-            '</div>' +
-            '<div style="margin-bottom:8px;">' +
-              '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
-              '<input id="prop-end" type="date" value="' + window.MA.htmlUtils.escHtml(task.endDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-            '</div>') +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ステータス</label>' +
-          '<div style="display:flex;gap:2px;">' + statusBtns + '</div>' +
-        '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">after依存</label>' +
-          '<input id="prop-after" type="text" value="' + window.MA.htmlUtils.escHtml(task.after || '') + '" placeholder="タスクID (例: a1)" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション移動</label>' +
-          '<select id="prop-move-section" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + moveSecOpts + '</select>' +
-        '</div>' +
-        '<button id="prop-delete-btn" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">タスク削除</button>';
-
-      // Bind handlers
-      window.MA.properties.bindTextField('prop-label', task.line, 'label');
-      window.MA.properties.bindTextField('prop-id', task.line, 'id');
-      window.MA.properties.bindTextField('prop-after', task.line, 'after');
-      window.MA.properties.bindDateField('prop-start', 'prop-end', task.line, updateTaskDates);
-
-      // Move up/down handlers
-      var moveUpBtn = document.getElementById('prop-move-up');
-      if (moveUpBtn) {
-        moveUpBtn.addEventListener('click', function() {
-          var newText = moveTaskWithinSection(mmdText, task.line, -1);
-          if (newText === mmdText) return; // no-op (boundary)
-          window.MA.history.pushHistory();
-          mmdText = newText;
-          suppressSync = true;
-          editorEl.value = mmdText;
-          suppressSync = false;
-          syncLineNumbers();
-          scheduleRefresh();
-        });
-      }
-      var moveDownBtn = document.getElementById('prop-move-down');
-      if (moveDownBtn) {
-        moveDownBtn.addEventListener('click', function() {
-          var newText = moveTaskWithinSection(mmdText, task.line, 1);
-          if (newText === mmdText) return;
-          window.MA.history.pushHistory();
-          mmdText = newText;
-          suppressSync = true;
-          editorEl.value = mmdText;
-          suppressSync = false;
-          syncLineNumbers();
-          scheduleRefresh();
-        });
-      }
-
-      var moveSectionEl = document.getElementById('prop-move-section');
-      if (moveSectionEl) {
-        moveSectionEl.addEventListener('change', function() {
-          var targetIdx = parseInt(moveSectionEl.value, 10);
-          if (isNaN(targetIdx)) return;
-          var newText = moveTaskToSection(mmdText, task.line, targetIdx);
-          if (newText === mmdText) return; // no-op
-          window.MA.history.pushHistory();
-          mmdText = newText;
-          suppressSync = true;
-          editorEl.value = mmdText;
-          suppressSync = false;
-          syncLineNumbers();
-          scheduleRefresh();
-        });
-      }
-
-      // Status buttons
-      var statusBtnEls = propsEl.querySelectorAll('.prop-status-btn');
-      for (var sbi = 0; sbi < statusBtnEls.length; sbi++) {
-        (function(btn) {
-          btn.addEventListener('click', function() {
-            window.MA.history.pushHistory();
-            mmdText = updateTaskField(mmdText, task.line, 'status', btn.getAttribute('data-status'));
-            suppressSync = true;
-            editorEl.value = mmdText;
-            suppressSync = false;
-            syncLineNumbers();
-            scheduleRefresh();
-          });
-        })(statusBtnEls[sbi]);
-      }
-
-      // Delete button
-      var delBtn = document.getElementById('prop-delete-btn');
-      if (delBtn) {
-        delBtn.addEventListener('click', function() {
-          window.MA.history.pushHistory();
-          mmdText = deleteTask(mmdText, task.line);
-          suppressSync = true;
-          editorEl.value = mmdText;
-          suppressSync = false;
-          window.MA.selection.setSelected([]);
-          syncLineNumbers();
-          scheduleRefresh();
-        });
-      }
-      return;
-    }
-
-    // Multiple tasks selected
-    if (selData.length > 1) {
-      var selectedTasks = [];
-      if (parsedData && parsedData.tasks) {
-        for (var mi = 0; mi < selData.length; mi++) {
-          for (var mj = 0; mj < parsedData.tasks.length; mj++) {
-            if (parsedData.tasks[mj].id === selData[mi].id) {
-              selectedTasks.push(parsedData.tasks[mj]);
-              break;
-            }
-          }
-        }
-      }
-
-      var batchStatusBtns = ['done', 'active', 'crit', 'none'].map(function(s) {
-        var val = s === 'none' ? '' : s;
-        return '<button class="batch-status-btn" data-status="' + val + '" style="flex:1;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border);padding:3px 4px;border-radius:3px;cursor:pointer;font-size:10px;">' + s + '</button>';
-      }).join('');
-
-      propsEl.innerHTML =
-        '<div style="margin-bottom:8px;font-size:11px;color:var(--text-secondary);">' + selData.length + ' タスク選択中</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">一括ステータス変更</label>' +
-          '<div style="display:flex;gap:2px;">' + batchStatusBtns + '</div>' +
-        '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">一括日付シフト（日数）</label>' +
-          '<div style="display:flex;gap:4px;">' +
-            '<input id="batch-shift-days" type="number" value="0" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-            '<button id="batch-shift-btn" style="background:var(--accent);color:#fff;border:none;padding:3px 8px;border-radius:3px;cursor:pointer;font-size:11px;">適用</button>' +
-          '</div>' +
-        '</div>' +
-        '<button id="batch-delete-btn" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">一括削除</button>';
-
-      // Batch status change
-      var batchBtnEls = propsEl.querySelectorAll('.batch-status-btn');
-      for (var bbi = 0; bbi < batchBtnEls.length; bbi++) {
-        (function(btn) {
-          btn.addEventListener('click', function() {
-            window.MA.history.pushHistory();
-            var statusVal = btn.getAttribute('data-status');
-            for (var bti = 0; bti < selectedTasks.length; bti++) {
-              mmdText = updateTaskField(mmdText, selectedTasks[bti].line, 'status', statusVal);
-            }
-            suppressSync = true;
-            editorEl.value = mmdText;
-            suppressSync = false;
-            syncLineNumbers();
-            scheduleRefresh();
-          });
-        })(batchBtnEls[bbi]);
-      }
-
-      // Batch date shift
-      var shiftBtn = document.getElementById('batch-shift-btn');
-      if (shiftBtn) {
-        shiftBtn.addEventListener('click', function() {
-          var daysVal = parseInt(document.getElementById('batch-shift-days').value, 10);
-          if (isNaN(daysVal) || daysVal === 0) return;
-          window.MA.history.pushHistory();
-          for (var sti = 0; sti < selectedTasks.length; sti++) {
-            var st = selectedTasks[sti];
-            var newStart = st.startDate && DATE_RE.test(st.startDate) ? window.MA.dateUtils.addDays(st.startDate, daysVal) : null;
-            var newEnd = st.endDate && DATE_RE.test(st.endDate) ? window.MA.dateUtils.addDays(st.endDate, daysVal) : null;
-            if (newStart || newEnd) {
-              mmdText = updateTaskDates(mmdText, st.line, newStart, newEnd);
-            }
-          }
-          suppressSync = true;
-          editorEl.value = mmdText;
-          suppressSync = false;
-          syncLineNumbers();
-          scheduleRefresh();
-        });
-      }
-
-      // Batch delete (reverse line order to preserve line numbers)
-      var batchDelBtn = document.getElementById('batch-delete-btn');
-      if (batchDelBtn) {
-        batchDelBtn.addEventListener('click', function() {
-          window.MA.history.pushHistory();
-          // Sort by line number descending so deletion doesn't shift lines
-          var sorted = selectedTasks.slice().sort(function(a, b) { return b.line - a.line; });
-          for (var di = 0; di < sorted.length; di++) {
-            mmdText = deleteTask(mmdText, sorted[di].line);
-          }
-          suppressSync = true;
-          editorEl.value = mmdText;
-          suppressSync = false;
-          window.MA.selection.setSelected([]);
-          syncLineNumbers();
-          scheduleRefresh();
-        });
-      }
-      return;
-    }
-
-    // Section selected
-    if (selData.length === 1 && selData[0].type === 'section') {
-      var secId = selData[0].id;
-      var section = null;
-      if (parsedData && parsedData.sections) {
-        for (var sci = 0; sci < parsedData.sections.length; sci++) {
-          if (parsedData.sections[sci].name === secId) {
-            section = parsedData.sections[sci];
-            break;
-          }
-        }
-      }
-      if (!section) {
-        propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">セクションが見つかりません</p>';
-        return;
-      }
-
-      // Tasks in this section
-      var secTasks = [];
-      if (parsedData && parsedData.tasks) {
-        var secIndex = parsedData.sections.indexOf(section);
-        for (var sti2 = 0; sti2 < parsedData.tasks.length; sti2++) {
-          if (parsedData.tasks[sti2].sectionIndex === secIndex) {
-            secTasks.push(parsedData.tasks[sti2]);
-          }
-        }
-      }
-
-      var taskList = secTasks.map(function(t) {
-        return '<div style="padding:2px 4px;font-size:11px;color:var(--text-primary);">' + window.MA.htmlUtils.escHtml(t.label) + '</div>';
-      }).join('');
-
-      propsEl.innerHTML =
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション名</label>' +
-          '<input id="prop-sec-name" type="text" value="' + window.MA.htmlUtils.escHtml(section.name) + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-        '</div>' +
-        '<div style="margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:4px;">タスク一覧 (' + secTasks.length + '件)</label>' +
-          taskList +
-        '</div>' +
-        '<button id="prop-sec-delete-btn" style="width:100%;background:var(--accent-red);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:8px;">セクション削除 (タスクごと)</button>';
-
-      // Bind section name change
-      var secNameEl = document.getElementById('prop-sec-name');
-      if (secNameEl) {
-        secNameEl.addEventListener('change', function() {
-          window.MA.history.pushHistory();
-          var lines = mmdText.split('\n');
-          var idx = section.line - 1;
-          if (idx >= 0 && idx < lines.length) {
-            var indent = lines[idx].match(/^(\s*)/)[1];
-            lines[idx] = indent + 'section ' + secNameEl.value;
-            mmdText = lines.join('\n');
-            suppressSync = true;
-            editorEl.value = mmdText;
-            suppressSync = false;
-            window.MA.selection.setSelected([{ type: 'section', id: secNameEl.value }]);
-            syncLineNumbers();
-            scheduleRefresh();
-          }
-        });
-      }
-
-      // Bind section delete
-      var secDelBtn = document.getElementById('prop-sec-delete-btn');
-      if (secDelBtn) {
-        secDelBtn.addEventListener('click', function() {
-          window.MA.history.pushHistory();
-          mmdText = deleteSection(mmdText, section.line);
-          suppressSync = true;
-          editorEl.value = mmdText;
-          suppressSync = false;
-          window.MA.selection.setSelected([]);
-          syncLineNumbers();
-          scheduleRefresh();
-        });
-      }
-      return;
-    }
-
-    // Default fallback
-    propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">タスクを選択してください</p>';
-  },
+  // buildOverlay は gantt.js へ移した (M2 / ADR-012 の 3引数契約)。
+  // ここに残していたのは app.js のクロージャ変数 overlayEl を見ていたからで、
+  // 引数で受ける形に揃えたことで依存が消えた。
+  buildOverlay: window.MA.modules.gantt.buildOverlay,
+  // renderProps は gantt.js へ移した (M2 / ADR-012 の 4引数契約)。
+  renderProps: window.MA.modules.gantt.renderProps,
 };
 
 // Register window.MA.modules (sequence, etc.) into local modules dict
@@ -1103,7 +252,18 @@ async function refresh(skipRender) {
     // Guard: if a newer render was started, discard this result
     if (thisRender !== renderCounter) return;
 
+    // 描き上がりが本物か確かめる。
+    //
+    // 上限を上げてもさらに超える場合がある。mermaid はそのときも例外を投げず
+    // プレースホルダーを返すので、こちらで見分けないと「保存したつもりで空同然の
+    // 画像を受け取る」ことになる。間違った成果物が黙って出るのが一番悪い。
+    if (window.MA.diagnose && window.MA.diagnose.isOversizePlaceholder(renderResult.svg)) {
+      throw new Error('本文が長すぎて mermaid が図を描けません (' +
+        mmdText.length.toLocaleString() + ' 文字)。図を分割してください。');
+    }
+
     previewSvgEl.innerHTML = renderResult.svg;
+    previewStale = false;
 
     var svgEl = previewSvgEl.querySelector('svg');
     if (svgEl) {
@@ -1172,15 +332,23 @@ async function refresh(skipRender) {
 
     // Build overlay (skip during drag to prevent jitter)
     if (currentModule && svgEl && !dragState) {
-      if (currentModule.type === 'gantt') {
-        currentModule.buildOverlay(svgEl, parsed);
-      } else {
-        currentModule.buildOverlay(svgEl, parsed, overlayEl);
-      }
+      // 図種による場合分けは不要 (gantt も 3引数契約に揃えた)
+      currentModule.buildOverlay(svgEl, parsed, overlayEl);
     }
 
     statusParseEl.textContent = 'OK';
     statusParseEl.classList.remove('error');
+
+    // 描けたのに一部が落ちている場合を黙って通さない。
+    //
+    // mermaid は必ず例外を投げるとは限らない。kanban の列名に括弧を入れると
+    // parse は通り、図も出るが、括弧の中だけが消える。journey の section 名に
+    // # を入れると以降が無かったことになる。利用者から見ると「入れたはずの文字が
+    // 図に無い」だけで、原因を突き止める手掛かりがどこにも出ていなかった。
+    // 失敗したときだけ原因を言うのでは足りない (R11 特殊文字)。
+    var warn = window.MA.diagnose ? window.MA.diagnose.diagnose(mmdText, null) : '';
+    if (warn) showRenderWarningBanner(warn);
+    else hideParseErrorBanner();
   } catch (e) {
     if (thisRender !== renderCounter) return;
     // mermaid のエラーは字句解析器の言葉なので、原因が分かる場合は先に日本語で言う。
@@ -1193,6 +361,25 @@ async function refresh(skipRender) {
     // 見えているペインの幅ではなく**キャンバスの幅**で折り返す。結果、一行が
     // ペインの右端で切れ、肝心の「どの文字が該当するか」が読めない。
     // 元からある Render error の行も同じ理由で切れていた (実機で確認)。
+    // 直前に描けていた図は残す。
+    //
+    // 以前は失敗のたびにプレビューを赤いエラーテキストで置き換えていた。構文を
+    // 打っている途中は必ず一時的に不正になるので、`section` と打つだけで図が消える。
+    // 「テキストを直すと図がどう変わるか」を見ながら書くという3ペインUIの目的が
+    // 成り立たなくなっていた。参照したい図が消えるので、結局エディタだけ見て打つことになる。
+    //
+    // 図が既に出ているなら、そのままにしてステータスと小さな帯だけでエラーを伝える。
+    previewStale = true;
+    var hadDiagram = !!previewSvgEl.querySelector('svg');
+    if (hadDiagram) {
+      statusParseEl.textContent = 'Error';
+      statusParseEl.classList.add('error');
+      showParseErrorBanner(e);
+      renderProps();
+      renderStatus();
+      return;
+    }
+
     // 拡大率を一旦外す。このコンテナには scale(zoom) がかかっているので、
     // 124% のまま文章を出すと文字も 124% になり、指定した幅で折り返しても
     // ペインからはみ出す。図に戻れば次の描画で scale は付け直される。
@@ -1261,6 +448,12 @@ function ganttStatusText(parsedData) {
 // 「保存できたのか」「いま何が消えたのか」を画面が何も言っていなかった。
 // 行を増やさずに済ませたいので、既存のステータス行を数秒だけ borrow する
 // (dragBlockedMsg が同じ枠を使っているのと同じやり方)。
+// いまプレビューに出ている図が、今の本文のものではないことを覚えておく。
+// 描画失敗時に直前の図を残すようにしたので、そのまま書き出すと
+// **編集していない内容**が成果物になる。図を残す判断自体は正しいので、
+// Export 側に「古い」という情報を伝える。
+var previewStale = false;
+
 var transientMsg = '';
 var transientUntil = 0;
 var transientTimer = null;
@@ -1272,6 +465,120 @@ function showTransient(msg, ms) {
   renderStatus();
 }
 // ショートカット一覧の開閉。Escape でも閉じられる (閉じ方を探させない)。
+// 入力欄を抜けたときにフォーカスがどこにも残らないと、「いまどこにいるか」が
+// 画面から消える。矢印キーでの巡回は動くので実害は小さいが、戻し先を決めておく。
+// 選んでいる要素を契約経由で消す。
+//
+// 図種ごとの分岐は持たない。`operations.delete(text, lineNum, opts)` は
+// ADR-012 で全21図種が持つ約束になっているので、それだけを使う。
+//
+// 1件ずつ消すたびに現在の本文を parse し直すのは、削除で行番号がずれるため。
+// 最初に取った行番号を使い回すと、2件目以降は無関係の行を消す。
+// 逆に「毎回エディタから読み直す」形にすると、途中の結果を捨てて最後の1件しか
+// 残らない (過去に e2e でだけ捕まえた形)。本文は変数で明示的に持ち回す。
+function deleteSelectedElements(sel) {
+  if (!currentModule || !currentModule.operations ||
+      typeof currentModule.operations.delete !== 'function') {
+    showTransient('この図種は削除に対応していません', 3000);
+    return;
+  }
+  var text = mmdText;
+  var removed = 0;
+  sel.forEach(function(s) {
+    var p;
+    try { p = currentModule.parse(text); } catch (e) { return; }
+    var target = null;
+    var els = p.elements || [];
+    for (var i = 0; i < els.length; i++) { if (els[i].id === s.id) { target = els[i]; break; } }
+    if (!target) {
+      var rels = p.relations || [];
+      for (var j = 0; j < rels.length; j++) { if (rels[j].id === s.id) { target = rels[j]; break; } }
+    }
+    if (!target) return;
+    var next = currentModule.operations['delete'](text, target.line, {
+      kind: target.kind || s.type, id: target.id, blockId: target.id, name: target.name,
+    });
+    if (next && next !== text) { text = next; removed++; }
+  });
+  if (!removed) {
+    showTransient('選んでいる要素を消せませんでした', 3000);
+    return;
+  }
+  // 実際に消えた数を数える。
+  //
+  // 選んだ数をそのまま言うと過少申告になる。flowchart のノードを1つ消すと
+  // それに繋がるエッジも消えるので、一覧の ✕ は「✕3」と波及数を出している
+  // (tooltip に「1 ノード / 2 エッジが消えます」)。キーボードで消したときだけ
+  // 「1件削除」と出るのでは、同じ操作の結果が経路によって違う数に見える。
+  var msg = deletedMessage(removed);
+  try {
+    var b0 = currentModule.parse(mmdText);
+    var a0 = currentModule.parse(text);
+    var dEl = ((b0.elements || []).length) - ((a0.elements || []).length);
+    var dRel = ((b0.relations || []).length) - ((a0.relations || []).length);
+    if (dEl > 0 && dRel > 0) msg = dEl + '件と関連 ' + dRel + '件を削除 — Ctrl+Z で戻せます';
+    else if (dEl > 0) msg = deletedMessage(dEl);
+    else if (dRel > 0) msg = '関連 ' + dRel + '件を削除 — Ctrl+Z で戻せます';
+  } catch (e) { /* 数えられなければ選んだ数のまま言う */ }
+  window.MA.history.pushHistory();
+  mmdText = text;
+  suppressSync = true;
+  editorEl.value = mmdText;
+  suppressSync = false;
+  window.MA.selection.setSelected([]);
+  syncLineNumbers();
+  // 削除に確認を出さないのは Undo で戻せるからだが、戻せることを示して
+  // いるのはツールバーの Undo だけで、視線は図の上にある。消したその場で言う。
+  showTransient(msg);
+  scheduleRefresh();
+}
+
+// プロパティパネルに続きがあるかを見て、帯の出し入れをする。
+//
+// 13インチのノートPC (1366x768) では 21図種中15図種でパネルが画面に収まらない
+// (flowchart は 320px はみ出す)。スクロールバーは実測で幅0だったので、
+// **続きがあることを示すものが画面に1つも無かった**。
+//
+// 一番下まで見えているときは出さない。常に出すと「まだ下がある」の合図が
+// 意味を失い、無視されるようになる。
+function updatePropsOverflowHint() {
+  var el = document.getElementById('props-content');
+  var hint = document.getElementById('props-more');
+  if (!el || !hint) return;
+  var more = el.scrollHeight - el.clientHeight - el.scrollTop;
+  hint.hidden = more <= 4;   // 端数の丸めで1〜2px残ることがある
+}
+
+// 追加フォームの先頭欄へ飛ぶ。
+//
+// 追加は一番よく使う操作なのに、欄へ入る手段がマウスのクリックしか無かった。
+// Enter での確定は既にできるので、**入口の1クリックだけ**がキーボード完結を
+// 止めていた。1日100回足すなら100往復。
+//
+// 欄の id は図種ごとに違う (`fc-add-node-id` / `prop-add-label` / `kb-add-col-name`)
+// ので名前の表は持たない。「add を含む id を持つ、最初の入力欄」で選ぶ。
+function focusAddForm() {
+  var el = document.querySelector(
+    '#props-content input[id*="add"], #props-content select[id*="add"], #props-content textarea[id*="add"]');
+  if (!el) {
+    showTransient('この図種には追加フォームがありません', 2500);
+    return;
+  }
+  el.focus();
+  if (el.select) el.select();
+}
+
+// エディタへ戻る。
+// プレビューへ戻す focusPreview の逆向きが無く、本文を直すたびにマウスへ持ち替えていた。
+function focusEditor() {
+  if (editorEl && editorEl.focus) editorEl.focus();
+}
+
+function focusPreview() {
+  var pane = document.getElementById('preview-pane') || previewSvgEl;
+  if (pane && pane.focus) { pane.setAttribute('tabindex', '-1'); pane.focus(); }
+}
+
 function toggleShortcutHelp(force) {
   var box = document.getElementById('shortcut-help');
   if (!box) return;
@@ -1288,7 +595,66 @@ function deletedMessage(n) {
   return n + '件削除 — Ctrl+Z で戻せます';
 }
 
+// 描画に失敗したが直前の図が残っているとき用の帯。
+// 図を消さずに「いま表示しているのは古い」ことだけを伝える。
+function showParseErrorBanner(err) {
+  var host = document.getElementById('preview-container') || previewSvgEl.parentElement;
+  if (!host) return;
+  var el = document.getElementById('parse-error-banner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'parse-error-banner';
+    host.appendChild(el);
+  }
+  var cause = window.MA.diagnose ? window.MA.diagnose.diagnose(mmdText, err) : '';
+  // 原因を名指しできないときに「構文エラー」と断定しない。
+  //
+  // 実際、500本のエッジ上限に当たったときもこの文言が出ていた。本文に構文誤りは
+  // 1つも無いのに構文を疑わせるので、何も言わないより高くつく。
+  // 分かっているのは「描けなかった」ことだけなので、そこまでを言う。
+  el.textContent = cause || ('図を描けませんでした — 表示しているのは直前に描けた図です');
+  el.hidden = false;
+}
+function hideParseErrorBanner() {
+  var el = document.getElementById('parse-error-banner');
+  if (el) { el.hidden = true; el.classList.remove('warn'); }
+}
+
+// 図は描けているが、入れた文字の一部が落ちているときの帯。
+// エラーではないので図はそのまま見せ、原因だけを添える。
+function showRenderWarningBanner(cause) {
+  var host = document.getElementById('preview-container') || previewSvgEl.parentElement;
+  if (!host) return;
+  var el = document.getElementById('parse-error-banner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'parse-error-banner';
+    host.appendChild(el);
+  }
+  el.classList.add('warn');
+  el.textContent = '図は描けましたが一部が反映されていません — ' + cause;
+  el.hidden = false;
+}
+
+// D1: いまどのファイルを触っているかを常に見えるようにする。
+//
+// 保存名は保存時に4秒だけ出て消えていたので、複数の図を並行して直す運用で
+// 「どこに上書きされるか」を確かめる手段がなかった。上書き保存を入れた以上、
+// これは安全に関わる情報になる。
+function updateDocumentTitle() {
+  var name = currentBaseName();
+  var dirty = hasUnsavedWork(mmdText, savedText,
+    currentModule && currentModule.template ? currentModule.template() : null);
+  document.title = (dirty ? '● ' : '') + name + '.mmd — MermaidAssist';
+}
+
 function renderStatus() {
+  // タイトルはステータス行の中身とは独立なので、早期 return の前に更新する。
+  //
+  // 以前は関数の末尾で呼んでいたので、一時メッセージが出ている4秒間はそこまで
+  // 到達しなかった。保存直後に編集しても未保存マークが付かない。
+  // 保存した直後はまさに編集を再開する時間帯なので、一番当たりやすい穴だった。
+  if (typeof updateDocumentTitle === 'function') updateDocumentTitle();
   if (!statusInfoEl) return;
   if (transientMsg && Date.now() < transientUntil) {
     statusInfoEl.textContent = transientMsg;
@@ -1396,20 +762,59 @@ function filterRows() {
   }
 }
 
+// 本文の編集で再描画が起きたのか、パネルの操作で起きたのかを区別する。
+//
+// パネルは毎回 innerHTML を作り直すので、書きかけの追加フォームは消える。
+// 実測: 追加フォームに「WIP」と入れてからエディタに1文字打つと、空になった。
+// 打鍵の途中で再描画が挟まると先頭の文字も落ちる (「ae」と打って「e」になった)。
+//
+// ただし**いつでも復元してよいわけではない**。「+追加」を押した直後の再描画では
+// フォームが空になるのが正しく、そこで書き戻すと同じ要素をもう一度足しかねない。
+// 引き金で分ける。
+var refreshCause = 'other';
+
+// 追加フォームの書きかけを持ち越す。
+//
+// id に 'add' を含む入力欄だけを対象にする。図種ごとに id は違う
+// (`fc-add-node-id` / `prop-add-label` / `kb-add-col-name`) が、接頭辞の表は持たない。
+// 図種を切り替えると id ごと入れ替わるので、別の図種へ持ち越されることはない
+// (持ち越してはいけない — R15 状態の持ち越し)。
+function snapshotAddForm() {
+  var snap = {};
+  if (!propsEl) return snap;
+  var els = propsEl.querySelectorAll('input[id*="add"], textarea[id*="add"]');
+  for (var i = 0; i < els.length; i++) {
+    if (els[i].type === 'radio' || els[i].type === 'checkbox') continue;
+    if (els[i].value) snap[els[i].id] = els[i].value;
+  }
+  return snap;
+}
+
+function restoreAddForm(snap) {
+  if (!propsEl) return;
+  Object.keys(snap).forEach(function(id) {
+    var el = document.getElementById(id);
+    // 空のときだけ戻す。モジュールが意図して値を置き直した場合は触らない。
+    if (el && propsEl.contains(el) && !el.value) el.value = snap[id];
+  });
+}
+
 function renderProps() {
+  var snap = (refreshCause === 'editor') ? snapshotAddForm() : null;
   withFocusKept(function() {
     renderPropsInner();
     applyListFilter();
   });
+  if (snap) restoreAddForm(snap);
+  // パネルの中身が入れ替わると高さも変わる。帯の出し入れはここで見る。
+  updatePropsOverflowHint();
 }
 
 function renderPropsInner() {
   if (!propsEl || !currentModule) return;
-  // Gantt's renderProps uses the old 2-arg form (inline in app.js)
-  // Sequence and future modules use the 4-arg form: (selData, parsedData, propsEl, ctx)
-  if (currentModule.type === 'gantt') {
-    currentModule.renderProps(sel, parsed);
-  } else {
+  // 図種による場合分けは不要になった。gantt も他の20図種と同じ
+  // 4引数契約 (selData, parsedData, propsEl, ctx) で呼ぶ。
+  {
     currentModule.renderProps(sel, parsed, propsEl, {
       getMmdText: function() { return mmdText; },
       setMmdText: function(t) {
@@ -1427,7 +832,10 @@ function renderPropsInner() {
           try { parsed = currentModule.parse(mmdText); } catch (e) { /* leave stale */ }
         }
       },
-      onUpdate: function() { scheduleRefresh(); },
+      onUpdate: function() { refreshCause = 'panel'; scheduleRefresh(); },
+      // gantt のパネルは拒否理由をステータスに出すので、その口も渡す。
+      // 他のモジュールは使わないが、契約にあって困るものではない。
+      showTransient: function(msg, ms) { showTransient(msg, ms); },
     });
   }
 }
@@ -1515,7 +923,19 @@ function ganttSpanDays(parsedData) {
 // and the mode lives in ganttViewMode rather than in mermaid's config — config
 // is derived state, so another initialize() elsewhere cannot lose it.
 function applyMermaidConfig(parsedData) {
-  var cfg = { startOnLoad: false, theme: 'dark', securityLevel: 'loose' };
+  // maxTextSize の既定は 50,000 文字で、超えると mermaid は**例外を投げずに**
+  // 「Maximum text size in diagram exceeded」とだけ書かれた小さな図を返す。
+  // 2900タスク (15万文字) のガントで実測したところ、この値を上げれば本物が描ける。
+  //
+  // maxEdges の既定は 500 本。ここを上げていなかったので、文字数上限を
+  // 5,000,000 に引き上げてあるにもかかわらず **800要素 (20,483文字) で描けなく
+  // なっていた**。しかも例外の文言は帯の定型文に落ちて「構文エラー」と出るので、
+  // 存在しない構文誤りを探すことになる。500本は中規模の構成図で普通に届く数。
+  var cfg = {
+    startOnLoad: false, theme: 'dark', securityLevel: 'loose',
+    maxTextSize: 5000000,
+    maxEdges: 100000,
+  };
   if (currentModule && currentModule.type === 'gantt') {
     var fitW = previewContentWidth();
     var days = ganttSpanDays(parsedData);
@@ -1589,7 +1009,18 @@ var savedText = null;
 // 起動時のサンプル読み込み・ファイルを開いたとき・図種切替でも呼ばれるので、
 // ここに「保存: HH:MM」を出すと**保存していないのに保存したと言う**ことになる
 // (実機のスクリーンショットで発覚した)。表示は保存動作の側で行う。
-function markSaved() { savedText = mmdText; }
+function markSaved() {
+  savedText = mmdText;
+  // 未保存マークはここで更新する。
+  //
+  // タイトルは renderStatus() 経由でしか更新されず、保存は再描画を起こさないので
+  // 保存しても `●` が消えなかった。マークを付けた目的は「保存し忘れを防ぐ」こと
+  // なのに、消えないマークは情報を持たない。入れた機能が目的を果たしていなかった。
+  //
+  // markSaved は起動時・ファイルを開いたとき・図種切替でも呼ばれるが、
+  // どの場合も「いまの本文が基準」になるので、マークが消えるのが正しい。
+  if (typeof updateDocumentTitle === 'function') updateDocumentTitle();
+}
 
 // A diagram is worth warning about only when it differs from what was last
 // saved *and* from the template it started as. Prompting on an untouched
@@ -1645,8 +1076,30 @@ function openFile() {
 // 一度「名前を付けて保存」したファイルへの参照。以後はここへ上書きする。
 var saveHandle = null;
 
+// ファイルに書き出す本文。
+//
+// エディタの本文は末尾改行を持たない (21図種のひな形も、削除処理も、その規約で
+// 揃っている)。ただしファイルとして書き出す側では末尾改行を1つ付ける。
+//
+// 数十〜数百枚を Git 管理する運用では、末尾改行が無いと全ファイルの差分に
+// `\ No newline at end of file` が付き、**末尾に1行足しただけで2行の差分**に
+// 見える (既存最終行の削除 + 2行の追加)。レビューで「何を変えたか」が読みにくい。
+// POSIX のテキストファイル規約でもあり、Prettier / gofmt も同じことをしている。
+//
+// 開き直したときは元の本文に戻るよう、読み込み側で末尾の改行を落とす。
+// 付けるのは常に1つ、外すのも常に1つ。条件を付けると往復が壊れる。
+//
+//   本文 "A"    → ファイル "A\n"   → 開き直して "A"     ✓
+//   本文 "A\n"  → ファイル "A\n\n" → 開き直して "A\n"   ✓
+//
+// 「既に改行で終わっていれば足さない」にすると、2つ目のケースで利用者が
+// 打った末尾の改行が往復のたびに消える (実際そうなっていた)。
+function fileBody() {
+  return mmdText + '\n';
+}
+
 function downloadAsFile() {
-  var blob = new Blob([mmdText], { type: 'text/plain' });
+  var blob = new Blob([fileBody()], { type: 'text/plain' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = currentBaseName() + '.mmd';
@@ -1668,13 +1121,13 @@ function saveFile() {
   if (saveHandle) { overwriteSaved(); return; }
   downloadAsFile();
   markSaved();
-  showTransient(savedMessage(new Date()) + ' (ダウンロード)');
+  showTransient(savedMessage(new Date()) + ' — ダウンロードしました');
 }
 
 async function overwriteSaved() {
   try {
     var w = await saveHandle.createWritable();
-    await w.write(mmdText);
+    await w.write(fileBody());
     await w.close();
     markSaved();
     showTransient(savedMessage(new Date()) + ' → ' + (saveHandle.name || ''));
@@ -1684,7 +1137,7 @@ async function overwriteSaved() {
     saveHandle = null;
     downloadAsFile();
     markSaved();
-    showTransient('上書きに失敗したのでダウンロードしました');
+    showTransient('上書きに失敗 — 代わりにダウンロードしました');
   }
 }
 
@@ -1693,7 +1146,7 @@ async function overwriteSaved() {
 // できないことをその場で言う。黙ってダウンロードすると「指定できた」と誤解される。
 async function saveFileAs() {
   if (!window.showSaveFilePicker) {
-    showTransient('このブラウザは上書き保存に対応していません (Chrome / Edge なら可能)', 5000);
+    showTransient('このブラウザは上書き保存に非対応 — Chrome / Edge なら使えます', 5000);
     return;
   }
   try {
@@ -1702,7 +1155,7 @@ async function saveFileAs() {
       types: [{ description: 'Mermaid', accept: { 'text/plain': ['.mmd', '.mermaid'] } }],
     });
   } catch (e) {
-    showTransient('保存先の指定を中止しました', 2500);
+    showTransient('保存先の指定を中止 — 本文はそのままです', 2500);
     return;
   }
   if (saveHandle && saveHandle.name) loadedFileName = saveHandle.name;
@@ -1710,10 +1163,80 @@ async function saveFileAs() {
 }
 
 // ── Export Functions ───────────────────────────────────────────────────────
+// 古い図を書き出さない。
+//
+// 描画に失敗している間は直前の図を残しているので、そのまま Export すると
+// **編集していない内容**が成果物になる。帯で「古い」とは言っているが、
+// 書き出しはそれを見ていなかった (前回の修正が作った副作用)。
+function blockExportIfStale() {
+  if (!previewStale) return false;
+  showTransient('構文エラー中のため書き出していません — 本文を直すか .mmd で保存してください', 5000);
+  return true;
+}
+
+// 書き出す SVG の id を、そのファイル固有のものに付け替える。
+//
+// mermaid が付ける id は `mermaid-svg-<セッション内の連番>` で、
+// **別々のセッションで書き出した2枚が同じ id を持つ**。実測: 2つの .mmd を
+// それぞれ開いて書き出すと、どちらも `mermaid-svg-2` になった。
+//
+// スタイルは `#mermaid-svg-2 .node rect { … }` の形で id に紐付いており
+// (flowchart で64箇所、gantt で109箇所)、同じ id の SVG を1つの文書に並べると
+// 2枚目が `getElementById` で参照できない (実測)。数十〜数百枚を wiki や
+// 設計書に貼る運用では、id で参照する仕組みが静かに1枚目だけを指す。
+//
+// ファイル名から作るので、同じ図を何度書き出しても同じ id になる
+// (Git の差分に無意味な変化を出さない)。
+function uniqueSvgId(baseName) {
+  var safe = String(baseName || 'diagram').replace(/[^A-Za-z0-9_-]/g, '_');
+  return 'ma-' + safe;
+}
+
+function retargetSvgId(clone, newId) {
+  var oldId = clone.getAttribute('id');
+  if (!oldId || oldId === newId) return;
+  clone.setAttribute('id', newId);
+
+  // スタイル側の参照を付け替える。付け替えないと、書き出した SVG が
+  // 自分のスタイルを1つも受け取れなくなる (色も字も既定に戻る)。
+  var styles = clone.querySelectorAll('style');
+  for (var i = 0; i < styles.length; i++) {
+    styles[i].textContent = styles[i].textContent.split('#' + oldId).join('#' + newId);
+  }
+
+  // 矢印マーカーの id も同じ接頭辞を持つ (`mermaid-svg-2_flowchart-v2-pointEnd`)。
+  //
+  // `url(#…)` は文書内で**最初に見つかった id** を拾うので、同じ接頭辞の SVG を
+  // 2枚並べると、2枚目の矢印が1枚目のマーカーを使う。線の種類が違えば矢印の形が
+  // 入れ替わり、しかもエラーは出ない。id 本体だけ直しても、ここが残ると意味がない。
+  var all = clone.querySelectorAll('[id]');
+  for (var j = 0; j < all.length; j++) {
+    var v = all[j].getAttribute('id');
+    if (v && v.indexOf(oldId) === 0) all[j].setAttribute('id', newId + v.slice(oldId.length));
+  }
+  // url(#…) で参照している側 (marker-start / marker-end / fill / clip-path など)
+  var refAttrs = ['marker-start', 'marker-end', 'marker-mid', 'fill', 'stroke', 'clip-path', 'mask', 'filter'];
+  var users = clone.querySelectorAll('*');
+  for (var k = 0; k < users.length; k++) {
+    for (var a = 0; a < refAttrs.length; a++) {
+      var av = users[k].getAttribute(refAttrs[a]);
+      if (av && av.indexOf('url(#' + oldId) >= 0) {
+        users[k].setAttribute(refAttrs[a], av.split('url(#' + oldId).join('url(#' + newId));
+      }
+    }
+    var st = users[k].getAttribute('style');
+    if (st && st.indexOf('url(#' + oldId) >= 0) {
+      users[k].setAttribute('style', st.split('url(#' + oldId).join('url(#' + newId));
+    }
+  }
+}
+
 function exportSVG() {
+  if (blockExportIfStale()) return;
   var svgEl = previewSvgEl.querySelector('svg');
   if (!svgEl) return;
   var clone = svgEl.cloneNode(true);
+  retargetSvgId(clone, uniqueSvgId(currentBaseName()));
   var blob = new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -1722,43 +1245,88 @@ function exportSVG() {
   URL.revokeObjectURL(a.href);
 }
 
-function svgToCanvas(transparent, callback) {
+// scale は書き出す画素の倍率。
+//
+// これまで等倍しか無かった (実測: viewBox 788x196 → PNG 788x196)。
+// 設計書や wiki に貼ると、拡大表示や印刷で字がつぶれる。姉妹プロジェクトの
+// 01_StableBlock では同じ理由で 2倍を入れている。
+//
+// Chrome は幅 65,535px を超える canvas を作れないので、超える倍率は落とす。
+// 黙って小さい画像を返すより、要求した倍率で出せないことを告げる。
+function svgToCanvas(transparent, callback, scale) {
   var svgEl = previewSvgEl.querySelector('svg');
   if (!svgEl) return;
   var clone = svgEl.cloneNode(true);
   var svgData = new XMLSerializer().serializeToString(clone);
   var img = new Image();
   img.onload = function() {
+    var s = scale || 1;
+    var MAX = 65535;
+    if (img.width * s > MAX || img.height * s > MAX) {
+      var fit = Math.min(MAX / img.width, MAX / img.height);
+      showTransient('図が大きすぎるため ' + s + '倍では書き出せません — ' +
+        fit.toFixed(2) + '倍にしました', 5000);
+      s = fit;
+    }
     var canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
+    canvas.width = Math.round(img.width * s);
+    canvas.height = Math.round(img.height * s);
     var ctx = canvas.getContext('2d');
     if (!transparent) {
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
-    ctx.drawImage(img, 0, 0);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     callback(canvas);
   };
   img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData);
 }
 
-function exportPNG(transparent) {
+function exportPNG(transparent, scale) {
+  if (blockExportIfStale()) return;
   svgToCanvas(transparent, function(canvas) {
     canvas.toBlob(function(blob) {
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = currentBaseName() + '.png';
+      a.download = currentBaseName() + (scale && scale !== 1 ? '@' + scale + 'x' : '') + '.png';
       a.click();
       URL.revokeObjectURL(a.href);
     });
-  });
+  }, scale);
 }
 
+// クリップボードへコピーする。
+//
+// 以前は `navigator.clipboard.write(...)` を呼びっぱなしで、返る Promise を
+// 誰も見ていなかった。実測すると失敗が2通りあり、**どちらも画面には何も出ない**:
+//
+//   権限が下りない          → コンソールに Write permission denied、画面は無反応
+//   ClipboardItem が無い     → コンソールに ReferenceError、画面は無反応
+//                             (Firefox / Safari / 古いブラウザ)
+//
+// 押しても何も起きないので、利用者はそのまま資料へ貼り付ける。すると
+// **前にコピーしていた何か**が入る。失敗が成功と見分けられないのが一番悪い。
+// 上書き保存の非対応を告げているのと同じ作法に揃える。
 function exportClipboard() {
+  if (blockExportIfStale()) return;
+  if (typeof ClipboardItem === 'undefined' || !navigator.clipboard || !navigator.clipboard.write) {
+    showTransient('このブラウザは図のコピーに非対応 — Chrome / Edge なら使えます。PNG で保存してください', 6000);
+    return;
+  }
   svgToCanvas(false, function(canvas) {
     canvas.toBlob(function(blob) {
-      navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      if (!blob) { showTransient('図を画像にできませんでした', 4000); return; }
+      Promise.resolve()
+        .then(function() { return navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); })
+        .then(function() {
+          showTransient('図をクリップボードにコピーしました (' +
+            Math.round(blob.size / 1024) + ' KB)');
+        })
+        .catch(function(e) {
+          // 何が起きたか分からないまま貼り付けさせない。
+          showTransient('クリップボードにコピーできませんでした — ' +
+            String((e && e.message) || e).slice(0, 60), 6000);
+        });
     });
   });
 }
@@ -1864,12 +1432,22 @@ function init() {
     // the pre-edit text once a line grew past 80 characters.
     window.MA.history.pushHistoryCoalesced('editor', EDITOR_UNDO_COALESCE_MS);
     mmdText = editorEl.value;
+    refreshCause = 'editor';
     scheduleRefresh();
   });
 
   editorEl.addEventListener('scroll', function() {
     syncLineNumbers();
   });
+
+  // パネルを下まで送ったら「続きがあります」を引っ込める。
+  // 出しっぱなしにすると合図として働かなくなる。
+  var propsContentEl = document.getElementById('props-content');
+  if (propsContentEl) {
+    propsContentEl.addEventListener('scroll', updatePropsOverflowHint);
+  }
+  // 窓の高さが変われば収まりも変わる。ペインの幅変更でも折り返しが変わる。
+  window.addEventListener('resize', updatePropsOverflowHint);
 
   // Tab / Shift+Tab: indent / outdent with 2 spaces (see workspace ADR-011)
   editorEl.addEventListener('keydown', function(e) {
@@ -1925,8 +1503,12 @@ function init() {
       pendingAutoFit = true;
       setGanttViewMode('overview');
       setZoom(1.0);
-      mmdText = ev.target.result;
+      // 書き出し側で付けた末尾改行を1つだけ落とす (fileBody と対称)。
+      // 落とさないと、保存 → 開き直しのたびに末尾の空行が1つ増えていく。
+      mmdText = String(ev.target.result || '').replace(/\n$/, '');
       loadedFileName = openedName;
+      // ファイルを開いたときも文書は入れ替わる。
+      if (currentModule && currentModule.resetTransientState) currentModule.resetTransientState();
       // 別のファイルを開いたら、前の保存先への参照は捨てる。
       // 残しておくと、開いたつもりの無いファイルを上書きする。
       saveHandle = null;
@@ -2006,6 +1588,56 @@ function init() {
     });
   }
 
+  // 未保存のままタブを閉じる / リロードすると作業が全消失する。
+  // 保存がダウンロード操作しか無いのでこまめな保存の習慣も付きにくい。
+  // 離脱確認を出す (ブラウザが文面を決めるので、こちらは意思表示だけ)。
+  window.addEventListener('beforeunload', function(ev) {
+    if (!hasUnsavedWork(mmdText, savedText, currentModule && currentModule.template ? currentModule.template() : null)) return;
+    ev.preventDefault();
+    ev.returnValue = '';
+    return '';
+  });
+
+  // 追加フォームで Enter を使えるようにする。
+  //
+  // 全図種で追加ボタンの click にしか紐付いておらず、10件追加するのに毎回
+  // マウスへ持ち替える必要があった。パネル幅は220pxで縦に長いので、ボタンが
+  // 画面外ならスクロールも加算される。学習コストを払っても速くならない形。
+  //
+  // 各モジュールを書き換える代わりに、パネル全体で Enter を拾い、その入力欄の
+  // **直後にある追加ボタン**を押す。追加ボタンはどの図種も文字が `+` で始まるか
+  // id が `add` を含むので、それを目印にする。
+  function findAddButtonAfter(input) {
+    var buttons = propsEl.querySelectorAll('button');
+    var seen = false;
+    for (var i = 0; i < buttons.length; i++) {
+      var btn = buttons[i];
+      var pos = input.compareDocumentPosition(btn);
+      // input より後ろにあるボタンだけ見る
+      if (!(pos & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+      var txt = (btn.textContent || '').trim();
+      var id = btn.id || '';
+      if (txt.charAt(0) === '+' || /add/i.test(id)) { seen = true; return btn; }
+    }
+    return seen ? null : null;
+  }
+
+  if (propsEl) {
+    propsEl.addEventListener('keydown', function(ev) {
+      if (ev.key !== 'Enter' || ev.isComposing) return;
+      var t = ev.target;
+      if (!t || t.tagName !== 'INPUT') return;
+      if (t.type !== 'text' && t.type !== 'date' && t.type !== 'number') return;
+      var btn = findAddButtonAfter(t);
+      if (!btn) return;
+      ev.preventDefault();
+      btn.click();
+    });
+  }
+
+  var statusHelp = document.getElementById('status-help');
+  if (statusHelp) statusHelp.addEventListener('click', function() { toggleShortcutHelp(true); });
+
   var helpClose = document.getElementById('shortcut-help-close');
   if (helpClose) helpClose.addEventListener('click', function() { toggleShortcutHelp(false); });
   var helpBox = document.getElementById('shortcut-help');
@@ -2013,15 +1645,31 @@ function init() {
     if (ev.target === helpBox) toggleShortcutHelp(false);   // 外側をクリックでも閉じる
   });
 
-  document.getElementById('exp-mmd').addEventListener('click', function() {
-    exportMenu.classList.remove('open');
-    saveFile();
-  });
+  // 保存の入口は Save に集約した。
+  //
+  // 以前は Save ボタン / Ctrl+S / Ctrl+Shift+S / Export の2項目の4つに散っていた。
+  // 初回に1度だけ使う「保存先の指定」が、毎日使う Export と同じ場所にあった。
+  var saveMenu = document.getElementById('save-menu');
+  var saveMenuBtn = document.getElementById('btn-save-menu');
+  if (saveMenuBtn && saveMenu) {
+    saveMenuBtn.addEventListener('click', function(ev) {
+      ev.stopPropagation();
+      saveMenu.classList.toggle('open');
+    });
+    document.getElementById('save-as').addEventListener('click', function() {
+      saveMenu.classList.remove('open');
+      saveFileAs();
+    });
+    document.addEventListener('click', function() { saveMenu.classList.remove('open'); });
+  }
 
-  document.getElementById('exp-mmd-as').addEventListener('click', function() {
-    exportMenu.classList.remove('open');
-    saveFileAs();
-  });
+  // `?` の存在に気づいてもらうのは初回だけでよい。
+  // 置いた場所が画面最下部の二次色なので、数秒だけアクセント色にする。
+  var helpHint = document.getElementById('status-help');
+  if (helpHint) {
+    helpHint.classList.add('first-run');
+    setTimeout(function() { helpHint.classList.remove('first-run'); }, 5000);
+  }
 
   document.getElementById('exp-svg').addEventListener('click', function() {
     exportMenu.classList.remove('open');
@@ -2031,6 +1679,14 @@ function init() {
   document.getElementById('exp-png').addEventListener('click', function() {
     exportMenu.classList.remove('open');
     exportPNG(false);
+  });
+
+  // 等倍だけだと設計書に貼ったとき拡大や印刷で字がつぶれる。
+  // 既定は等倍のまま残し、2倍を別項目として足す (既定を変えると、いま
+  // 等倍を前提にしている書き出しの寸法が黙って変わる)。
+  document.getElementById('exp-png-2x').addEventListener('click', function() {
+    exportMenu.classList.remove('open');
+    exportPNG(false, 2);
   });
 
   document.getElementById('exp-png-transparent').addEventListener('click', function() {
@@ -2687,34 +2343,48 @@ function init() {
     //
     // IME composition is left alone; taking Ctrl+Z during conversion would break
     // candidate selection.
-    if (e.ctrlKey && e.key === 'z' && !e.isComposing) {
+    // Shift を除外しないと Ctrl+Shift+Z がここに先に吸われて Undo になる。
+    // ブラウザによって Shift+z の e.key は 'Z' にも 'z' にもなるので、
+    // 文字の大小ではなく **shiftKey で** 分ける。
+    if (e.ctrlKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z') && !e.isComposing) {
       e.preventDefault(); window.MA.history.undo();
-    } else if (e.ctrlKey && e.key === 'y' && !e.isComposing) {
+    } else if (e.ctrlKey && (e.key === 'y' || ((e.key === 'Z' || e.key === 'z') && e.shiftKey)) && !e.isComposing) {
+      // Ctrl+Shift+Z は Figma / draw.io / VSCode で Redo 。Shift 併用だと e.key は 'Z' に
+      // なるので、小文字比較だけだと分岐に入らない。
       e.preventDefault(); window.MA.history.redo();
     } else if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
       e.preventDefault();
       saveFileAs();
     } else if (e.ctrlKey && e.key === 's') {
       e.preventDefault(); saveFile();
+    } else if (e.ctrlKey && (e.key === '0' || e.key === '9' || e.key === '+' ||
+                             e.key === '=' || e.key === '-')) {
+      // 拡大して細部を見る→全体に戻すは1日数十回。毎回ツールバーへ
+      // マウスを往復させていた (プレビュー中央から約400〜600px)。
+      e.preventDefault();
+      if (e.key === '0') setZoomFromUser(1.0);
+      else if (e.key === '9') zoomToFit();
+      else if (e.key === '-') setZoomFromUser(zoom - 0.1);
+      else setZoomFromUser(zoom + 0.1);
     } else if (e.ctrlKey && e.key === 'o') {
       e.preventDefault(); openFile();
     } else if (e.key === 'Delete' && !inInput && !inEditor) {
       if (sel.length === 0) return;
-      window.MA.history.pushHistory();
-      var lines = sel.map(function(s) {
-        var t = parsed.tasks.find(function(tk) { return tk.id === s.id; });
-        return t ? t.line : -1;
-      }).filter(function(l) { return l > 0; }).sort(function(a, b) { return b - a; });
-      lines.forEach(function(l) { mmdText = deleteTask(mmdText, l); });
-      suppressSync = true;
-      editorEl.value = mmdText;
-      suppressSync = false;
-      window.MA.selection.setSelected([]);
-      syncLineNumbers();
-      // 削除に確認を出さないのは Undo で戻せるからだが、戻せることを示して
-      // いるのはツールバーの Undo だけで、視線は図の上にある。消したその場で言う。
-      showTransient(deletedMessage(lines.length));
-      scheduleRefresh();
+      // 契約 (ADR-012 operations.delete) で消す。
+      //
+      // 以前は `parsed.tasks` を見て gantt だけを処理し、他の20図種には
+      // 「Delete キーの削除は未対応 — 一覧の ✕ を使ってください」と返していた。
+      // 契約は既に全21図種で揃っているのに、この経路だけが gantt 専用の
+      // 旧実装のまま残っていた。**削除1回ごとにマウス往復が1回**発生する。
+      // キーボード中心で1日100回消すなら100往復。
+      deleteSelectedElements(sel);
+    } else if ((e.key === 'a' || e.key === 'A') && !e.ctrlKey && !e.metaKey && !e.altKey && !inInput && !inEditor) {
+      // 修飾なし1打鍵。Delete / ? と同じ条件 (入力欄とエディタの外にいるとき) で受ける。
+      e.preventDefault();
+      focusAddForm();
+    } else if ((e.key === 'e' || e.key === 'E') && !e.ctrlKey && !e.metaKey && !e.altKey && !inInput && !inEditor) {
+      e.preventDefault();
+      focusEditor();
     } else if (e.key === '?' && !inInput && !inEditor) {
       // ショートカットが12個あるのに、それを知る手段が画面に無かった。
       // キーボード中心の人にとって一番価値のある部分が伝わっていない。
@@ -2724,6 +2394,7 @@ function init() {
                document.getElementById('shortcut-help') &&
                !document.getElementById('shortcut-help').hasAttribute('hidden')) {
       toggleShortcutHelp(false);
+      focusPreview();
     } else if (e.key === 'Escape') {
       // Escape has to get out of connection mode too. Without it the only way
       // to leave was to complete the edge — clicking anywhere else on the canvas
@@ -2746,12 +2417,18 @@ function init() {
       var forward = (e.key === 'ArrowDown' || e.key === 'ArrowRight');
       if (selectAdjacentElement(forward ? 1 : -1)) e.preventDefault();
     } else if (e.ctrlKey && e.key === 'a' && !inEditor && !inInput) {
+      // 選択・コピー・削除は gantt の `parsed.tasks` 前提で書かれていた。
+      // 他の図種では `parsed.tasks` が undefined なので `.map` で例外になり、
+      // コンソールにしか出ないので利用者には「押しても何も起きない」としか見えない。
+      // 未対応なら例外を出さず、その旨をステータスに出す。
       e.preventDefault();
+      if (!parsed || !parsed.tasks) { showTransient('すべて選択は未対応 — この図種では一覧から選んでください', 3000); return; }
       window.MA.selection.setSelected(parsed.tasks.map(function(t) { return { type: 'task', id: t.id }; }));
     } else if (e.ctrlKey && e.shiftKey && e.key === 'C') {
       e.preventDefault(); exportClipboard();
     } else if (e.ctrlKey && e.key === 'c' && !inEditor && !inInput && sel.length > 0) {
       e.preventDefault();
+      if (!parsed || !parsed.tasks) { showTransient('要素の複写は未対応 — エディタで行をコピーしてください', 3000); return; }
       clipboard = sel.map(function(s) {
         return parsed.tasks.find(function(t) { return t.id === s.id; });
       }).filter(Boolean);
@@ -2854,6 +2531,9 @@ function init() {
       pendingAutoFit = true;
       mmdText = mod.template();
       loadedFileName = '';
+      // 文書が入れ替わったので、モジュールが持っている一時状態を捨てさせる。
+      // 実装していないモジュールは何もしなくてよい (フォームを毎回作り直すため)。
+      if (mod.resetTransientState) mod.resetTransientState();
       markSaved();
       suppressSync = true;
       editorEl.value = mmdText;

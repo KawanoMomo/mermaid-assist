@@ -79,6 +79,16 @@ window.MA.modules.quadrantChart = (function() {
     return window.MA.textUpdater.deleteLine(text, lineNum);
   }
 
+  // 点の名前は `名前: [x, y]` の左側にそのまま置かれる。
+  // 英数字と空白以外が入ると mermaid の字句解析が落ちるので、引用符で囲う。
+  // 「設計(詳細)」「配列[0]」のような実務の名前はこれが無いと図が出ない。
+  function quoteName(v) {
+    var s = String(v == null ? '' : v);
+    if (/^"[\s\S]*"$/.test(s)) return s;
+    if (/^[A-Za-z0-9_ ]+$/.test(s)) return s;
+    return '"' + s + '"';
+  }
+
   function updatePoint(text, lineNum, field, value) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
@@ -87,7 +97,7 @@ window.MA.modules.quadrantChart = (function() {
     var m = lines[idx].trim().match(/^(.+?):\s*\[\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\]\s*$/);
     if (!m) return text;
     var label = m[1].trim(), x = m[2], y = m[3];
-    if (field === 'label') label = value;
+    if (field === 'label') label = quoteName(value);
     else if (field === 'x') x = value;
     else if (field === 'y') y = value;
     lines[idx] = indent + label + ': [' + x + ', ' + y + ']';
@@ -136,7 +146,7 @@ window.MA.modules.quadrantChart = (function() {
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">ポイントを追加</label>' +
-          P.fieldHtml('Label', 'qd-add-label', '', '例: Campaign A') +
+          P.fieldHtml('ラベル', 'qd-add-label', '', '例: Campaign A') +
           P.fieldHtml('X (0-1)', 'qd-add-x', '0.5') +
           P.fieldHtml('Y (0-1)', 'qd-add-y', '0.5') +
           P.primaryButtonHtml('qd-add-btn', '+ ポイント追加') +
@@ -198,7 +208,7 @@ window.MA.modules.quadrantChart = (function() {
       if (!pt) { propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">ポイントが見つかりません</p>'; return; }
       propsEl.innerHTML =
         P.panelHeaderHtml(pt.label) +
-        P.fieldHtml('Label', 'qd-edit-label', pt.label) +
+        P.fieldHtml('ラベル', 'qd-edit-label', pt.label) +
         P.fieldHtml('X (0-1)', 'qd-edit-x', String(pt.x)) +
         P.fieldHtml('Y (0-1)', 'qd-edit-y', String(pt.y)) +
         P.dangerButtonHtml('qd-edit-delete', 'ポイント削除');

@@ -13,9 +13,9 @@ const path = require('path');
 const ROOT = process.argv[2] || process.cwd();
 
 // 下限。既存の件数を割り込んだら、テストが消されたということ。
-const MIN_UNIT = 787;
-const MIN_E2E = 357;
-const MIN_RENDER = 30;          // rename 22 + delete 8
+const MIN_UNIT = 970;
+const MIN_E2E = 406;
+const MIN_RENDER = 34;          // rename 26 + delete 8
 const MIN_RENDER_SUITES = 2;    // case ファイルの本数。1本消されても気付けるように
 
 const results = [];
@@ -61,7 +61,7 @@ check('G4/G5', 'e2e', (!eFail || +eFail[1] === 0) && ePass >= MIN_E2E,
 // 並行レビュー。4観点すべてで指摘ゼロ。
 // 実行済みの結果を読む (gate から起動すると2重に走って遅い)。
 const outDir = path.join(__dirname, 'out');
-const reviewers = ['r1-destructive', 'r2-delete', 'r3-render', 'r4-ui', 'r5-user', 'r6-move', 'r7-consistency', 'r8-scale', 'r9-workflow', 'r10-roundtrip', 'r11-specialchars', 'r12-noop'];
+const reviewers = ['r1-destructive', 'r2-delete', 'r3-render', 'r4-ui', 'r5-user', 'r6-move', 'r7-consistency', 'r8-scale', 'r9-workflow', 'r10-roundtrip', 'r11-specialchars', 'r12-noop', 'r13-unknown-syntax', 'r14-boundary', 'r15-state-carryover', 'r16-count-parity', 'r17-undo-redo', 'r18-keyboard-only', 'r19-coverage', 'r20-unicode-names', 'r21-reachable', 'r22-silent-failure'];
 //
 // 出力の**鮮度**も見る。ここを見ていなかったせいで、変異注入したときの
 // 結果ファイルがそのまま残り、ゲートが古いソースへの指摘を読んでいた。
@@ -95,6 +95,31 @@ check('LOOP', '並行レビューの指摘',
   reviewTotal === 0 && reviewMissing.length === 0,
   reviewMissing.length ? ('未実行: ' + reviewMissing.join(', ')) : (reviewTotal + ' 件'));
 
+// 網羅率の下限。
+//
+// 「指摘0件」は検査した範囲の外では何も意味しない。実際 r11 は関数名の表で
+// 対象を選んでいたので 21 図種中 6 図種しか見ておらず、その状態で 0 件だった。
+// 契約ベースに直したら同じ観点のまま 47 件出た。観点を増やす前に、まず
+// **見ている範囲が縮んでいないこと**を機械で押さえる。
+//
+// 下限は現状の実測値 (coverage-floor.json)。下回ったら FAIL。
+// 上げるのは自由、下げるにはファイルを書き換える必要がある = 意図が記録に残る。
+let covFail = [];
+try {
+  const floor = JSON.parse(fs.readFileSync(path.join(__dirname, 'coverage-floor.json'), 'utf8'));
+  Object.keys(floor).forEach((r) => {
+    const f = path.join(outDir, r + '.coverage.json');
+    if (!fs.existsSync(f)) { covFail.push(r + ': 網羅率の記録が無い'); return; }
+    const got = JSON.parse(fs.readFileSync(f, 'utf8'));
+    if (got.examined < floor[r].examined) {
+      covFail.push(r + ': ' + got.examined + '/' + got.total +
+        ' (下限 ' + floor[r].examined + ')');
+    }
+  });
+} catch (e) { covFail.push('下限ファイルが読めない: ' + e.message); }
+check('COV', 'レビューの網羅率', covFail.length === 0,
+  covFail.length ? covFail.join(' / ') : '全観点が下限以上');
+
 // G7: 権利。LICENSE と package.json の整合、同梱物のライセンス同梱。
 let rights = true, rightsDetail = [];
 if (!fs.existsSync(path.join(ROOT, 'LICENSE'))) { rights = false; rightsDetail.push('LICENSE 無し'); }
@@ -121,6 +146,29 @@ try {
 } catch (e) { /* 無ければ -1 */ }
 check('BACKLOG', '棚卸しの未着手', backlogOpen === 0,
   backlogOpen < 0 ? 'docs/backlog.md が読めない' : (backlogOpen + ' 件が「残」'));
+
+// 棚卸しが現実に追いついていること。
+//
+// これまでゲートは D 区分 (残) しか見ていなかった。そのため C 区分 (検証の仕組み)
+// が **6ラウンド分・7項目遅れていても毎回 PASS していた**。
+// 観点を足しても棚卸しに書かなければ、次に読む人はその観点の存在を知らない。
+//
+// 「プランが現実を写す測定器」であるためには、機械で照合できる部分は
+// 機械で照合する。ここではレビュアーの実体と記録の対応だけを見る。
+let missingDoc = [];
+try {
+  const bl = fs.readFileSync(path.join(ROOT, 'docs', 'backlog.md'), 'utf8');
+  fs.readdirSync(__dirname)
+    .filter(f => /^r\d+-.*\.js$/.test(f))
+    .forEach(f => {
+      const n = f.match(/^r(\d+)-/)[1];
+      // 「R22」「r22」のどちらの書き方でもよい。R2 が R22 に誤って一致しないよう
+      // 後ろに数字が続かないことまで見る。
+      if (!new RegExp('[Rr]' + n + '(?![0-9])').test(bl)) missingDoc.push(f);
+    });
+} catch (e) { missingDoc.push('docs/backlog.md が読めない'); }
+check('DOC', '棚卸しと実体の対応', missingDoc.length === 0,
+  missingDoc.length ? ('棚卸しに記録が無い: ' + missingDoc.join(', ')) : '全レビュアーが記録されている');
 
 const failed = results.filter(r => !r.ok);
 console.log('');

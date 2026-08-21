@@ -332,6 +332,7 @@ html, body {
 
 /* ── Properties Pane ───────────────────────────────────────────────────────── */
 #props-pane {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 220px;
@@ -359,6 +360,44 @@ html, body {
   font-size: 12px;
   color: var(--text-secondary);
 }
+
+/* パネルに続きがあることを画面で示す。
+
+   13インチのノートPC (1366x768) では 21図種中15図種でプロパティパネルが
+   画面に収まらない (flowchart は 320px はみ出す)。共通のスクロールバーは 6px で
+   --border 色 (#30363d)、背景とほぼ同じ明度しかなく、環境によっては幅0の
+   オーバーレイになる。実測でスクロールバーの幅は 0px だった。
+
+   つまり **320px 分の続きがあるのに、画面上の手掛かりがゼロ** だった。
+   初見の利用者は「この図種には関連を追加する手段が無い」と判断する。
+
+   パネルの構成そのものを変える案 (折り畳み見出し / タブ分割) は GUI の
+   作り替えなので合意が要る。ここでは「続きがある」ことを告げるだけにする。 */
+#props-content::-webkit-scrollbar { width: 10px; }
+#props-content::-webkit-scrollbar-thumb {
+  background: var(--text-secondary);
+  border-radius: 5px;
+}
+#props-content {
+  scrollbar-width: thin;
+  scrollbar-color: var(--text-secondary) var(--bg-secondary);
+}
+
+/* 重ねずに、パネルの一番下へ「続きがある」ことを置く。
+   最初は図の上に浮かせる形にしたが、実機で最後の行に重なって読めなくなった
+   (計測は通っていた。スクリーンショットでしか出ない種類の壊れ方)。
+   必要なときだけ現れるので、収まっている 6/21 図種では高さを取らない。 */
+#props-more {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 10px;
+  text-align: center;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border);
+  user-select: none;
+}
+#props-more[hidden] { display: none; }
 
 /* ── Status Bar ────────────────────────────────────────────────────────────── */
 #shortcut-help {
@@ -400,11 +439,75 @@ html, body {
 }
 #shortcut-help-table { border-collapse: collapse; font-size: 12px; }
 #shortcut-help-table td { padding: 3px 14px 3px 0; color: var(--text-primary); vertical-align: top; }
+#shortcut-help-table .sc-scope {
+  color: var(--text-secondary);
+  font-size: 10px;
+  margin-left: 6px;
+}
 #shortcut-help-table td:first-child {
   font-family: var(--font-mono);
   color: var(--accent);
   white-space: nowrap;
 }
+
+#parse-error-banner {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(190, 60, 60, 0.92);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 12px;
+  z-index: 50;
+  pointer-events: none;
+}
+#parse-error-banner[hidden] { display: none; }
+/* 図は描けているが一部が落ちている場合。エラーとは区別する
+   (赤は「図が出ていない」の色として既に使っているため)。 */
+#parse-error-banner.warn {
+  background: rgba(190, 140, 40, 0.94);
+}
+
+#status-help {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 2px;
+}
+#status-help:hover { color: var(--accent); }
+#status-help.first-run { color: var(--accent); font-weight: 600; }
+
+.save-wrap { position: relative; display: inline-flex; }
+#save-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  z-index: 100;
+  min-width: 220px;
+}
+#save-menu.open { display: block; }
+#save-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+#save-menu button:hover { background: var(--bg-tertiary); }
 
 #statusbar {
   display: flex;
@@ -498,7 +601,13 @@ html, body {
     <span class="logo">MermaidAssist</span>
 
     <button class="tb-btn" id="btn-open" title="ファイルを開く (Ctrl+O)">Open</button>
-    <button class="tb-btn" id="btn-save" title="ファイルを保存 (Ctrl+S)">Save</button>
+    <span class="save-wrap">
+      <button class="tb-btn" id="btn-save" title="ファイルを保存 (Ctrl+S)">Save</button>
+      <button class="tb-btn" id="btn-save-menu" title="保存先を指定して上書き (Ctrl+Shift+S)">▾</button>
+      <div id="save-menu">
+        <button id="save-as">保存先を指定して上書き…</button>
+      </div>
+    </span>
 
     <div class="tb-sep"></div>
 
@@ -517,10 +626,9 @@ html, body {
     <div class="export-wrap">
       <button class="tb-btn" id="btn-export" title="エクスポート">Export ▾</button>
       <div id="export-menu">
-        <button id="exp-mmd">Mermaid記法 (.mmd)</button>
-        <button id="exp-mmd-as">保存先を指定して上書き…</button>
         <button id="exp-svg">SVGとして保存</button>
         <button id="exp-png">PNGとして保存</button>
+        <button id="exp-png-2x">PNGとして保存（2倍）</button>
         <button id="exp-png-transparent">PNG（透過背景）</button>
         <button id="exp-clipboard">クリップボードにコピー</button>
       </div>
@@ -585,6 +693,7 @@ html, body {
       <div id="props-content">
         <p style="color:var(--text-secondary);font-size:11px;">タスクを選択してください</p>
       </div>
+      <div id="props-more" hidden>↓ さらに項目があります</div>
     </div>
 
   </div><!-- /#main -->
@@ -598,14 +707,18 @@ html, body {
       </div>
       <table id="shortcut-help-table">
         <tr><td>Ctrl+S</td><td>保存</td></tr>
-        <tr><td>Ctrl+Shift+S</td><td>保存先を指定して上書き (Chrome / Edge)</td></tr>
+        <tr><td>Ctrl+Shift+S</td><td>保存先を指定して上書き <span class="sc-scope">Chrome / Edge のみ</span></td></tr>
         <tr><td>Ctrl+O</td><td>開く</td></tr>
-        <tr><td>Ctrl+Z / Ctrl+Y</td><td>元に戻す / やり直す</td></tr>
+        <tr><td>Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z</td><td>元に戻す / やり直す</td></tr>
         <tr><td>↑ ↓ ← →</td><td>要素を順に選ぶ (図にフォーカスがあるとき)</td></tr>
         <tr><td>Delete</td><td>選んでいる要素を削除</td></tr>
-        <tr><td>Ctrl+A</td><td>すべて選択</td></tr>
-        <tr><td>Ctrl+C / Ctrl+V</td><td>選んでいる要素を複写 / 貼り付け</td></tr>
+        <tr><td>Ctrl+A</td><td>すべて選択 <span class="sc-scope">Gantt のみ</span></td></tr>
+        <tr><td>Ctrl+C / Ctrl+V</td><td>選んでいる要素を複写 / 貼り付け <span class="sc-scope">Gantt のみ</span></td></tr>
         <tr><td>Ctrl+Shift+C</td><td>図をクリップボードへ</td></tr>
+        <tr><td>Ctrl+0 / Ctrl+9</td><td>等倍 / 幅に合わせる</td></tr>
+        <tr><td>Ctrl++ / Ctrl+-</td><td>拡大 / 縮小</td></tr>
+        <tr><td>A</td><td>追加フォームの先頭欄へ移動 (図にフォーカスがあるとき)</td></tr>
+        <tr><td>E</td><td>エディタへ移動 (図にフォーカスがあるとき)</td></tr>
         <tr><td>Escape</td><td>選択解除 / 接続モードを中止</td></tr>
         <tr><td>?</td><td>この一覧を開閉</td></tr>
       </table>
@@ -616,6 +729,7 @@ html, body {
   <div id="statusbar">
     <span id="status-parse">Ready</span>
     <span id="status-info"></span>
+    <button id="status-help" title="キーボードショートカットを開く (?)">? ショートカット</button>
   </div>
 
 </div><!-- /#app -->

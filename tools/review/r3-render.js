@@ -6,7 +6,7 @@
 const path = require('path');
 const fs = require('fs');
 const { chromium } = require('E:/00_Git/05_MermaidAssist/node_modules/playwright');
-const { loadModules, report } = require('./lib');
+const { loadModules, report, markExamined } = require('./lib');
 const ROOT = process.argv[2];
 const M = loadModules(ROOT);
 
@@ -32,7 +32,7 @@ Object.keys(M).forEach((key) => {
   if (typeof mod.operations.connect === 'function') {
     try {
       const out = mod.operations.connect(t0, idOf(a), idOf(b), {});
-      if (out && out !== t0) cases.push({ module: key, op: 'connect', text: out });
+      if (out && out !== t0) { cases.push({ module: key, op: 'connect', text: out }); markExamined(key); }
     } catch (e) {
       cases.push({ module: key, op: 'connect', text: null, err: String(e.message).slice(0, 60) });
     }

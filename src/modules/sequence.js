@@ -130,6 +130,19 @@ window.MA.modules.sequence = (function() {
           to = rest.trim();
           label = '';
         }
+        // メッセージ行は参加者の宣言も兼ねる。
+        //
+        // `A->>B: 要求` だけ書けば mermaid は A と B を描く。実務では
+        // `participant` 行を書かないほうがむしろ普通で、短く書けるのが利点。
+        // ところがこちらは message 行から参加者を登録していなかったので、
+        // **参加者が1人も一覧に出ず、選ぶことも名前を変えることもできなかった**
+        // (実測: mermaid はアクターを8図形描くのに、こちらの要素数は0)。
+        //
+        // flowchart がエッジ行でノードを登録するのと同じ形に揃える。
+        // line は「最初に現れた行」= その参加者を宣言している行になる。
+        ensureParticipant(from, lineNum);
+        ensureParticipant(to, lineNum);
+
         result.relations.push({
           kind: 'message',
           id: '__msg_' + (msgCounter++),
@@ -144,6 +157,25 @@ window.MA.modules.sequence = (function() {
     }
 
     return result;
+
+    function ensureParticipant(id, lineN) {
+      if (!id) return;
+      // `A->>B` の端点に修飾が付く形 (`activate A` などは別行なのでここには来ない)。
+      // 空白や記号だけの断片は参加者ではない。
+      if (!/^[^\s:>\-]+$/.test(id)) return;
+      for (var k = 0; k < result.elements.length; k++) {
+        if (result.elements[k].id === id) return;
+      }
+      result.elements.push({
+        kind: 'participant',
+        id: id,
+        label: id,
+        line: lineN,
+        // 宣言行を持たない (メッセージ行から導出した) ことを示す。
+        // ラベルを付けるには `participant A as ラベル` の行を作る必要がある。
+        implicit: true,
+      });
+    }
   }
 
   // ── Updaters ──
@@ -290,6 +322,53 @@ window.MA.modules.sequence = (function() {
   }
   function decodeLabel(s) {
     return String(s === undefined || s === null ? '' : s).replace(/#35;/g, '#');
+  }
+
+  // 宣言行を持たない参加者 (メッセージ行だけで現れるもの) を編集する。
+  //
+  // `A->>B: 要求` の形は実務でむしろ普通だが、`participant A` の行が無いので
+  // 書き換える場所が無い。従来は message 行に回っていたため、
+  // **参加者のラベルを変えるとメッセージの本文が書き換わっていた**
+  // (`A->>B: 要求` → `A->>B: 端末`)。state で直したのと同じ形。
+  //
+  // ラベルを付けたいなら宣言行を作る。ID を変えたいなら参照側を追従させる。
+  function updateImplicitParticipant(text, id, field, value) {
+    if (!id || value === undefined || value === null) return text;
+    var lines = text.split('\n');
+    if (field === 'id' || field === 'name') {
+      var newId = String(value).trim();
+      if (!newId || newId === id) return text;
+      // 既にある参加者へは変えない (黙って2人を1人に統合させない)
+      var existing = parseSequence(text).elements.map(function(e) { return e.id; });
+      if (existing.indexOf(newId) >= 0) return text;
+      renameParticipantRefs(lines, id, newId, -1);
+      return lines.join('\n');
+    }
+    if (field === 'label') {
+      var label = String(value);
+      if (!label || label === id) return text;
+      // 宣言行を図種宣言の直後に作る。メッセージ側は id のままなので図の形は変わらない。
+      var insertAt = 1;
+      for (var k = 0; k < lines.length; k++) {
+        if (/^sequenceDiagram/.test(lines[k].trim())) { insertAt = k + 1; break; }
+      }
+      var baseIndent = '    ';
+      for (var k2 = insertAt; k2 < lines.length; k2++) {
+        if (lines[k2].trim()) { baseIndent = lines[k2].match(/^(\s*)/)[1]; break; }
+      }
+      lines.splice(insertAt, 0, baseIndent + 'participant ' + id + ' as ' + encodeLabel(label));
+      return lines.join('\n');
+    }
+    if (field === 'kind') {
+      var kind2 = (value === 'actor') ? 'actor' : 'participant';
+      var insertAt2 = 1;
+      for (var k3 = 0; k3 < lines.length; k3++) {
+        if (/^sequenceDiagram/.test(lines[k3].trim())) { insertAt2 = k3 + 1; break; }
+      }
+      lines.splice(insertAt2, 0, '    ' + kind2 + ' ' + id);
+      return lines.join('\n');
+    }
+    return text;
   }
 
   function updateParticipant(text, lineNum, field, value) {
@@ -1514,18 +1593,40 @@ window.MA.modules.sequence = (function() {
         }
         return text;
       },
-      delete: function(text, lineNum) {
-        // Generic delete single line (works for participant, message, note)
+      delete: function(text, lineNum, opts) {
+        opts = opts || {};
+        // 参加者は id 認識の削除を使う。
+        //
+        // 単なる行削除だと `participant A as Client` の宣言だけが消え、
+        // `A->>B: Request` が残る。mermaid は参照だけで参加者を作るので、
+        // **一覧から消してもライフラインは図に残る** (しかもラベルを失って
+        // 「A」に戻る)。deleteParticipant は前からあったのに、契約の入口が
+        // id を渡していなかった。state / flowchart / er / class と同じ形。
+        if (opts.kind === 'participant' || opts.kind === 'actor') {
+          return deleteParticipant(text, lineNum, opts.id);
+        }
+        // Generic delete single line (works for message, note)
         return window.MA.textUpdater.deleteLine(text, lineNum);
       },
-      update: function(text, lineNum, field, value) {
-        // Determine element kind by parsing the line
+      update: function(text, lineNum, field, value, opts) {
+        opts = opts || {};
         var lines = text.split('\n');
         var trimmed = (lines[lineNum - 1] || '').trim();
-        if (trimmed.indexOf('participant ') === 0 || trimmed.indexOf('actor ') === 0) {
-          return updateParticipant(text, lineNum, field, value);
+        var isDecl = trimmed.indexOf('participant ') === 0 || trimmed.indexOf('actor ') === 0;
+
+        // 分岐は opts.kind を優先する。
+        //
+        // 行の中身だけで判定していたので、宣言行を持たない参加者
+        // (`A->>B: 要求` の A) を選んでラベルを変えると **メッセージの本文が
+        // 書き換わっていた**。state で直したのと同じ形で、これが3例目。
+        if (opts.kind === 'participant' || opts.kind === 'actor') {
+          if (isDecl) return updateParticipant(text, lineNum, field, value);
+          return updateImplicitParticipant(text, opts.id, field, value);
         }
-        // Otherwise assume message (arrow-based)
+        if (opts.kind === 'message') return updateMessage(text, lineNum, field, value);
+
+        // kind が無い呼び方 (旧い呼出し) は従来どおり行の中身で判定する
+        if (isDecl) return updateParticipant(text, lineNum, field, value);
         return updateMessage(text, lineNum, field, value);
       },
       moveUp: function(text, lineNum) {

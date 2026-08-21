@@ -20,6 +20,12 @@ window.MA.modules.timeline = (function() {
       var trimmed = lines[i].trim();
       if (!trimmed || trimmed.indexOf('%%') === 0) continue;
       if (/^timeline/.test(trimmed)) continue;
+      // アクセシビリティ用のメタデータは図に描かれない。
+      //
+      // `accTitle:` / `accDescr:` は読み上げ用の情報で、mermaid は SVG のテキストに
+      // 出さない。ここで拾うと一覧に幽霊の「期間」が並び、その ✕ を押せば読み上げ用の
+      // 情報が消える。実描画に接地させたレビュー (R13) で見つけた。
+      if (/^acc(Title|Descr)\s*:/.test(trimmed)) continue;
 
       var tm = trimmed.match(TITLE_RE);
       if (tm) { result.meta.title = tm[1].trim(); continue; }
@@ -477,7 +483,13 @@ window.MA.modules.timeline = (function() {
       delete: function(text, lineNum) { return deleteElement(text, lineNum); },
       update: function(text, lineNum, field, value, opts) {
         opts = opts || {};
-        if (opts.kind === 'section') return updateSection(text, lineNum, value);
+        if (opts.kind === 'section') {
+        // 知らない field で名前を書き換えない。
+        // 以前は field を見ず kind だけで分岐していたため、どんな field 名でも
+        // 名前が置き換わった。将来 field を増やしたときに黙って名前を潰す。
+          if (field !== 'name' && field !== 'label') return text;
+          return updateSection(text, lineNum, value);
+        }
         if (opts.kind === 'period') return updatePeriod(text, lineNum, field, value, opts.eventIndex);
         if (field === 'title') return setTitle(text, value);
         return text;

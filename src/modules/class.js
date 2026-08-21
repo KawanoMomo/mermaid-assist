@@ -6,6 +6,52 @@ window.MA.modules.classDiagram = (function() {
   // Relation patterns (longest first for greedy matching)
   var RELATION_TYPES = ['<|--', '<|..', '*--', 'o--', '..>', '-->', '--'];
 
+  // 表示ラベルは `["..."]` の形で宣言行に付く。
+  function unqLabel(v) {
+    if (!v) return '';
+    var s2 = String(v);
+    return /^"[\s\S]*"$/.test(s2) ? s2.slice(1, -1) : s2;
+  }
+
+  // mermaid はラベルの中の " をエスケープできないが、&quot; はそのまま
+  // " として描かれる (v11.13 実測)。
+  function encLabel(v) {
+    return String(v == null ? '' : v).replace(/"/g, '&quot;');
+  }
+
+  // クラスの表示ラベルを変える。宣言行が無ければ作る。
+  //
+  // クラス名は識別子なので日本語や括弧を入れると図が壊れる。
+  // 以前はラベル欄がクラス名そのものを書き換えていたので、
+  // 「設計(詳細)」のような実務の名前を入れると parse が落ちていた。
+  function updateClassLabel(text, lineNum, classId, newLabel) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    var enc = encLabel(newLabel);
+    var indent = lines[idx].match(/^(\s*)/)[1];
+    var trimmed = lines[idx].trim();
+    var m = trimmed.match(/^class\s+([^\s\[{]+)(?:\[".*?"\])?(\s*\{\s*)?$/);
+    if (m) {
+      // ラベルを外す指定 (空文字) なら ["..."] ごと消す
+      var suffix = enc ? '["' + enc + '"]' : '';
+      lines[idx] = indent + 'class ' + m[1] + suffix + (m[2] ? ' {' : '');
+      return lines.join('\n');
+    }
+    // 宣言行が無い (関係行だけで現れるクラス)。図種宣言の直後に作る。
+    if (!classId || !enc) return text;
+    var insertAt = 1;
+    for (var k = 0; k < lines.length; k++) {
+      if (/^classDiagram/.test(lines[k].trim())) { insertAt = k + 1; break; }
+    }
+    var baseIndent = '    ';
+    for (var k2 = insertAt; k2 < lines.length; k2++) {
+      if (lines[k2].trim()) { baseIndent = lines[k2].match(/^(\s*)/)[1]; break; }
+    }
+    lines.splice(insertAt, 0, baseIndent + 'class ' + classId + '["' + enc + '"]');
+    return lines.join('\n');
+  }
+
   function parseClass(text) {
     var result = {
       meta: {},
@@ -59,12 +105,17 @@ window.MA.modules.classDiagram = (function() {
         continue;
       }
 
-      // Class block start: class Name {
-      var classBlockMatch = trimmed.match(/^class\s+(\S+)\s*\{\s*$/);
+      // Class block start: class Name {  /  class Name["表示ラベル"] {
+      //
+      // mermaid は識別子とは別に表示ラベルを持てる (`class Animal["設計(詳細)"]`)。
+      // これまでこちらはその形を読めず、ラベル欄がクラス名そのものを書き換えていた。
+      // クラス名は識別子なので日本語や括弧を入れると図が壊れる。表示ラベルなら
+      // 「設計(詳細)」をそのまま出せる (v11.13 実測)。
+      var classBlockMatch = trimmed.match(/^class\s+([^\s\[{]+)(?:\[(".*?")\])?\s*\{\s*$/);
       if (classBlockMatch) {
         var cid = classBlockMatch[1];
         if (!classMap[cid]) {
-          var ce = { kind: 'class', id: cid, label: cid, members: [], line: lineNum };
+          var ce = { kind: 'class', id: cid, label: unqLabel(classBlockMatch[2]) || cid, members: [], line: lineNum };
           result.elements.push(ce);
           classMap[cid] = ce;
         }
@@ -73,11 +124,11 @@ window.MA.modules.classDiagram = (function() {
       }
 
       // Standalone class declaration: class Name
-      var classDeclMatch = trimmed.match(/^class\s+(\S+)\s*$/);
+      var classDeclMatch = trimmed.match(/^class\s+([^\s\[{]+)(?:\[(".*?")\])?\s*$/);
       if (classDeclMatch) {
         var cid2 = classDeclMatch[1];
         if (!classMap[cid2]) {
-          var ce2 = { kind: 'class', id: cid2, label: cid2, members: [], line: lineNum };
+          var ce2 = { kind: 'class', id: cid2, label: unqLabel(classDeclMatch[2]) || cid2, members: [], line: lineNum };
           result.elements.push(ce2);
           classMap[cid2] = ce2;
         }
@@ -275,6 +326,54 @@ window.MA.modules.classDiagram = (function() {
     var m = trimmed.match(/^(\S+)\s+([<>|*o.\-]{2,})\s+(\S+?)(?:\s*:\s*.*)?$/);
     if (!m) return false;
     return m[1] === classId || m[3] === classId;
+  }
+
+  // クラス名の変更。
+  //
+  // 選択時のパネルはクラス名を読み取り専用の文字として出すだけで、入力欄が無かった。
+  // 他の図種 (flowchart / block / sequence / c4 / state / requirement) は ID 欄を持ち、
+  // 変更すると参照側も追従する。class だけ取り残されていた (R18 で発覚)。
+  //
+  // 参照の追従が要るのは削除と同じ理由。宣言だけ変えると関係行が古い名前を
+  // 指したまま残り、mermaid は参照だけで要素を作るので幽霊クラスが生える。
+  //
+  // 既にある名前への変更は拒否する。mermaid は2つを黙って統合するので、
+  // 利用者からは「クラスが消えた」としか見えない。
+  function updateClassName(text, lineNum, oldId, newId) {
+    if (!newId || !String(newId).trim() || newId === oldId) return text;
+    var existing = parseClass(text).elements.map(function(e) { return e.id; });
+    if (existing.indexOf(newId) >= 0) return text;
+
+    var lines = text.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      var indent = lines[i].match(/^(\s*)/)[1];
+      var trimmed = lines[i].trim();
+      if (!trimmed) continue;
+
+      // `class X {` / `class X`
+      var decl = trimmed.match(/^class\s+(\S+)(\s*\{\s*)?$/);
+      if (decl && decl[1] === oldId) {
+        lines[i] = indent + 'class ' + newId + (decl[2] ? ' {' : '');
+        continue;
+      }
+      // `A <|-- B` などの関係行
+      var rel = trimmed.match(/^(\S+)(\s+[<>|*o.\-]{2,}\s+)(\S+?)(\s*:\s*.*)?$/);
+      if (rel) {
+        var left = rel[1] === oldId ? newId : rel[1];
+        var right = rel[3] === oldId ? newId : rel[3];
+        if (left !== rel[1] || right !== rel[3]) {
+          lines[i] = indent + left + rel[2] + right + (rel[4] || '');
+        }
+        continue;
+      }
+      // `X : +member` 形式
+      var mem = trimmed.match(/^(\S+)(\s+:\s+.*)$/);
+      if (mem && mem[1] === oldId) {
+        lines[i] = indent + newId + mem[2];
+        continue;
+      }
+    }
+    return lines.join('\n');
   }
 
   function addMember(text, classId, visibility, name, type, isMethod) {
@@ -522,7 +621,9 @@ window.MA.modules.classDiagram = (function() {
       if (!membersList) membersList = props.emptyListHtml('（メンバなし）');
       propsEl.innerHTML =
         props.panelHeaderHtml(cls.label) +
-        '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">クラス: ' + escHtml(cls.id) + '</div>' +
+        // 名前を変えられるようにする。以前は読み取り専用の文字だったので、
+        // リネームにはテキストを直接触るしかなかった (R18)。
+        props.fieldHtml('クラス名', 'sel-class-name', cls.id) +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">メンバ一覧</label>' +
           '<div>' + membersList + '</div>' +
@@ -538,6 +639,25 @@ window.MA.modules.classDiagram = (function() {
         });
 
       // 図の上でクリック2回で関係を引く
+      var clsNameEl = document.getElementById('sel-class-name');
+      if (clsNameEl) {
+        clsNameEl.addEventListener('change', function() {
+          var next = clsNameEl.value.trim();
+          if (!next || next === cls.id) return;
+          var updated = updateClassName(ctx.getMmdText(), cls.line, cls.id, next);
+          if (updated === ctx.getMmdText()) {
+            // 拒否されたときに黙っていると「押しても何も起きない」になる。
+            if (ctx.showTransient) ctx.showTransient('その名前は既に使われています — 別の名前にしてください', 3000);
+            clsNameEl.value = cls.id;
+            return;
+          }
+          window.MA.history.pushHistory();
+          ctx.setMmdText(updated);
+          window.MA.selection.setSelected([{ type: 'class', id: next }]);
+          ctx.onUpdate();
+        });
+      }
+
       props.bindConnectButton('sel-class-connect', 'class', cls.id,
         function(fromId, toId) { return addRelation(ctx.getMmdText(), fromId, toId); });
 
@@ -646,12 +766,31 @@ window.MA.modules.classDiagram = (function() {
         if (kind === 'namespace') return addNamespace(text, props.id);
         return text;
       },
-      delete: function(text, lineNum) { return window.MA.textUpdater.deleteLine(text, lineNum); },
-      update: function(text, lineNum, field, value) {
+      // 契約経由の削除も id 認識の実装を使う。
+      // 以前は単なる deleteLine で、要素は「最初に現れた行」を持つため、
+      // 関係行だけが消えて宣言が残っていた。mermaid は参照だけで要素を作るので
+      // **一覧から消えても図には残る**。UI 経路だけ直して契約経路を忘れる形の再発。
+      delete: function(text, lineNum, opts) {
+        opts = opts || {};
+        return deleteClass(text, lineNum, opts.id);
+      },
+      update: function(text, lineNum, field, value, opts) {
+        opts = opts || {};
         var lines = text.split('\n');
         var trimmed = (lines[lineNum - 1] || '').trim();
         for (var i = 0; i < RELATION_TYPES.length; i++) {
           if (trimmed.indexOf(RELATION_TYPES[i]) > 0) return updateRelation(text, lineNum, field, value);
+        }
+        // クラス名の変更を統一入口からも使えるようにする。
+        // 関数は追加したのに入口へ繋いでいなかった。r12 を契約ベースに書き換えたら
+        // 「どの field を渡しても本文が変わらない」として出てきた。
+        var decl = trimmed.match(/^class\s+([^\s\[{]+)/);
+        var oldId = opts.id || (decl ? decl[1] : null);
+        // label = 図に出る文字 (識別子とは別)、name/id = 識別子の改名。
+        // 以前は label も改名に回していたので、実務の名前を入れると図が壊れた。
+        if (field === 'label') return updateClassLabel(text, lineNum, oldId, value);
+        if (field === 'name' || field === 'id') {
+          if (oldId) return updateClassName(text, lineNum, oldId, value);
         }
         return text;
       },
@@ -672,6 +811,8 @@ window.MA.modules.classDiagram = (function() {
     parseClass: parseClass,
     addClass: addClass,
     deleteClass: deleteClass,
+    updateClassName: updateClassName,
+    updateClassLabel: updateClassLabel,
     moveClassUp: moveClassUp,
     moveClassDown: moveClassDown,
     addMember: addMember,
