@@ -170,6 +170,28 @@ try {
 check('DOC', '棚卸しと実体の対応', missingDoc.length === 0,
   missingDoc.length ? ('棚卸しに記録が無い: ' + missingDoc.join(', ')) : '全レビュアーが記録されている');
 
+// 棚卸しの散文が主張している「測れる事実」が今も正しいこと。
+//
+// A 区分 (テストで守られている) は抜き取り10件すべて記録どおりだったのに対し、
+// E 区分 (判断を書いた文章のみ) は **5件中4件が誤っていた**。
+// 同じ「済」でも、機械が触れる形かどうかで寿命が違う。
+//
+// `record-claims.js` は G1 (move: false のまま) / E2 (使える id を出さない) /
+// E7 (別名の ; は引用符でも通らない) を実測する。
+// 価値判断 (G2 のパネル構成、G3 の複写の意味) は正しく散文なので対象外。
+let recFail = [];
+try {
+  const f = path.join(outDir, 'record-claims.json');
+  if (!fs.existsSync(f)) recFail.push('未実行');
+  else if (fs.statSync(f).mtimeMs < srcTime) recFail.push('ソースより古い');
+  else {
+    const items = JSON.parse(fs.readFileSync(f, 'utf8'));
+    items.forEach((x) => recFail.push(x.module + '.' + x.fn));
+  }
+} catch (e) { recFail.push('読めない: ' + e.message); }
+check('REC', '棚卸しの主張の検証', recFail.length === 0,
+  recFail.length ? recFail.join(' / ') : '3件の主張が今も正しい');
+
 const failed = results.filter(r => !r.ok);
 console.log('');
 results.forEach(r => console.log('  ' + (r.ok ? 'PASS' : 'FAIL') + '  ' +
