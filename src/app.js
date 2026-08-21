@@ -202,9 +202,53 @@ function detectModule(text) {
 }
 
 // ── Refresh Pipeline ───────────────────────────────────────────────────────
+// 描き直しを1フレームに合流させるだけでは足りない。
+//
+// requestAnimationFrame は**同じフレームの中**しかまとめない。人が打つ速さ
+// (毎秒5文字 = 200ms 間隔) だと1打鍵ごとに1回描き直す。実測 (1366x768):
+//
+//   要素   10文字打つ間に固まった合計   1打鍵あたり
+//     10                        0ms          0ms
+//     50                      797ms         80ms
+//    200                     4988ms        500ms
+//    400                    14718ms       1470ms
+//
+// 400要素の図に10文字打つと、**合計 14.7秒 画面が固まる**。
+//
+// 一定時間を待つ形にする。待ち時間は**前回の描き直しに実際かかった時間**から
+// 決める。小さい図は今までどおり即座に (1フレーム)、重い図は打ち終わるまで
+// 待つ。固定値にすると、軽い図で無駄に遅くなるか、重い図で効かないかの
+// どちらかになる (150ms 固定では 200ms 間隔の打鍵に対して1回も合流しない)。
+var lastRenderMs = 0;
+var debounceTimeout = null;
+
+function refreshDelay() {
+  if (lastRenderMs <= 150) return 0;              // 軽い図はそのまま
+  return Math.min(Math.round(lastRenderMs), 800); // 重い図は前回かかった分だけ待つ
+}
+
 function scheduleRefresh() {
   cancelAnimationFrame(debounceTimer);
-  debounceTimer = requestAnimationFrame(function() { refresh(); });
+  if (debounceTimeout) { clearTimeout(debounceTimeout); debounceTimeout = null; }
+  var wait = refreshDelay();
+  if (wait === 0) {
+    debounceTimer = requestAnimationFrame(function() { refresh(); });
+    return;
+  }
+  // 待っている間に「読み取りと状態表示だけ先に」追いつかせることも試したが、
+  // **それ自体が重かった**。実測 (400要素、200ms 間隔で10文字):
+  //
+  //   描き直しだけ待つ            固まった合計 14718ms → 1460ms
+  //   + 軽い側を毎回先に走らせる                    → 22194ms (悪化)
+  //
+  // 軽いはずの `refresh(true)` は一覧を作り直す。400要素だと 799行の DOM を
+  // 毎回組み直すので **1打鍵あたり約850ms** かかっていた。
+  // 一覧に仮想化が無いという UI-022 と同じ根で、そちらが片付くまでは
+  // まとめて待つ方が速い。状態表示が最大 800ms 遅れるのは承知の上。
+  debounceTimeout = setTimeout(function() {
+    debounceTimeout = null;
+    debounceTimer = requestAnimationFrame(function() { refresh(); });
+  }, wait);
 }
 
 async function refresh(skipRender) {
@@ -271,8 +315,10 @@ async function refresh(skipRender) {
 
   // Render via mermaid.js
   var svgId = 'mermaid-svg-' + thisRender;
+  var renderStartedAt = (window.performance && performance.now) ? performance.now() : Date.now();
   try {
     var renderResult = await mermaid.render(svgId, mmdText);
+    lastRenderMs = ((window.performance && performance.now) ? performance.now() : Date.now()) - renderStartedAt;
     if (previewSvgEl) previewSvgEl.removeAttribute('aria-busy');
     // Guard: if a newer render was started, discard this result
     if (thisRender !== renderCounter) return;

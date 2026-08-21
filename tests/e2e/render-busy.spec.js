@@ -103,11 +103,12 @@ test.describe('UI-027: 重い図を描いている間、進んでいることが
     setText(page, flow(600)).catch(() => {});
     await page.waitForTimeout(30);
     await setText(page, flow(5));
+    // 重い図の描き直しが終わったあと、待ち時間 (最大800ms) を置いて
+    // 最後の内容が描かれる。「OK になってから600ms」では届かない。
     await page.waitForFunction(() => {
-      const s = document.getElementById('status-parse');
-      return s && (s.textContent || '').trim() === 'OK';
+      const s = document.getElementById('status-info');
+      return s && /要素: 5(\D|$)/.test(s.textContent || '');
     }, null, { timeout: 90000 });
-    await page.waitForTimeout(600);
     const info = await page.locator('#status-info').textContent();
     expect(info).toContain('要素: 5');
   });
