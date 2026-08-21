@@ -18,6 +18,15 @@
   var ARCH_LABEL = /\[([^\]]*)\]/g;
   var ARCH_OK = /^[A-Za-z0-9_ ]*$/;
 
+  // 引用符で囲えば通る。
+  //
+  // 以前は「architecture のラベルには半角英数字しか使えない (引用符で囲んでも
+  // 通らない)」と告げていた。**実測すると引用符で通る**
+  // (`service a(server)["設計"]` → 「設計」を描画、v11.13)。
+  // 直せない制限として扱っていたのが誤りで、モジュール側で引用するようにした。
+  //
+  // ここに残すのは「引用符が付いていないのに英数字以外が入っている」場合だけ。
+  // 利用者が本文を直接書いたときに起きる。
   function firstBadArchLabel(text) {
     var lines = text.split('\n');
     for (var i = 0; i < lines.length; i++) {
@@ -26,6 +35,7 @@
       ARCH_LABEL.lastIndex = 0;
       var m;
       while ((m = ARCH_LABEL.exec(t))) {
+        if (/^".*"$/.test(m[1])) continue;   // 引用済みなら通る
         if (!ARCH_OK.test(m[1])) return m[1];
       }
     }
@@ -69,7 +79,9 @@
   // pie / quadrant / packet / radar / requirement は &quot; が文字どおり
   // 「&quot;」と描かれてしまうので、逃がしても直らない (v11.13 実測)。
   // つまりこちらでは直せない。せめて原因を告げる。
-  var NO_QUOTE_ESCAPE = /^(pie|quadrantChart|packet-beta|packet|radar-beta|requirementDiagram)/;
+  // architecture も同じ (引用符では囲えるが、中の " は &quot; にしても
+  // そのまま文字として出る。v11.13 実測)。
+  var NO_QUOTE_ESCAPE = /^(pie|quadrantChart|packet-beta|packet|radar-beta|requirementDiagram|architecture-beta)/;
 
   // 「引用符の数」で見てはいけない。1行に複数のラベルを置く図種があり
   // (radar の `axis a["A"], b["B"]`)、素直に数えると正しい行を誤検知する。
@@ -79,6 +91,21 @@
   //   a["A"], b["B"] → `"A"` の直後が `]` → 正しい区切り
   var QUOTED = /"[^"]*"/g;
   var SEPARATOR_AFTER = /^[\s,:\]\)\}]|^$/;
+
+  // 「逃がしたのに出ない」印。
+  //
+  // er / state / class では `&quot;` がそのまま `"` として描かれるので逃がせるが、
+  // pie / quadrant / packet / radar / requirement / architecture は
+  // **`&quot;` を文字どおり描いてしまう** (v11.13 実測)。
+  // 本文に `&quot;` が居る = こちらが逃がしたことの印なので、
+  // それを見つけたら「この図種では " を表せない」と告げる。
+  function firstEscapedQuote(text) {
+    var lines = text.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].indexOf('&quot;') >= 0) return lines[i].trim().slice(0, 40);
+    }
+    return null;
+  }
 
   function firstOverQuotedLine(text) {
     var lines = text.split('\n');
@@ -153,6 +180,12 @@
     if (limit) return limit;
 
     if (NO_QUOTE_ESCAPE.test(head)) {
+      var eq = firstEscapedQuote(text);
+      if (eq !== null) {
+        return 'この図種のラベルには " を含められません' +
+          '(mermaid 側の制限。&quot; と書いてもそのまま文字として出ます)。' +
+          '「' + eq + '」が該当します。';
+      }
       var q = firstOverQuotedLine(text);
       if (q !== null) {
         return 'この図種のラベルには " を含められません' +
@@ -196,8 +229,8 @@
     if (/^architecture-beta/.test(head)) {
       var bad = firstBadArchLabel(text);
       if (bad !== null) {
-        return 'architecture 図のラベルには半角英数字・下線・空白しか使えません' +
-          '(mermaid 側の制限)。「' + bad + '」が該当します。';
+        return 'architecture 図のラベルに半角英数字以外を入れるときは ' +
+          '引用符で囲ってください (例: ["設計"])。「' + bad + '」が該当します。';
       }
     }
 

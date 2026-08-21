@@ -22,7 +22,7 @@ window.MA.modules.architectureBeta = (function() {
       var gm = trimmed.match(/^group\s+(\S+)\s*\(([^)]+)\)\s*\[([^\]]*)\]\s*(?:in\s+(\S+))?\s*$/);
       if (gm) {
         result.groups.push({
-          kind: 'group', id: gm[1], icon: gm[2], label: gm[3],
+          kind: 'group', id: gm[1], icon: gm[2], label: unquoteLabel(gm[3]),
           parentId: gm[4] || null, line: lineNum,
         });
         continue;
@@ -32,7 +32,7 @@ window.MA.modules.architectureBeta = (function() {
       var sm = trimmed.match(/^service\s+(\S+)\s*\(([^)]+)\)\s*\[([^\]]*)\]\s*(?:in\s+(\S+))?\s*$/);
       if (sm) {
         result.elements.push({
-          kind: 'service', id: sm[1], icon: sm[2], label: sm[3],
+          kind: 'service', id: sm[1], icon: sm[2], label: unquoteLabel(sm[3]),
           parentId: sm[4] || null, line: lineNum,
         });
         continue;
@@ -52,11 +52,32 @@ window.MA.modules.architectureBeta = (function() {
     return result;
   }
 
+  // architecture のラベルは `[…]` にそのまま置かれる。半角英数字・下線・空白しか
+  // 通らないので、日本語を入れると字句解析が落ちる。
+  //
+  // 「引用符で囲んでも通らない」と記録していたが、**実測すると通る**
+  // (`service a(server)["設計"]` → 「設計」を描画、v11.13)。
+  // 記録の方が誤っており、直せない制限として扱っていた。
+  // 組込の構成図で日本語が使えないのは実務上大きい。
+  function quoteLabel(v) {
+    var s2 = String(v == null ? '' : v);
+    if (/^"[\s\S]*"$/.test(s2)) return s2;
+    if (/^[A-Za-z0-9_ ]*$/.test(s2)) return s2;
+    return '"' + s2.replace(/"/g, '&quot;') + '"';
+  }
+
+  // 読むときは引用符を外す (入れた文字と一覧に出る文字を一致させる)。
+  function unquoteLabel(v) {
+    var s2 = String(v == null ? '' : v);
+    var inner = /^"[\s\S]*"$/.test(s2) ? s2.slice(1, -1) : s2;
+    return inner.replace(/&quot;/g, '"');
+  }
+
   function addGroup(text, id, icon, label, parent) {
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
-    var line = '    group ' + id + '(' + icon + ')[' + label + ']' + (parent ? ' in ' + parent : '');
+    var line = '    group ' + id + '(' + icon + ')[' + quoteLabel(label) + ']' + (parent ? ' in ' + parent : '');
     lines.splice(insertAt, 0, line);
     return lines.join('\n');
   }
@@ -65,7 +86,7 @@ window.MA.modules.architectureBeta = (function() {
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
-    var line = '    service ' + id + '(' + icon + ')[' + label + ']' + (parent ? ' in ' + parent : '');
+    var line = '    service ' + id + '(' + icon + ')[' + quoteLabel(label) + ']' + (parent ? ' in ' + parent : '');
     lines.splice(insertAt, 0, line);
     return lines.join('\n');
   }
@@ -132,7 +153,7 @@ window.MA.modules.architectureBeta = (function() {
     else if (field === 'label') label = value;
     else if (field === 'parentId') parent = value;
     else if (field === 'kind') kind = value;
-    lines[idx] = indent + kind + ' ' + id + '(' + icon + ')[' + label + ']' + (parent ? ' in ' + parent : '');
+    lines[idx] = indent + kind + ' ' + id + '(' + icon + ')[' + quoteLabel(label) + ']' + (parent ? ' in ' + parent : '');
     if (field === 'id' && value !== oldId) renameRefs(lines, oldId, value, idx);
     return lines.join('\n');
   }

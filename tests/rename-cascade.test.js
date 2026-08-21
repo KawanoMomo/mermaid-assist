@@ -157,7 +157,14 @@ describe('architecture: サービスIDのリネーム', function() {
 
   test('R-AR-3: ラベル中の "db" は書き換えない', function() {
     var out = M.architectureBeta.updateElement(src, 3, 'id', 'store').split('\n');
-    expect(out[2]).toContain('[db を持つ]');
+    // ラベルの文字はそのまま。ただし日本語を含むので引用符が付く。
+    //
+    // 以前は「architecture のラベルは半角英数字しか通らない (引用符でも駄目)」と
+    // 記録しており、日本語ラベルは素のまま書き出していた。実測すると
+    // **引用符で囲えば通る** ので囲うようにした。この期待値は「囲っていなかった頃」の
+    // 形を見ていたので、意図 (ラベルの文字を書き換えない) に合わせ直す。
+    expect(out[2]).toContain('db を持つ');
+    expect(out[2]).toContain('"db を持つ"');
   });
 });
 
