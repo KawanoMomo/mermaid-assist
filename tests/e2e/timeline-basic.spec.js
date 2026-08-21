@@ -99,7 +99,7 @@ test.describe('E41-E48: Timeline Operations', () => {
     await page.waitForTimeout(800);
     expect(await page.locator('label:has-text("Section")').count()).toBeGreaterThan(0);
     expect(await page.locator('label:has-text("Period")').count()).toBeGreaterThan(0);
-    expect(await page.locator('label:has-text("Event")').count()).toBeGreaterThan(0);
+    expect(await page.locator('label:has-text("イベント")').count()).toBeGreaterThan(0);
   });
 
   test('E46: section select opens detail panel', async ({ page }) => {

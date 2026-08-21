@@ -522,7 +522,7 @@ window.MA.modules.classDiagram = (function() {
             '<select id="cl-add-mem-class" style="flex:2;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + classOpts + '</select>' +
             '<select id="cl-add-mem-vis" style="flex:0 0 50px;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + visOpts + '</select>' +
           '</div>' +
-          fieldHtml('名前', 'cl-add-mem-name', '', 'name') +
+          fieldHtml('ラベル', 'cl-add-mem-name', '', 'name') +
           fieldHtml('型/戻り値', 'cl-add-mem-type', '', 'String') +
           '<div style="display:flex;gap:4px;align-items:center;">' +
             '<label style="font-size:11px;color:var(--text-secondary);"><input id="cl-add-mem-method" type="checkbox"> method (())</label>' +
@@ -623,7 +623,7 @@ window.MA.modules.classDiagram = (function() {
         props.panelHeaderHtml(cls.label) +
         // 名前を変えられるようにする。以前は読み取り専用の文字だったので、
         // リネームにはテキストを直接触るしかなかった (R18)。
-        props.fieldHtml('クラス名', 'sel-class-name', cls.id) +
+        props.fieldHtml('ID', 'sel-class-name', cls.id) +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">メンバ一覧</label>' +
           '<div>' + membersList + '</div>' +

@@ -403,12 +403,12 @@ window.MA.modules.requirementDiagram = (function() {
           '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
             '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">要件を追加</label>' +
             P.selectFieldHtml('Type', 'req-add-req-type', reqTypeOpts) +
-            P.fieldHtml('Name', 'req-add-req-name', '', '') +
+            P.fieldHtml('ID', 'req-add-req-name', '', '') +
             P.primaryButtonHtml('req-add-req-btn', '+ 要件追加') +
           '</div>' +
           '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
             '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">エレメントを追加</label>' +
-            P.fieldHtml('Name', 'req-add-elem-name', '', '') +
+            P.fieldHtml('ID', 'req-add-elem-name', '', '') +
             P.primaryButtonHtml('req-add-elem-btn', '+ エレメント追加') +
           '</div>' +
           '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
@@ -487,8 +487,8 @@ window.MA.modules.requirementDiagram = (function() {
           propsEl.innerHTML =
             P.panelHeaderHtml(rq.name) +
             P.selectFieldHtml('Type', 'req-edit-type', reqTypeOpts2) +
-            P.fieldHtml('Name', 'req-edit-name', rq.name) +
-            P.fieldHtml('id', 'req-edit-id', rq.id) +
+            P.fieldHtml('ID', 'req-edit-name', rq.name) +
+            P.fieldHtml('要求番号', 'req-edit-id', rq.id) +
             '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">text</label><textarea id="req-edit-text" rows="3" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;font-family:inherit;resize:vertical;">' + escHtml(rq.text) + '</textarea></div>' +
             P.selectFieldHtml('risk', 'req-edit-risk', riskOpts) +
             P.selectFieldHtml('verifymethod', 'req-edit-verify', verifyOpts) +
@@ -532,8 +532,8 @@ window.MA.modules.requirementDiagram = (function() {
 
           propsEl.innerHTML =
             P.panelHeaderHtml(el.name) +
-            P.fieldHtml('Name', 'req-edit-elem-name', el.name) +
-            P.fieldHtml('type', 'req-edit-elem-type', el.type) +
+            P.fieldHtml('ID', 'req-edit-elem-name', el.name) +
+            P.fieldHtml('Type', 'req-edit-elem-type', el.type) +
             P.fieldHtml('docref', 'req-edit-elem-docref', el.docref, '空可') +
             P.dangerButtonHtml('req-edit-elem-delete', 'エレメント削除');
 

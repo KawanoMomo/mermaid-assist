@@ -136,9 +136,9 @@ test.describe('E57-E66: Gitgraph Operations', () => {
     await waitForRender(page);
     await switchToGG(page);
     await page.waitForTimeout(800);
-    expect(await page.locator('label:has-text("Commit を追加")').count()).toBeGreaterThan(0);
-    expect(await page.locator('label:has-text("Branch を追加")').count()).toBeGreaterThan(0);
-    expect(await page.locator('label:has-text("Merge を追加")').count()).toBeGreaterThan(0);
+    expect(await page.locator('label:has-text("コミットを追加")').count()).toBeGreaterThan(0);
+    expect(await page.locator('label:has-text("ブランチを追加")').count()).toBeGreaterThan(0);
+    expect(await page.locator('label:has-text("マージを追加")').count()).toBeGreaterThan(0);
   });
 
   test('E65: commit detail panel + update id', async ({ page }) => {

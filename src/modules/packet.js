@@ -156,8 +156,8 @@ window.MA.modules.packetBeta = (function() {
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">Packet</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">Title 設定</label>' +
-          P.fieldHtml('Title', 'pk-title', parsedData.meta.title || '') +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">タイトル設定</label>' +
+          P.fieldHtml('タイトル', 'pk-title', parsedData.meta.title || '') +
           P.primaryButtonHtml('pk-set-title', 'Title 適用') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +

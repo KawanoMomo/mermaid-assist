@@ -334,7 +334,7 @@ window.MA.modules.mindmap = (function() {
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">子ノードを追加</label>' +
           P.selectFieldHtml('親ノード', 'mm-add-parent', parentOpts) +
-          P.fieldHtml('Text', 'mm-add-text', '', '例: New Idea') +
+          P.fieldHtml('ラベル', 'mm-add-text', '', '例: New Idea') +
           P.selectFieldHtml('Shape', 'mm-add-shape', shapeOpts) +
           P.primaryButtonHtml('mm-add-btn', '+ 子ノード追加') +
         '</div>' +
@@ -381,7 +381,7 @@ window.MA.modules.mindmap = (function() {
         propsEl.innerHTML =
           P.panelHeaderHtml(n.text) +
           '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">Level: ' + n.level + (n.parentId ? ' (親: ' + escHtml(n.parentId) + ')' : ' (root)') + '</div>' +
-          P.fieldHtml('Text', 'mm-edit-text', n.text) +
+          P.fieldHtml('ラベル', 'mm-edit-text', n.text) +
           P.selectFieldHtml('Shape', 'mm-edit-shape', shapeOpts2) +
           P.fieldHtml('Icon (空で削除)', 'mm-edit-icon', n.icon, '例: fa fa-book') +
           '<div style="display:flex;gap:4px;margin-bottom:8px;">' +

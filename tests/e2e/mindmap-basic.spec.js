@@ -89,7 +89,7 @@ test.describe('E49-E56: Mindmap Operations', () => {
     await switchToMM(page);
     await page.waitForTimeout(800);
     expect(await page.locator('label:has-text("親ノード")').count()).toBeGreaterThan(0);
-    expect(await page.locator('label:has-text("Text")').count()).toBeGreaterThan(0);
+    expect(await page.locator('label:has-text("ラベル")').count()).toBeGreaterThan(0);
     expect(await page.locator('label:has-text("Shape")').count()).toBeGreaterThan(0);
   });
 

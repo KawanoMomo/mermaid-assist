@@ -301,32 +301,32 @@ window.MA.modules.gitGraph = (function() {
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">Gitgraph</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">Commit を追加</label>' +
-          P.fieldHtml('id (任意)', 'gg-add-commit-id', '') +
-          P.selectFieldHtml('type', 'gg-add-commit-type', typeOpts) +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">コミットを追加</label>' +
+          P.fieldHtml('ID (任意)', 'gg-add-commit-id', '') +
+          P.selectFieldHtml('Type', 'gg-add-commit-type', typeOpts) +
           P.fieldHtml('tag (任意)', 'gg-add-commit-tag', '') +
-          P.primaryButtonHtml('gg-add-commit-btn', '+ Commit 追加') +
+          P.primaryButtonHtml('gg-add-commit-btn', '+ コミット追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">Branch を追加</label>' +
-          P.fieldHtml('Branch name', 'gg-add-branch-name', '') +
-          P.primaryButtonHtml('gg-add-branch-btn', '+ Branch 追加') +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">ブランチを追加</label>' +
+          P.fieldHtml('ID', 'gg-add-branch-name', '') +
+          P.primaryButtonHtml('gg-add-branch-btn', '+ ブランチ追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">Checkout を追加</label>' +
-          P.selectFieldHtml('Target branch', 'gg-add-checkout-target', branchOpts) +
-          P.primaryButtonHtml('gg-add-checkout-btn', '+ Checkout 追加') +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">チェックアウトを追加</label>' +
+          P.selectFieldHtml('Target', 'gg-add-checkout-target', branchOpts) +
+          P.primaryButtonHtml('gg-add-checkout-btn', '+ チェックアウト追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">Merge を追加</label>' +
-          P.selectFieldHtml('Target branch', 'gg-add-merge-target', branchOpts) +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">マージを追加</label>' +
+          P.selectFieldHtml('Target', 'gg-add-merge-target', branchOpts) +
           P.fieldHtml('tag (任意)', 'gg-add-merge-tag', '') +
-          P.primaryButtonHtml('gg-add-merge-btn', '+ Merge 追加') +
+          P.primaryButtonHtml('gg-add-merge-btn', '+ マージ追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">Cherry-pick を追加</label>' +
-          P.selectFieldHtml('Commit id', 'gg-add-cp-id', commitIdOpts) +
-          P.primaryButtonHtml('gg-add-cp-btn', '+ Cherry-pick 追加') +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">チェリーピックを追加</label>' +
+          P.selectFieldHtml('Target', 'gg-add-cp-id', commitIdOpts) +
+          P.primaryButtonHtml('gg-add-cp-btn', '+ チェリーピック追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">アイテム一覧</label>' +
@@ -387,18 +387,18 @@ window.MA.modules.gitGraph = (function() {
 
       if (found.kind === 'commit') {
         var typeOpts2 = COMMIT_TYPES.map(function(t) { return { value: t, label: t, selected: t === found.commitType }; });
-        html += P.fieldHtml('id', 'gg-edit-id', found.id);
-        html += P.selectFieldHtml('type', 'gg-edit-type', typeOpts2);
+        html += P.fieldHtml('ID', 'gg-edit-id', found.id);
+        html += P.selectFieldHtml('Type', 'gg-edit-type', typeOpts2);
         html += P.fieldHtml('tag', 'gg-edit-tag', found.tag);
       } else if (found.kind === 'branch') {
-        html += P.fieldHtml('name', 'gg-edit-branch-name', found.name);
+        html += P.fieldHtml('ID', 'gg-edit-branch-name', found.name);
       } else if (found.kind === 'checkout') {
-        html += P.fieldHtml('target', 'gg-edit-checkout-target', found.target);
+        html += P.fieldHtml('Target', 'gg-edit-checkout-target', found.target);
       } else if (found.kind === 'merge') {
-        html += P.fieldHtml('target', 'gg-edit-merge-target', found.target);
+        html += P.fieldHtml('Target', 'gg-edit-merge-target', found.target);
         html += P.fieldHtml('tag', 'gg-edit-merge-tag', found.tag);
       } else if (found.kind === 'cherry-pick') {
-        html += P.fieldHtml('id', 'gg-edit-cp-id', found.id);
+        html += P.fieldHtml('ID', 'gg-edit-cp-id', found.id);
       }
       html += P.dangerButtonHtml('gg-edit-delete', '削除');
       propsEl.innerHTML = html;

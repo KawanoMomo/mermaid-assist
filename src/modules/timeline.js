@@ -254,26 +254,26 @@ window.MA.modules.timeline = (function() {
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">Timeline</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">Title 設定</label>' +
-          P.fieldHtml('Title', 'tl-title', currentTitle) +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">タイトル設定</label>' +
+          P.fieldHtml('タイトル', 'tl-title', currentTitle) +
           P.primaryButtonHtml('tl-set-title-btn', 'Title 適用') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">セクションを追加</label>' +
-          P.fieldHtml('Name', 'tl-add-sec-name', '') +
+          P.fieldHtml('ラベル', 'tl-add-sec-name', '') +
           P.primaryButtonHtml('tl-add-sec-btn', '+ セクション追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">ピリオドを追加</label>' +
           P.selectFieldHtml('Section', 'tl-add-p-section', secOpts) +
           P.fieldHtml('Period', 'tl-add-p-period', '', '例: 2026-04-01') +
-          P.fieldHtml('Event', 'tl-add-p-event', '', '初期イベント') +
+          P.fieldHtml('イベント', 'tl-add-p-event', '', '初期イベント') +
           P.primaryButtonHtml('tl-add-p-btn', '+ ピリオド追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">イベントを既存ピリオドに追加</label>' +
           P.selectFieldHtml('Period', 'tl-add-ev-period', periodOpts) +
-          P.fieldHtml('Event', 'tl-add-ev-text', '') +
+          P.fieldHtml('イベント', 'tl-add-ev-text', '') +
           P.primaryButtonHtml('tl-add-ev-btn', '+ イベント追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
@@ -332,7 +332,7 @@ window.MA.modules.timeline = (function() {
 
         propsEl.innerHTML =
           P.panelHeaderHtml(sec.label) +
-          P.fieldHtml('Name', 'tl-edit-sec-name', sec.label) +
+          P.fieldHtml('ラベル', 'tl-edit-sec-name', sec.label) +
           P.actionBarHtml('tl-edit-sec', {
             insertBefore: false, insertAfter: false,
             move: false, delete: true,

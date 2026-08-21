@@ -488,9 +488,9 @@ window.MA.modules.blockBeta = (function() {
         propsEl.innerHTML =
           '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">Block Diagram</div>' +
           '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
-            '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">Columns 設定</label>' +
-            P.fieldHtml('Columns (1-N)', 'block-set-cols', String(currentCols), '空欄=未設定') +
-            P.primaryButtonHtml('block-set-cols-btn', 'Columns 適用') +
+            '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">列数設定</label>' +
+            P.fieldHtml('列数 (1-N)', 'block-set-cols', String(currentCols), '空欄=未設定') +
+            P.primaryButtonHtml('block-set-cols-btn', '列数 適用') +
           '</div>' +
           '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
             '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">ブロックを追加</label>' +
@@ -501,7 +501,7 @@ window.MA.modules.blockBeta = (function() {
           '</div>' +
           '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
             '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">グループを追加</label>' +
-            P.fieldHtml('グループID', 'block-add-group-id', '', '例: mcu_group') +
+            P.fieldHtml('ID', 'block-add-group-id', '', '例: mcu_group') +
             P.primaryButtonHtml('block-add-group-btn', '+ グループ追加') +
           '</div>' +
           '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +

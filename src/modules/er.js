@@ -457,7 +457,7 @@ window.MA.modules.erDiagram = (function() {
       propsEl.innerHTML =
         P.panelHeaderHtml(ent.label) +
         // 名前を変えられるようにする (R18 で発覚した取り残し)。
-        P.fieldHtml('エンティティ名', 'sel-ent-name', ent.id) +
+        P.fieldHtml('ID', 'sel-ent-name', ent.id) +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">属性一覧</label>' +
           '<div>' + attrsList + '</div>' +

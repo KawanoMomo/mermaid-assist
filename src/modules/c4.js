@@ -664,7 +664,7 @@ window.MA.modules.c4 = (function() {
           P.selectFieldHtml('Variant', 'c4-variant', variantOpts) +
           P.primaryButtonHtml('c4-set-variant', 'Variant 適用') +
           '<div style="height:6px;"></div>' +
-          P.fieldHtml('Title', 'c4-title', parsedData.meta.title || '') +
+          P.fieldHtml('タイトル', 'c4-title', parsedData.meta.title || '') +
           P.primaryButtonHtml('c4-set-title', 'Title 適用') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
