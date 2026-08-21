@@ -441,6 +441,56 @@ window.MA.modules.mindmap = (function() {
     propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">未対応の選択状態</p>';
   }
 
+  // 節とその子孫が占める範囲。字下げが自分より深い行が続く限り子孫。
+  function subtreeRange(lines, startIdx) {
+    var indent = lines[startIdx].search(/[^ \t]/);
+    var end = startIdx;
+    for (var i = startIdx + 1; i < lines.length; i++) {
+      if (lines[i].trim() === '') { end = i; continue; }
+      var ind = lines[i].search(/[^ \t]/);
+      if (ind <= indent) break;
+      end = i;
+    }
+    while (end > startIdx && lines[end].trim() === '') end--;
+    return { start: startIdx, end: end, indent: indent };
+  }
+
+  // 同じ字下げの兄弟のうち、direction 側の隣と入れ替える。
+  // 親が違う (途中でより浅い行を跨ぐ) 場合は動かさない。
+  function moveNodeAmongSiblings(text, lineNum, direction) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length || lines[idx].trim() === '') return text;
+    var me = subtreeRange(lines, idx);
+    var sib = -1;
+    if (direction < 0) {
+      for (var i = idx - 1; i >= 0; i--) {
+        if (lines[i].trim() === '') continue;
+        var ind = lines[i].search(/[^ \t]/);
+        if (ind < me.indent) break;          // 親まで来た = 先頭の兄弟
+        if (ind === me.indent) { sib = i; break; }
+      }
+    } else {
+      for (var j = me.end + 1; j < lines.length; j++) {
+        if (lines[j].trim() === '') continue;
+        var ind2 = lines[j].search(/[^ \t]/);
+        if (ind2 < me.indent) break;         // 親の外へ出た = 末尾の兄弟
+        if (ind2 === me.indent) { sib = j; break; }
+      }
+    }
+    if (sib < 0) return text;
+    var other = subtreeRange(lines, sib);
+    var first = (me.start < other.start) ? me : other;
+    var second = (me.start < other.start) ? other : me;
+    if (first.end >= second.start) return text;
+    var pre = lines.slice(0, first.start);
+    var fb = lines.slice(first.start, first.end + 1);
+    var mid = lines.slice(first.end + 1, second.start);
+    var sb = lines.slice(second.start, second.end + 1);
+    var post = lines.slice(second.end + 1);
+    return pre.concat(sb, mid, fb, post).join('\n');
+  }
+
   return {
     type: 'mindmap',
     displayName: 'Mindmap',
@@ -500,15 +550,17 @@ window.MA.modules.mindmap = (function() {
         if (field === 'outdent') return outdentNode(text, lineNum);
         return text;
       },
-      moveUp: function(text, lineNum) {
-        if (lineNum <= 1) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum - 1);
-      },
-      moveDown: function(text, lineNum) {
-        var total = text.split('\n').length;
-        if (lineNum >= total) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum + 1);
-      },
+      // 素の行入れ替えは**図の宣言行と入れ替わって図を壊す**。
+      // 同じ種類の要素が乗っている行としか入れ替えない。
+      // mindmap の並びは**字下げが親子関係そのもの**なので、共通の
+      // moveElementLine (種類が同じ隣の要素と入れ替える) では壊れる。
+      // 実測: 深さ2の節を上へ動かすと深さ1の根と入れ替わり、
+      // 「There can be only one root」で図が出なくなる。
+      //
+      // 正しい移動は「同じ親を持つ兄弟どうしの入れ替え」で、
+      // しかも**子孫を連れて動く**必要がある。
+      moveUp: function(text, lineNum) { return moveNodeAmongSiblings(text, lineNum, -1); },
+      moveDown: function(text, lineNum) { return moveNodeAmongSiblings(text, lineNum, 1); },
       connect: function(text) { return text; },
     },
     addChild: addChild, addSibling: addSibling, indentNode: indentNode, outdentNode: outdentNode,

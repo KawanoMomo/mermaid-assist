@@ -97,10 +97,27 @@ Object.keys(M).forEach((key) => {
             what: mv + ' が無関係なコメント行を消す' });
         }
         // 並び替えは行の入れ替えなので、行の多重集合は**変わらない**のが正しい。
+        //
+        // ただし **位置そのものが中身になっている図種**では成り立たない。
+        // packet-beta の欄は `0-15: "Source Port"` のようにビット位置を
+        // 行に書くので、並べ替えたら番号を振り直さないと mermaid が拒否する
+        // (「Packet block 16 - 31 is not contiguous」)。
+        // 行の一致を求めると、**正しい実装の方を欠陥として報告してしまう。**
+        //
+        // 意図は「並べ替えで中身が失われないこと」なので、行ではなく
+        // **要素の見分けがつく文字の多重集合**を比べる。
         const ch = changedLines(src, after);
         if (ch.length > 0) {
-          findings.push({ module: key, fn: 'W4 並び替えの副作用',
-            what: mv + ' が行の中身を書き換える: ' + ch.slice(0, 3).map(x => JSON.stringify(x)).join(' ') });
+          const idOf = (e) => [e.label, e.name, e.text, e.period, e.id]
+            .filter(x => typeof x === 'string' && x.trim() && !/^__/.test(x))[0] || '';
+          let before2 = [], after2 = [];
+          try { before2 = (mod.parse(src).elements || []).map(idOf).filter(Boolean).sort(); } catch (e) {}
+          try { after2 = (mod.parse(after).elements || []).map(idOf).filter(Boolean).sort(); } catch (e) {}
+          if (before2.join('|') !== after2.join('|')) {
+            findings.push({ module: key, fn: 'W4 並び替えの副作用',
+              what: mv + ' が中身を書き換える: 行 ' + ch.slice(0, 2).map(x => JSON.stringify(x)).join(' ') +
+                    ' / 要素 [' + before2.join(',') + '] → [' + after2.join(',') + ']' });
+          }
         }
       }
     }

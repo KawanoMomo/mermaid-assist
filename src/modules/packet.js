@@ -229,6 +229,33 @@ window.MA.modules.packetBeta = (function() {
     propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">未対応の選択状態</p>';
   }
 
+  // 欄を1つ動かして、ビット番号を振り直す。幅 (endBit - startBit) は保つ。
+  function moveField(text, lineNum, direction) {
+    var els = parsePacket(text).elements || [];
+    var fields = els.filter(function(e) { return e.kind === 'field'; })
+      .sort(function(a, b) { return a.line - b.line; });
+    var at = -1;
+    for (var i = 0; i < fields.length; i++) if (fields[i].line === lineNum) { at = i; break; }
+    var to = at + direction;
+    if (at < 0 || to < 0 || to >= fields.length) return text;
+
+    var order = fields.slice();
+    var tmp = order[at]; order[at] = order[to]; order[to] = tmp;
+
+    var lines = text.split('\n');
+    var bit = fields[0].startBit;
+    order.forEach(function(f, i) {
+      var width = f.endBit - f.startBit;
+      var start = bit;
+      var end = bit + width;
+      bit = end + 1;
+      var indent = lines[fields[i].line - 1].match(/^(\s*)/)[1];
+      var range = (width === 0) ? String(start) : (start + '-' + end);
+      lines[fields[i].line - 1] = indent + range + ': "' + f.label + '"';
+    });
+    return lines.join('\n');
+  }
+
   return {
     type: 'packet-beta',
     displayName: 'Packet',
@@ -267,15 +294,14 @@ window.MA.modules.packetBeta = (function() {
       },
       delete: function(text, lineNum) { return deleteField(text, lineNum); },
       update: function(text, lineNum, field, value) { return updateField(text, lineNum, field, value); },
-      moveUp: function(text, lineNum) {
-        if (lineNum <= 1) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum - 1);
-      },
-      moveDown: function(text, lineNum) {
-        var total = text.split('\n').length;
-        if (lineNum >= total) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum + 1);
-      },
+      // 素の行入れ替えは**図の宣言行と入れ替わって図を壊す**。
+      // 同じ種類の要素が乗っている行としか入れ替えない。
+      // packet の並びは**ビット位置そのもの**なので、行を入れ替えるだけでは
+      // 番号が飛んで mermaid に拒否される。実測:
+      //   「Packet block 16 - 31 is not contiguous. It should start from 0.」
+      // 入れ替えたあと、各欄の幅を保ったまま先頭から番号を振り直す。
+      moveUp: function(text, lineNum) { return moveField(text, lineNum, -1); },
+      moveDown: function(text, lineNum) { return moveField(text, lineNum, 1); },
       connect: function(text) { return text; },
     },
     setTitle: setTitle, addField: addField, deleteField: deleteField, updateField: updateField,
