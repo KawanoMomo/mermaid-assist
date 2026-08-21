@@ -263,6 +263,16 @@ window.MA.modules.sankeyBeta = (function() {
     operations: {
       add: function(text, kind, props) {
         if (kind === 'flow') return addFlow(text, props.from, props.to, props.value);
+        // `parse` が返す kind は 'node' なのに、ここは 'flow' しか受けていなかった。
+        // sankey のノードは流れの端点としてしか存在しないので、'node' で
+        // 足すときは**既存のノードからの流れを1本足す** (G4)。
+        if (kind === 'node' || kind === undefined) {
+          var els = parseSankey(text).elements || [];
+          var from = props.from || (els.length ? (els[0].label || els[0].id) : null);
+          var to = props.name || props.label || props.text;
+          if (!from || !to || from === to) return text;
+          return addFlow(text, from, to, props.value == null ? 1 : props.value);
+        }
         return text;
       },
       // 契約経由では kind を見て分ける。ノードは流れごと落とす。

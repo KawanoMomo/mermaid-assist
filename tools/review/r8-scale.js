@@ -238,9 +238,32 @@ async function grow(page, target) {
           const bc = cnt(names.before), ac = cnt(names.after);
           const gone = Object.keys(bc).filter(k => (ac[k] || 0) < bc[k]);
           const added = Object.keys(ac).filter(k => (bc[k] || 0) < ac[k]);
-          if (gone.length !== 1 || added.length) {
+          // 何を消したのかは、消えたものから読む (一覧の末尾は要素のことも
+          // 関係のこともある)。
+          //
+          //   要素が消えた  → その要素が対象。**その要素を指す関係**が
+          //                   一緒に消えるのは巻き添えではない
+          //                   (sankey のノードは流れの端点としてしか存在しない)
+          //   関係だけ消えた → 関係が対象。ちょうど1本ならよい
+          //
+          // 最初は「消えたのは1つだけ」を求めたが、それでは sankey の正しい
+          // 実装を欠陥として報告してしまう。次に関係を一律で除いたら、
+          // 関係を消した図種が全部「巻き添え」になった。**対象が何かを
+          // 決めてから巻き添えを数える**のが正しい順序だった。
+          const elemsGone = gone.filter(k => k.indexOf('関係:') !== 0);
+          const relsGone = gone.filter(k => k.indexOf('関係:') === 0);
+          let collateral = [];
+          if (elemsGone.length) {
+            const target = elemsGone[0];
+            collateral = elemsGone.slice(1)
+              .concat(relsGone.filter(k => k.indexOf(target) < 0));
+          } else {
+            collateral = relsGone.slice(1);   // 関係を1本消したなら残りは巻き添え
+          }
+          if (!gone.length || collateral.length || added.length) {
             findings.push({ module: c.type, fn: 'S4 大規模削除',
               what: '1つ消したのに 減った=[' + gone.slice(0, 4).join(',') +
+                    '] 巻き添え=[' + collateral.slice(0, 4).join(',') +
                     '] 増えた=[' + added.slice(0, 4).join(',') + ']' });
           }
         }

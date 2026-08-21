@@ -524,6 +524,19 @@ window.MA.modules.mindmap = (function() {
       add: function(text, kind, props) {
         if (kind === 'child') return addChild(text, props.parentLine, props.text, props.shape);
         if (kind === 'sibling') return addSibling(text, props.siblingLine, props.text, props.shape);
+        // `parse` が返す kind は 'node' なのに、ここは 'child' / 'sibling' しか
+        // 受けていなかった。**一覧に出ている種類で足せない**ので、契約経由の
+        // 呼び出し (r8 が文書を育てるときなど) が黙って空振りする (G4)。
+        // 既存の呼び出しは変えず、'node' を別名として受ける。
+        // 親を指定していなければ根の子として足す。
+        if (kind === 'node' || kind === undefined) {
+          var pl = props.parentLine;
+          if (!pl) {
+            var els = parseMindmap(text).elements || [];
+            pl = els.length ? els[0].line : 2;   // 根
+          }
+          return addChild(text, pl, props.text || props.label, props.shape);
+        }
         return text;
       },
       delete: function(text, lineNum) { return deleteNode(text, lineNum); },
