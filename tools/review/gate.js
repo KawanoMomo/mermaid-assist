@@ -192,6 +192,31 @@ try {
 check('REC', '棚卸しの主張の検証', recFail.length === 0,
   recFail.length ? recFail.join(' / ') : '3件の主張が今も正しい');
 
+// バックログ (G区分) の**前提**が今も成り立っていること。
+//
+// G区分は「やらないが捨てていない」項目で、それぞれに先送りしてよい理由が
+// 書いてある。理由が崩れたら先送りできないのに、**崩れたことを誰も
+// 監視していなかった**。
+//
+// 実例: G4 は「契約経由で add を呼ぶのは検査とテストだけ」を理由に
+// 先送りし、復活条件を「その経路を作る時点」と書いた。**その経路は6ラウンド後に
+// 私自身が r8 を書き換えたときに作っていた** — 気付いたのは偶然だった。
+//
+// 人が決める項目 (訳す範囲・案の選択) は自動化できない。**どちらなのかを
+// 項目ごとに宣言させる**ところまでを機械で強制する。
+let premiseFail = [];
+try {
+  const f = path.join(outDir, 'backlog-premises.json');
+  if (!fs.existsSync(f)) premiseFail.push('未実行');
+  else if (fs.statSync(f).mtimeMs < srcTime) premiseFail.push('ソースより古い');
+  else {
+    const items = JSON.parse(fs.readFileSync(f, 'utf8'));
+    items.forEach((x) => premiseFail.push(x.module + '.' + x.fn));
+  }
+} catch (e) { premiseFail.push('読めない: ' + e.message); }
+check('PREMISE', 'バックログの前提', premiseFail.length === 0,
+  premiseFail.length ? premiseFail.join(' / ') : '全項目の前提が成り立っている');
+
 const failed = results.filter(r => !r.ok);
 console.log('');
 results.forEach(r => console.log('  ' + (r.ok ? 'PASS' : 'FAIL') + '  ' +
