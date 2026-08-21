@@ -245,10 +245,35 @@ async function refresh(skipRender) {
   // place that calls it.
   applyMermaidConfig(parsed);
 
+  // 大きい図は mermaid の描画がメインスレッドを塞ぐ。
+  //
+  // 実測 (1366x768, flowchart): 200要素で 2.1秒、500要素で 3.8秒、600要素で 3.2秒。
+  // **その間 100ms 間隔のポーリングが1度もサンプルを取れない** = 画面が一切
+  // 更新されない。ステータスは前の値のまま、進行を示すものは何も出ていなかった。
+  // 押した操作が効いているのか固まったのかが区別できない。
+  //
+  // 描画を始める前に「描画中…」を出し、**ブラウザに実際に描かせてから**
+  // 重い処理へ入る。await だけではマイクロタスクしか回らず塗り替えは起きないので、
+  // requestAnimationFrame の後にもう一度キューへ戻す。
+  //
+  // 小さい図で毎打鍵ちらつくと逆に邪魔なので、実測で1秒を超え始める大きさ
+  // (300行) からにする。
+  var heavy = mmdText.length > 6000 || mmdText.split('\n').length > 300;
+  if (heavy && statusParseEl) {
+    statusParseEl.textContent = '描画中…';
+    statusParseEl.classList.remove('error');
+    if (previewSvgEl) previewSvgEl.setAttribute('aria-busy', 'true');
+    await new Promise(function(res) {
+      requestAnimationFrame(function() { setTimeout(res, 0); });
+    });
+    if (thisRender !== renderCounter) return;   // 追い越されたら捨てる
+  }
+
   // Render via mermaid.js
   var svgId = 'mermaid-svg-' + thisRender;
   try {
     var renderResult = await mermaid.render(svgId, mmdText);
+    if (previewSvgEl) previewSvgEl.removeAttribute('aria-busy');
     // Guard: if a newer render was started, discard this result
     if (thisRender !== renderCounter) return;
 
@@ -370,6 +395,7 @@ async function refresh(skipRender) {
     //
     // 図が既に出ているなら、そのままにしてステータスと小さな帯だけでエラーを伝える。
     previewStale = true;
+    if (previewSvgEl) previewSvgEl.removeAttribute('aria-busy');
     var hadDiagram = !!previewSvgEl.querySelector('svg');
     if (hadDiagram) {
       statusParseEl.textContent = 'Error';
