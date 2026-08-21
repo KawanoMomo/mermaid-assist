@@ -192,12 +192,38 @@ window.MA.modules.mindmap = (function() {
     return lines.join('\n');
   }
 
+  // その行が今持っている形状と、形状の前に置かれた語 (`root((…))` の `root`) を読む。
+  //
+  // `newShape` を渡さないと 'default' に落としていたので、**文字を変えるだけで
+  // 形状が失われていた**。`root((組み込み設計))` (円) を「新しい根」にすると
+  // `新しい根` (既定) になり、mindmap の根を指定する `root` も消えていた。
+  // エラーは出ないので、図の見た目が変わったことにしか気付けない。
+  function _shapeOfLine(trimmed) {
+    if (/^(?:\S+?)?\(\((.+?)\)\)$/.test(trimmed)) return 'circle';
+    if (/^(?:\S+?)?\)\)(.+?)\(\($/.test(trimmed)) return 'bang';
+    if (/^(?:\S+?)?\{\{(.+?)\}\}$/.test(trimmed)) return 'hexagon';
+    if (/^(?:\S+?)?\)(.+?)\($/.test(trimmed)) return 'cloud';
+    if (/^(?:\S+?)?\[(.+?)\]$/.test(trimmed)) return 'square';
+    if (/^(?:\S+?)?\((.+?)\)$/.test(trimmed)) return 'rounded';
+    return 'default';
+  }
+
+  // 形状記号の前に置かれた語を取り出す (`root((x))` → `root`)。
+  function _prefixOfLine(trimmed) {
+    var m = trimmed.match(/^([^\s(\[{)]+)(?=\(\(|\)\)|\{\{|\[|\(|\))/);
+    return m ? m[1] : '';
+  }
+
   function updateNodeText(text, lineNum, newText, newShape) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var indent = lines[idx].match(/^(\s*)/)[1];
-    lines[idx] = indent + shapeToText(newShape || 'default', newText);
+    var trimmed = lines[idx].trim();
+    // 形状を渡されなければ今の形状を保つ。
+    var shape = newShape || _shapeOfLine(trimmed);
+    var prefix = _prefixOfLine(trimmed);
+    lines[idx] = indent + prefix + shapeToText(shape, newText);
     return lines.join('\n');
   }
 
@@ -453,7 +479,22 @@ window.MA.modules.mindmap = (function() {
       delete: function(text, lineNum) { return deleteNode(text, lineNum); },
       update: function(text, lineNum, field, value, opts) {
         opts = opts || {};
-        if (field === 'text' || field === 'shape') return updateNodeText(text, lineNum, opts.text || value, opts.shape || value);
+        // text と shape を取り違えない。
+        //
+        // 以前は `opts.shape || value` と書いていたので、`field='text'` で
+        // 呼ぶと **新しい文字が形状として渡っていた**。shapeToText は知らない
+        // 形状名を既定として扱うので、文字を変えるだけで形状が失われる。
+        // `root((組み込み設計))` (円) が `root新しい根` になり、接頭辞が
+        // 文字に食い込んで別物になっていた。
+        if (field === 'text') {
+          // 形状は渡さない = 今の形状を保つ (updateNodeText が行から読む)
+          return updateNodeText(text, lineNum, opts.text !== undefined ? opts.text : value, opts.shape);
+        }
+        if (field === 'shape') {
+          // 形状だけ変える。文字は行から読み直す。
+          var cur = (parseMindmap(text).elements || []).filter(function(e) { return e.line === lineNum; })[0];
+          return updateNodeText(text, lineNum, opts.text !== undefined ? opts.text : (cur ? cur.text : ''), value);
+        }
         if (field === 'icon') return setIcon(text, lineNum, value);
         if (field === 'indent') return indentNode(text, lineNum);
         if (field === 'outdent') return outdentNode(text, lineNum);
