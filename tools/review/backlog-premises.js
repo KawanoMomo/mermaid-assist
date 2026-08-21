@@ -138,6 +138,64 @@ Object.keys(PREMISES).forEach((id) => {
   }
 });
 
+// ── H区分 (削除リスト) も見張る ─────────────────────────────────────────
+//
+// 「削除リスト — 黙って消さない」の項目には復活条件が書いてある。
+// **G区分と同じで、条件を誰も監視していない。**
+//
+// 2026-08-22 に F5 (ADR-027) / F6 + UI-022/023/032 / G3 (複写) を
+// 期限到来で凍結してここへ移した。凍結は「忘れる」ことではないので、
+// **条件が満たされたら気付ける状態**にしておく必要がある。
+//
+// 復活条件のほとんどは人の決定 (「採番の承認が出た時点」「案が選ばれた時点」)
+// なので自動判定できない。できるのは:
+//   1. 復活条件が**空でないこと**を確かめる (黙って消えていない)
+//   2. 機械で見られる条件は見る
+const hStart = md.indexOf('## H. 削除リスト');
+const hEnd = md.indexOf('## F.') > hStart ? md.indexOf('## F.') : md.length;
+const hSection = hStart >= 0 ? md.slice(hStart, hEnd) : '';
+const hRows = hSection.split('\n')
+  .filter(l => l.indexOf('|') === 0 && l.indexOf('---') < 0 && l.indexOf('削った項目') < 0)
+  .map(l => l.split('|').map(x => x.trim()))
+  .filter(c => c.length >= 4 && c[1]);
+
+// 機械で見られる復活条件だけ書く。無いものは「人の決定待ち」。
+const H_PROBES = {
+  'F5 ADR-027 の採番': () => {
+    const numbered = read('docs/adr/README.md').indexOf('ADR-027') >= 0;
+    return { revived: numbered, detail: numbered ? '**ADR-027 が採番された → 復活**' : 'ドラフトのまま' };
+  },
+  'F6 パネル構成の案の選択 + UI-022 / UI-023 / UI-032': () => {
+    // 案が選ばれると MOC に「採用」の記載が入る約束にする
+    const moc = read('docs/superpowers/specs/2026-08-22-panel-layout-moc.md');
+    const chosen = /採用[:：]\s*案[A-C]/.test(moc);
+    return { revived: chosen, detail: chosen ? '**案が選ばれた → 復活**' : '案は未選択 (既定は案D 現状維持)' };
+  },
+};
+
+const hLines = [];
+hRows.forEach((c) => {
+  const name = c[1];
+  const cond = c[3] || '';
+  if (!cond) {
+    findings.push({ module: name.slice(0, 30), fn: '復活条件の欠落',
+      what: '削除リストの項目に復活条件が書かれていない (黙って消えたのと同じ)' });
+    hLines.push(name.slice(0, 34) + ': **復活条件が無い**');
+    return;
+  }
+  const probe = H_PROBES[name];
+  if (!probe) { hLines.push(name.slice(0, 34) + ': [人の決定待ち] ' + cond.slice(0, 40)); return; }
+  let r;
+  try { r = probe(); } catch (e) { r = { revived: false, detail: '検査が例外: ' + e.message }; }
+  if (r.revived) {
+    findings.push({ module: name.slice(0, 30), fn: '復活条件が満たされた',
+      what: r.detail + ' — 削除リストから戻して計画に載せる' });
+  }
+  hLines.push(name.slice(0, 34) + ': ' + r.detail);
+});
+
 console.log('  (バックログ ' + ids.length + ' 項目の前提)');
 lines.forEach(l => console.log('    ' + l));
+console.log('  (削除リスト ' + hRows.length + ' 項目の復活条件)');
+hLines.forEach(l => console.log('    ' + l));
 report('backlog-premises', findings, { examined: 21, total: 21 });
