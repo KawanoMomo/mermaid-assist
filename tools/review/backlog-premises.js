@@ -166,9 +166,14 @@ const H_PROBES = {
     return { revived: numbered, detail: numbered ? '**ADR-027 が採番された → 復活**' : 'ドラフトのまま' };
   },
   'F6 パネル構成の案の選択 + UI-022 / UI-023 / UI-032': () => {
-    // 案が選ばれると MOC に「採用」の記載が入る約束にする
+    // 案が選ばれると MOC に「採用」の記載が入る約束にする。
+    //
+    // **行頭でなければならない。** 最初は本文のどこかにあれば良いことにしたが、
+    // MOC に書いた**再開手順の例文**(字下げした `採用: 案A`)に反応して
+    // 「案が選ばれた」と誤検出した (検査の誤り25件目)。
+    // 指示と決定は見た目が同じなので、**置かれる場所**で分ける。
     const moc = read('docs/superpowers/specs/2026-08-22-panel-layout-moc.md');
-    const chosen = /採用[:：]\s*案[A-C]/.test(moc);
+    const chosen = /^採用[:：]\s*案[A-C]/m.test(moc);
     return { revived: chosen, detail: chosen ? '**案が選ばれた → 復活**' : '案は未選択 (既定は案D 現状維持)' };
   },
 };
