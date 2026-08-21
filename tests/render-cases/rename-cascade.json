@@ -91,5 +91,26 @@
   "name": "flowchart-delete-subgraph/after",
   "text": "flowchart TD\n    Z[z]\n",
   "expectText": "z"
+ },
+ {
+  "name": "state-id-rename/before",
+  "text": "stateDiagram-v2\n    [*] --> Idle\n    Idle --> Running : start\n    Running --> Idle : stop\n    Running --> [*]\n"
+ },
+ {
+  "name": "state-id-rename/after",
+  "text": "stateDiagram-v2\n    [*] --> 待機\n    待機 --> Running : start\n    Running --> 待機 : stop\n    Running --> [*]\n",
+  "expectText": "startstop待機Running",
+  "expectAbsent": [
+   "Idle"
+  ]
+ },
+ {
+  "name": "state-id-rename-alias/before",
+  "text": "stateDiagram-v2\n    state \"実行中\" as Running\n    [*] --> Running\n    Running --> [*]\n"
+ },
+ {
+  "name": "state-id-rename-alias/after",
+  "text": "stateDiagram-v2\n    state \"実行中\" as Active\n    [*] --> Active\n    Active --> [*]\n",
+  "expectText": "実行中"
  }
 ]

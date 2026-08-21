@@ -20,11 +20,19 @@ const { report } = require('./lib');
 const ROOT = process.argv[2];
 const HTML = 'file:///' + path.resolve(ROOT, 'mermaid-assist.html').split(path.sep).join('/');
 
-const TYPES = ['gantt', 'flowchart', 'classDiagram', 'sequenceDiagram'];
+// 以前は4図種だけを直書きしていた (実測 4/21)。
+// 検査の中身は図種に依存していないので、一覧だけが範囲を狭めていた。
+// キーボード中心の使い方を想定している以上、17図種未検査は通せない。
+const TYPES = ['gantt', 'sequenceDiagram', 'flowchart', 'stateDiagram', 'classDiagram',
+  'erDiagram', 'requirementDiagram', 'block-beta', 'timeline', 'mindmap', 'gitGraph',
+  'pie', 'journey', 'quadrantChart', 'xychart-beta', 'sankey-beta', 'C4Context',
+  'packet-beta', 'architecture-beta', 'kanban', 'radar-beta'];
 const MAX_TAB = 30;   // これを超えて届かないなら実用上「到達できない」
 
 (async () => {
   const findings = [];
+  const examined = new Set();
+  const skipped = [];
   const b = await chromium.launch();
 
   for (const type of TYPES) {
@@ -50,11 +58,23 @@ const MAX_TAB = 30;   // これを超えて届かないなら実用上「到達�
     await p.waitForTimeout(700);
     const sel = await p.evaluate(() => window.MA.selection.getSelected());
     if (!sel.length) {
-      findings.push({ module: type, fn: 'K1 選択',
-        what: '\u77e2\u5370\u30ad\u30fc\u3067\u8981\u7d20\u3092\u9078\u3079\u306a\u3044 (\u30de\u30a6\u30b9\u304c\u5fc5\u8981)' });
+      // 重ね合わせを持たない図種がある (mermaid が DSL の id を SVG に出さず、
+      // 順序依存の照合は間違った要素を選ぶので入れないと決めている)。
+      // その図種で「選べない」と言うのは既知の制限の再掲にすぎない。
+      // 欠陥としては出さず、**検査から外れたこと**を記録する。
+      // (選べていた図種が選べなくなった場合は、網羅率の下限で FAIL になる)
+      const hasOverlay = await p.evaluate(() =>
+        document.querySelectorAll('#overlay-layer [data-element-id], #overlay-layer .overlay-bar').length);
+      if (hasOverlay) {
+        findings.push({ module: type, fn: 'K1 選択',
+          what: '重ね合わせはあるのに矢印キーで選べない (マウスが必要)' });
+      } else {
+        skipped.push(type + ': 重ね合わせが無い (既知の制限)');
+      }
       await p.close();
       continue;
     }
+    examined.add(type);
 
     // K2: Tab でラベル欄まで到達できるか
     let tabs = 0, reachedField = null;
@@ -100,5 +120,8 @@ const MAX_TAB = 30;   // これを超えて届かないなら実用上「到達�
   }
 
   await b.close();
-  report('r18-keyboard-only', findings, { examined: TYPES.length, total: 21 });
+  if (skipped.length) {
+    console.log('  (検査から外れた: ' + skipped.length + ' 図種) ' + skipped.slice(0, 6).join(' / '));
+  }
+  report('r18-keyboard-only', findings, { examined: examined.size, total: 21 });
 })();

@@ -32,11 +32,11 @@
   "total": 21
  },
  "r17-undo-redo": {
-  "examined": 2,
+  "examined": 19,
   "total": 21
  },
  "r18-keyboard-only": {
-  "examined": 4,
+  "examined": 10,
   "total": 21
  },
  "r19-coverage": {

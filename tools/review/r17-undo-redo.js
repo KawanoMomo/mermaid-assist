@@ -58,8 +58,21 @@ const CASES = [
   ] },
 ];
 
+
+// UI 駆動では図種ごとに手順が違うので2図種しか見られなかった (実測 2/21)。
+// 「戻して進めたら元に帰る」は図種に依らない性質なので、契約 (operations.*) で
+// 本文を作り、エディタ経由で流し込む走査を足して全21図種に広げる。
+//
+// 取り返しのつかない操作なので、19図種が未検査のままなのは通せない。
+const ALL_TYPES = ['gantt', 'sequenceDiagram', 'flowchart', 'stateDiagram', 'classDiagram',
+  'erDiagram', 'requirementDiagram', 'block-beta', 'timeline', 'mindmap', 'gitGraph',
+  'pie', 'journey', 'quadrantChart', 'xychart-beta', 'sankey-beta', 'C4Context',
+  'packet-beta', 'architecture-beta', 'kanban', 'radar-beta'];
+
 (async () => {
   const findings = [];
+  const examinedTypes = new Set();
+  const skippedTypes = [];
   const b = await chromium.launch();
 
   for (const c of CASES) {
@@ -115,6 +128,109 @@ const CASES = [
     await p.close();
   }
 
+  // ── 契約駆動の走査 (全21図種) ─────────────────────────────────────────
+  for (const type of ALL_TYPES) {
+    const p = await b.newPage({ viewport: { width: 1400, height: 900 } });
+    p.on('dialog', async d => { await d.accept(); });
+    await p.goto(HTML);
+    await p.waitForSelector('#preview-svg svg', { timeout: 20000 });
+    await p.waitForTimeout(500);
+    if (type !== 'gantt') { await p.locator('#diagram-type').selectOption(type); await p.waitForTimeout(1600); }
+    await p.waitForTimeout(300);
+
+    // 3手ぶんの本文を契約で作る。作れない図種はここで正直に外れる。
+    const plan = await p.evaluate(() => {
+      const mods = window.MA.modules;
+      const t0 = document.getElementById('editor').value;
+      let mod = null;
+      for (const k of Object.keys(mods)) {
+        if (mods[k] && typeof mods[k].detect === 'function' && mods[k].detect(t0)) { mod = mods[k]; break; }
+      }
+      if (!mod || !mod.operations) return { skip: 'モジュールが見つからない' };
+      let els = [];
+      try { els = mod.parse(t0).elements || []; } catch (e) { return { skip: 'parse 例外' }; }
+      if (!els.length) return { skip: '要素が無い' };
+      const FIELDS = ['label', 'text', 'title', 'name', 'value'];
+      const steps = [];
+      let cur = t0;
+      // 1手目・2手目: ラベルを2回変える
+      for (const v of ['ZZ手1', 'ZZ手2']) {
+        const el = (() => { try { return (mod.parse(cur).elements || [])[0]; } catch (e) { return null; } })();
+        if (!el) break;
+        let next = null;
+        for (const f of FIELDS) {
+          let c;
+          try { c = mod.operations.update(cur, el.line, f, v, { kind: el.kind, id: el.id, blockId: el.id, name: el.name }); }
+          catch (e) { continue; }
+          if (c && c !== cur) { next = c; break; }
+        }
+        if (!next) break;
+        steps.push(next); cur = next;
+      }
+      // 3手目: 消す
+      const el2 = (() => { try { return (mod.parse(cur).elements || [])[0]; } catch (e) { return null; } })();
+      if (el2 && typeof mod.operations.delete === 'function') {
+        let d = null;
+        try { d = mod.operations.delete(cur, el2.line, { kind: el2.kind, id: el2.id, blockId: el2.id, name: el2.name }); }
+        catch (e) { d = null; }
+        if (d && d !== cur) steps.push(d);
+      }
+      return { base: t0, steps: steps };
+    });
+
+    if (plan.skip || !plan.steps || plan.steps.length < 2) {
+      // 検査が成立しない図種は黙って通さず、外れたことを記録する
+      skippedTypes.push(type + ': ' + (plan.skip || ((plan.steps || []).length + '手しか作れない')));
+      await p.close();
+      continue;
+    }
+    examinedTypes.add(type);
+
+    // エディタ経由で1手ずつ流し込む (アプリの履歴に載せる)
+    const states = [plan.base];
+    for (const st of plan.steps) {
+      await p.evaluate((t) => {
+        const ed = document.getElementById('editor');
+        ed.value = t;
+        ed.dispatchEvent(new Event('input', { bubbles: true }));
+      }, st);
+      await p.waitForTimeout(700);
+      states.push(await p.locator('#editor').inputValue());
+    }
+
+    // 戻す
+    let broke = false;
+    for (let i = states.length - 1; i >= 1; i--) {
+      await p.evaluate(() => window.MA.history.undo());
+      await p.waitForTimeout(350);
+      const now = await p.locator('#editor').inputValue();
+      if (now !== states[i - 1]) {
+        findings.push({ module: type, fn: 'U1 戻す (契約駆動)',
+          what: (states.length - i) + '回戻したところが記録と違う (長さ ' + now.length + ' vs ' + states[i - 1].length + ')' });
+        broke = true;
+        break;
+      }
+    }
+    // 進める
+    if (!broke) {
+      for (let i = 1; i < states.length; i++) {
+        await p.evaluate(() => window.MA.history.redo());
+        await p.waitForTimeout(350);
+        const now = await p.locator('#editor').inputValue();
+        if (now !== states[i]) {
+          findings.push({ module: type, fn: 'U2 進める (契約駆動)',
+            what: i + '回進めたところが記録と違う (長さ ' + now.length + ' vs ' + states[i].length + ')' });
+          break;
+        }
+      }
+    }
+    await p.close();
+  }
+
   await b.close();
-  report('r17-undo-redo', findings, { examined: CASES.length, total: 21 });
+  // 検査から外れた図種を黙って捨てない
+  if (skippedTypes.length) {
+    console.log('  (検査が成立せず未検査: ' + skippedTypes.length + ' 図種) ' + skippedTypes.slice(0, 5).join(' / '));
+  }
+  report('r17-undo-redo', findings, { examined: examinedTypes.size, total: 21 });
 })();

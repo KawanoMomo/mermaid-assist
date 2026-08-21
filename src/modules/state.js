@@ -289,6 +289,68 @@ window.MA.modules.state = (function() {
     return text;
   }
 
+  // 状態の ID を変える。参照している行をすべて追従させる。
+  //
+  // パネルには ID 欄が出ているのに、イベントが繋がっておらず**打鍵しても何も
+  // 起きなかった** (R18 キーボード完結の走査を全21図種に広げて出た)。
+  // 欄があるのに効かないのは、無いより悪い。効いたと思って先へ進んでしまう。
+  //
+  // 参照の追従が要るのは削除と同じ理由。宣言だけ変えると遷移が古い ID を指した
+  // まま残り、mermaid は参照だけで状態を作るので**幽霊状態が生える**。
+  function updateStateId(text, oldId, newId) {
+    if (!oldId || newId == null) return text;
+    newId = String(newId).trim();
+    if (!newId || newId === oldId || newId === '[*]') return text;
+    // 既にある ID へは変えない (黙って2つの状態を1つに統合させない)
+    var existing = parseState(text).elements
+      .filter(function(e) { return e.kind === 'state'; })
+      .map(function(e) { return e.id; });
+    if (existing.indexOf(newId) >= 0) return text;
+
+    var lines = text.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      var indent = lines[i].match(/^(\s*)/)[1];
+      var trimmed = lines[i].trim();
+      if (!trimmed) continue;
+
+      var tr = trimmed.match(/^(\S+|\[\*\])\s+-->\s+(\S+|\[\*\])(\s*:\s*.*)?$/);
+      if (tr) {
+        var from = tr[1] === oldId ? newId : tr[1];
+        var to = tr[2] === oldId ? newId : tr[2];
+        if (from !== tr[1] || to !== tr[2]) {
+          lines[i] = indent + from + ' --> ' + to + (tr[3] || '');
+        }
+        continue;
+      }
+      var alias = trimmed.match(/^state\s+("[^"]*")\s+as\s+(\S+)\s*$/);
+      if (alias && alias[2] === oldId) {
+        lines[i] = indent + 'state ' + alias[1] + ' as ' + newId;
+        continue;
+      }
+      var special = trimmed.match(/^state\s+(\S+)\s+(<<(?:fork|join|choice)>>.*)$/);
+      if (special && special[1] === oldId) {
+        lines[i] = indent + 'state ' + newId + ' ' + special[2];
+        continue;
+      }
+      var comp = trimmed.match(/^state\s+(\S+)\s*\{\s*$/);
+      if (comp && comp[1] === oldId) {
+        lines[i] = indent + 'state ' + newId + ' {';
+        continue;
+      }
+      var decl = trimmed.match(/^state\s+(\S+)\s*$/);
+      if (decl && decl[1] === oldId) {
+        lines[i] = indent + 'state ' + newId;
+        continue;
+      }
+      var note = trimmed.match(/^note\s+(left of|right of|above|below)\s+(\S+)(\s*:.*)$/);
+      if (note && note[2] === oldId) {
+        lines[i] = indent + 'note ' + note[1] + ' ' + newId + note[3];
+        continue;
+      }
+    }
+    return lines.join('\n');
+  }
+
   function addTransition(text, from, to, event) {
     var newLine = '    ' + from + ' --> ' + to + (event ? ' : ' + event : '');
     var lines = text.split('\n');
@@ -504,6 +566,21 @@ window.MA.modules.state = (function() {
         ctx.setMmdText(updateStateLabel(ctx.getMmdText(), st.line, this.value, st.id));
         ctx.onUpdate();
       });
+      // ID 欄。以前は欄だけ出ていて何も繋がっておらず、打鍵しても無反応だった。
+      // 欄があるのに効かないのは無いより悪い (効いたと思って先へ進む)。
+      document.getElementById('sel-state-id').addEventListener('change', function() {
+        var next = updateStateId(ctx.getMmdText(), st.id, this.value);
+        if (next === ctx.getMmdText()) {
+          // 空・重複・[*] は拒否する。黙って戻すと「効かない欄」に見えるので告げる。
+          this.value = st.id;
+          if (ctx.showTransient) ctx.showTransient('その ID は使えません (空・重複・[*] は不可)');
+          return;
+        }
+        window.MA.history.pushHistory();
+        ctx.setMmdText(next);
+        window.MA.selection.setSelected([{ type: 'state', id: String(this.value).trim() }]);
+        ctx.onUpdate();
+      });
       P.bindActionBar('sel-state', {
         up: function() {
           var newText = moveStateUp(ctx.getMmdText(), st.line);
@@ -620,6 +697,7 @@ window.MA.modules.state = (function() {
         // ラベルを変えると遷移のラベルが書き換わっていた**。状態の名前は変わらず、
         // 矢印に覚えの無い文字が出る。エラーは出ないので気付きにくい。
         if (opts.kind === 'state') {
+          if (field === 'id' || field === 'name') return updateStateId(text, opts.id, value);
           if (field !== 'label') return text;
           return updateStateLabel(text, lineNum, value, opts.id);
         }
@@ -651,6 +729,7 @@ window.MA.modules.state = (function() {
     moveStateUp: moveStateUp,
     moveStateDown: moveStateDown,
     updateStateLabel: updateStateLabel,
+    updateStateId: updateStateId,
     addTransition: addTransition,
     deleteTransition: deleteTransition,
     updateTransition: updateTransition,
