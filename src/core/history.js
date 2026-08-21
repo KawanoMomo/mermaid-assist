@@ -99,6 +99,12 @@ window.MA.history = (function() {
 
   function canUndo() { return undoStack.length > 0; }
   function canRedo() { return future.length > 0; }
+  // あと何回戻せるか。合図が工具列ボタンの無効化しか無かったので、
+  // キーボードで Ctrl+Z を押している人には**どこまで戻ったかが分からない**。
+  // 実測: 90打鍵したあと押し続けると、自分が編集を始める前 (起動時のひな形)
+  // まで無言で戻る。
+  function undoDepth() { return undoStack.length; }
+  function redoDepth() { return future.length; }
 
   return {
     init: init,
@@ -110,5 +116,7 @@ window.MA.history = (function() {
     redo: redo,
     canUndo: canUndo,
     canRedo: canRedo,
+    undoDepth: undoDepth,
+    redoDepth: redoDepth,
   };
 })();

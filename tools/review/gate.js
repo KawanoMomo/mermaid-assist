@@ -14,7 +14,7 @@ const ROOT = process.argv[2] || process.cwd();
 
 // 下限。既存の件数を割り込んだら、テストが消されたということ。
 const MIN_UNIT = 999;
-const MIN_E2E = 418;
+const MIN_E2E = 421;
 const MIN_RENDER = 34;          // rename 26 + delete 8
 const MIN_RENDER_SUITES = 2;    // case ファイルの本数。1本消されても気付けるように
 

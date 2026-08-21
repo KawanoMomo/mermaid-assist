@@ -483,6 +483,13 @@ var previewStale = false;
 var transientMsg = '';
 var transientUntil = 0;
 var transientTimer = null;
+// 「あと何回戻せるか」を数字で出す。工具列のボタンは目に入らない位置にある。
+function showUndoDepth(head) {
+  var h = window.MA.history;
+  if (!h || typeof h.undoDepth !== 'function') return;
+  showTransient(head + ' — 戻せる: ' + h.undoDepth() + ' / やり直せる: ' + h.redoDepth(), 2500);
+}
+
 function showTransient(msg, ms) {
   transientMsg = msg;
   transientUntil = Date.now() + (ms || 4000);
@@ -2401,11 +2408,19 @@ function init() {
     // ブラウザによって Shift+z の e.key は 'Z' にも 'z' にもなるので、
     // 文字の大小ではなく **shiftKey で** 分ける。
     if (e.ctrlKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z') && !e.isComposing) {
-      e.preventDefault(); window.MA.history.undo();
+      e.preventDefault();
+      // 合図が工具列ボタンの無効化しか無く、キーボードで押している人には
+      // **どこまで戻ったかが分からなかった**。実測: 90打鍵したあと押し続けると
+      // 自分が編集を始める前 (起動時のひな形) まで無言で戻る。
+      var couldUndo = window.MA.history.canUndo();
+      window.MA.history.undo();
+      showUndoDepth(couldUndo ? '元に戻しました' : 'これ以上戻せません');
     } else if (e.ctrlKey && (e.key === 'y' || ((e.key === 'Z' || e.key === 'z') && e.shiftKey)) && !e.isComposing) {
       // Ctrl+Shift+Z は Figma / draw.io / VSCode で Redo 。Shift 併用だと e.key は 'Z' に
       // なるので、小文字比較だけだと分岐に入らない。
-      e.preventDefault(); window.MA.history.redo();
+      e.preventDefault(); var couldRedo = window.MA.history.canRedo();
+      window.MA.history.redo();
+      showUndoDepth(couldRedo ? 'やり直しました' : 'これ以上やり直せません');
     } else if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
       e.preventDefault();
       saveFileAs();
