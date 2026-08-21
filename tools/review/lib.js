@@ -38,8 +38,24 @@ function elementsOf(mod, text) {
   try {
     const p = mod.parse(text);
     return (p.elements || []).map((e, i) => ({
-      i, id: e.id, name: e.name, label: e.label, kind: e.kind, line: e.line,
-      key: e.id !== undefined && e.id !== null ? String(e.id) : String(e.name || e.label || i),
+      // 「その要素を人が見分ける文字」の置き場所は図種で違う。
+      // journey のタスクは text、pie は label、gitGraph の branch は name。
+      // 1つでも決め打ちすると、その図種が黙って検査から外れる。
+      i, id: e.id, name: e.name, label: e.label, text: e.text, kind: e.kind, line: e.line,
+      key: e.id !== undefined && e.id !== null && e.id !== '' ? String(e.id) : String(e.name || e.label || i),
+      // 同定できるか。
+      //
+      // gitGraph の無名コミットは id が空文字なので、2つあると同じ鍵になる。
+      // checkout / merge には id も name も無いので添字が鍵になるが、添字は
+      // 削除のたびに振り直されるので**identity としては使えない**。
+      // 鍵で残存を判定するレビュアーは、こういう要素を対象から外さないと
+      // 「押した要素が残る」という偽の指摘を出す (自動採番 id と同じ罠)。
+      identifiable: !!(
+        (e.id !== undefined && e.id !== null && e.id !== '' && !/^__/.test(String(e.id))) ||
+        (e.name !== undefined && e.name !== null && e.name !== '') ||
+        (e.label !== undefined && e.label !== null && e.label !== '') ||
+        (e.text !== undefined && e.text !== null && e.text !== '')
+      ),
     }));
   } catch (e) { return null; }
 }

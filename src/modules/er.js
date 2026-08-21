@@ -607,7 +607,14 @@ window.MA.modules.erDiagram = (function() {
         if (kind === 'relationship') return addRelationship(text, props.from, props.to, props.leftCard, props.rightCard, props.label, props.dashStyle);
         return text;
       },
-      delete: function(text, lineNum) { return window.MA.textUpdater.deleteLine(text, lineNum); },
+      // 契約経由の削除も id 認識の実装を使う。
+      // 以前は単なる deleteLine で、要素は「最初に現れた行」を持つため、
+      // 関係行だけが消えて宣言が残っていた。mermaid は参照だけで要素を作るので
+      // **一覧から消えても図には残る**。UI 経路だけ直して契約経路を忘れる形の再発。
+      delete: function(text, lineNum, opts) {
+        opts = opts || {};
+        return deleteEntity(text, lineNum, opts.id);
+      },
       update: function(text, lineNum, field, value, opts) {
         opts = opts || {};
         // エンティティ名の変更も統一入口から使えるようにする (class と同じ理由)。

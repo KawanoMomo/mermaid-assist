@@ -55,9 +55,22 @@ const TYPES = ['gantt', 'flowchart', 'sequenceDiagram', 'classDiagram', 'block-b
     } catch (e) {
       findings.push({ module: t, fn: 'R1 保存', what: '保存できない: ' + String(e.message).slice(0, 60) });
     }
-    if (saved !== null && saved !== inEditor) {
+    // 末尾改行1つは意図して足している。
+    //
+    // エディタの本文は末尾改行を持たない規約 (21図種のひな形と削除処理が揃えている)
+    // だが、Git 管理では末尾改行が無いと全ファイルの差分に
+    // `\ No newline at end of file` が付き、末尾に1行足すだけで2行差分になる。
+    // 書き出し側でだけ1つ付け、読み込み側で1つ落とす。
+    // ここで素の一致を求めると、正しい挙動を欠陥として報告してしまう。
+    // 書き出しは常に末尾へ改行を1つ足し、読み込みは常に1つ落とす (対称)。
+    // 条件付きにすると、利用者が打った末尾の改行が往復のたびに消える。
+    if (saved !== null && saved.replace(/\n$/, '') !== inEditor) {
       findings.push({ module: t, fn: 'R1 保存',
         what: '保存したファイルが本文と違う (本文 ' + inEditor.length + ' 文字 / 保存 ' + saved.length + ' 文字)' });
+    }
+    if (saved !== null && !/\n$/.test(saved)) {
+      findings.push({ module: t, fn: 'R1 保存',
+        what: '保存したファイルが改行で終わらない (Git の差分が毎回汚れる)' });
     }
     if (saved !== null && saved.indexOf('%% レビュー指摘') < 0) {
       findings.push({ module: t, fn: 'R1 保存', what: '保存でコメント行が落ちる' });

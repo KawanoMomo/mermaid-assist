@@ -120,9 +120,37 @@
     return null;
   }
 
+  // mermaid の上限に当たった場合。本文からは判定できないので例外の文言で見る。
+  //
+  // 上限は設定で引き上げてあるが、引き上げた値をさらに超えることはある。
+  // そのとき帯に出ていたのは「構文エラー」という定型文で、本文に構文誤りは
+  // 1つも無い。原因を告げないより悪く、**間違った方向に調査させる**。
+  function limitCause(err) {
+    var msg = err && err.message ? String(err.message) : String(err || '');
+    var edge = msg.match(/Edge limit exceeded\.\s*(\d+)\s*edges found, but the limit is (\d+)/i);
+    if (edge) {
+      return '線が多すぎて mermaid が図を描けません(' + edge[1] + ' 本 / 上限 ' +
+        edge[2] + ' 本)。図を分割してください。';
+    }
+    if (/Maximum text size in diagram exceeded/i.test(msg)) {
+      return '本文が長すぎて mermaid が図を描けません。図を分割してください。';
+    }
+    // 3000要素あたりで mermaid の配置計算が再帰の上限に当たる (v11.13 実測)。
+    // 設定では回避できない。「構文エラー」と出ると本文を疑うことになるので、
+    // 量の問題であることだけは伝える。
+    if (/Maximum call stack size exceeded/i.test(msg)) {
+      return '要素が多すぎて mermaid の配置計算が破綻しました' +
+        '(こちらの設定では回避できません)。図を分割してください。';
+    }
+    return '';
+  }
+
   function diagnose(text, err) {
     if (!text) return '';
     var head = text.split('\n')[0].trim();
+
+    var limit = limitCause(err);
+    if (limit) return limit;
 
     if (NO_QUOTE_ESCAPE.test(head)) {
       var q = firstOverQuotedLine(text);

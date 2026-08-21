@@ -467,6 +467,97 @@ function showTransient(msg, ms) {
 // ショートカット一覧の開閉。Escape でも閉じられる (閉じ方を探させない)。
 // 入力欄を抜けたときにフォーカスがどこにも残らないと、「いまどこにいるか」が
 // 画面から消える。矢印キーでの巡回は動くので実害は小さいが、戻し先を決めておく。
+// 選んでいる要素を契約経由で消す。
+//
+// 図種ごとの分岐は持たない。`operations.delete(text, lineNum, opts)` は
+// ADR-012 で全21図種が持つ約束になっているので、それだけを使う。
+//
+// 1件ずつ消すたびに現在の本文を parse し直すのは、削除で行番号がずれるため。
+// 最初に取った行番号を使い回すと、2件目以降は無関係の行を消す。
+// 逆に「毎回エディタから読み直す」形にすると、途中の結果を捨てて最後の1件しか
+// 残らない (過去に e2e でだけ捕まえた形)。本文は変数で明示的に持ち回す。
+function deleteSelectedElements(sel) {
+  if (!currentModule || !currentModule.operations ||
+      typeof currentModule.operations.delete !== 'function') {
+    showTransient('この図種は削除に対応していません', 3000);
+    return;
+  }
+  var text = mmdText;
+  var removed = 0;
+  sel.forEach(function(s) {
+    var p;
+    try { p = currentModule.parse(text); } catch (e) { return; }
+    var target = null;
+    var els = p.elements || [];
+    for (var i = 0; i < els.length; i++) { if (els[i].id === s.id) { target = els[i]; break; } }
+    if (!target) {
+      var rels = p.relations || [];
+      for (var j = 0; j < rels.length; j++) { if (rels[j].id === s.id) { target = rels[j]; break; } }
+    }
+    if (!target) return;
+    var next = currentModule.operations['delete'](text, target.line, {
+      kind: target.kind || s.type, id: target.id, blockId: target.id, name: target.name,
+    });
+    if (next && next !== text) { text = next; removed++; }
+  });
+  if (!removed) {
+    showTransient('選んでいる要素を消せませんでした', 3000);
+    return;
+  }
+  // 実際に消えた数を数える。
+  //
+  // 選んだ数をそのまま言うと過少申告になる。flowchart のノードを1つ消すと
+  // それに繋がるエッジも消えるので、一覧の ✕ は「✕3」と波及数を出している
+  // (tooltip に「1 ノード / 2 エッジが消えます」)。キーボードで消したときだけ
+  // 「1件削除」と出るのでは、同じ操作の結果が経路によって違う数に見える。
+  var msg = deletedMessage(removed);
+  try {
+    var b0 = currentModule.parse(mmdText);
+    var a0 = currentModule.parse(text);
+    var dEl = ((b0.elements || []).length) - ((a0.elements || []).length);
+    var dRel = ((b0.relations || []).length) - ((a0.relations || []).length);
+    if (dEl > 0 && dRel > 0) msg = dEl + '件と関連 ' + dRel + '件を削除 — Ctrl+Z で戻せます';
+    else if (dEl > 0) msg = deletedMessage(dEl);
+    else if (dRel > 0) msg = '関連 ' + dRel + '件を削除 — Ctrl+Z で戻せます';
+  } catch (e) { /* 数えられなければ選んだ数のまま言う */ }
+  window.MA.history.pushHistory();
+  mmdText = text;
+  suppressSync = true;
+  editorEl.value = mmdText;
+  suppressSync = false;
+  window.MA.selection.setSelected([]);
+  syncLineNumbers();
+  // 削除に確認を出さないのは Undo で戻せるからだが、戻せることを示して
+  // いるのはツールバーの Undo だけで、視線は図の上にある。消したその場で言う。
+  showTransient(msg);
+  scheduleRefresh();
+}
+
+// 追加フォームの先頭欄へ飛ぶ。
+//
+// 追加は一番よく使う操作なのに、欄へ入る手段がマウスのクリックしか無かった。
+// Enter での確定は既にできるので、**入口の1クリックだけ**がキーボード完結を
+// 止めていた。1日100回足すなら100往復。
+//
+// 欄の id は図種ごとに違う (`fc-add-node-id` / `prop-add-label` / `kb-add-col-name`)
+// ので名前の表は持たない。「add を含む id を持つ、最初の入力欄」で選ぶ。
+function focusAddForm() {
+  var el = document.querySelector(
+    '#props-content input[id*="add"], #props-content select[id*="add"], #props-content textarea[id*="add"]');
+  if (!el) {
+    showTransient('この図種には追加フォームがありません', 2500);
+    return;
+  }
+  el.focus();
+  if (el.select) el.select();
+}
+
+// エディタへ戻る。
+// プレビューへ戻す focusPreview の逆向きが無く、本文を直すたびにマウスへ持ち替えていた。
+function focusEditor() {
+  if (editorEl && editorEl.focus) editorEl.focus();
+}
+
 function focusPreview() {
   var pane = document.getElementById('preview-pane') || previewSvgEl;
   if (pane && pane.focus) { pane.setAttribute('tabindex', '-1'); pane.focus(); }
@@ -500,7 +591,12 @@ function showParseErrorBanner(err) {
     host.appendChild(el);
   }
   var cause = window.MA.diagnose ? window.MA.diagnose.diagnose(mmdText, err) : '';
-  el.textContent = cause || ('構文エラー — 表示しているのは直前に描けた図です');
+  // 原因を名指しできないときに「構文エラー」と断定しない。
+  //
+  // 実際、500本のエッジ上限に当たったときもこの文言が出ていた。本文に構文誤りは
+  // 1つも無いのに構文を疑わせるので、何も言わないより高くつく。
+  // 分かっているのは「描けなかった」ことだけなので、そこまでを言う。
+  el.textContent = cause || ('図を描けませんでした — 表示しているのは直前に描けた図です');
   el.hidden = false;
 }
 function hideParseErrorBanner() {
@@ -773,7 +869,16 @@ function applyMermaidConfig(parsedData) {
   // maxTextSize の既定は 50,000 文字で、超えると mermaid は**例外を投げずに**
   // 「Maximum text size in diagram exceeded」とだけ書かれた小さな図を返す。
   // 2900タスク (15万文字) のガントで実測したところ、この値を上げれば本物が描ける。
-  var cfg = { startOnLoad: false, theme: 'dark', securityLevel: 'loose', maxTextSize: 5000000 };
+  //
+  // maxEdges の既定は 500 本。ここを上げていなかったので、文字数上限を
+  // 5,000,000 に引き上げてあるにもかかわらず **800要素 (20,483文字) で描けなく
+  // なっていた**。しかも例外の文言は帯の定型文に落ちて「構文エラー」と出るので、
+  // 存在しない構文誤りを探すことになる。500本は中規模の構成図で普通に届く数。
+  var cfg = {
+    startOnLoad: false, theme: 'dark', securityLevel: 'loose',
+    maxTextSize: 5000000,
+    maxEdges: 100000,
+  };
   if (currentModule && currentModule.type === 'gantt') {
     var fitW = previewContentWidth();
     var days = ganttSpanDays(parsedData);
@@ -914,8 +1019,30 @@ function openFile() {
 // 一度「名前を付けて保存」したファイルへの参照。以後はここへ上書きする。
 var saveHandle = null;
 
+// ファイルに書き出す本文。
+//
+// エディタの本文は末尾改行を持たない (21図種のひな形も、削除処理も、その規約で
+// 揃っている)。ただしファイルとして書き出す側では末尾改行を1つ付ける。
+//
+// 数十〜数百枚を Git 管理する運用では、末尾改行が無いと全ファイルの差分に
+// `\ No newline at end of file` が付き、**末尾に1行足しただけで2行の差分**に
+// 見える (既存最終行の削除 + 2行の追加)。レビューで「何を変えたか」が読みにくい。
+// POSIX のテキストファイル規約でもあり、Prettier / gofmt も同じことをしている。
+//
+// 開き直したときは元の本文に戻るよう、読み込み側で末尾の改行を落とす。
+// 付けるのは常に1つ、外すのも常に1つ。条件を付けると往復が壊れる。
+//
+//   本文 "A"    → ファイル "A\n"   → 開き直して "A"     ✓
+//   本文 "A\n"  → ファイル "A\n\n" → 開き直して "A\n"   ✓
+//
+// 「既に改行で終わっていれば足さない」にすると、2つ目のケースで利用者が
+// 打った末尾の改行が往復のたびに消える (実際そうなっていた)。
+function fileBody() {
+  return mmdText + '\n';
+}
+
 function downloadAsFile() {
-  var blob = new Blob([mmdText], { type: 'text/plain' });
+  var blob = new Blob([fileBody()], { type: 'text/plain' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = currentBaseName() + '.mmd';
@@ -943,7 +1070,7 @@ function saveFile() {
 async function overwriteSaved() {
   try {
     var w = await saveHandle.createWritable();
-    await w.write(mmdText);
+    await w.write(fileBody());
     await w.close();
     markSaved();
     showTransient(savedMessage(new Date()) + ' → ' + (saveHandle.name || ''));
@@ -1208,7 +1335,9 @@ function init() {
       pendingAutoFit = true;
       setGanttViewMode('overview');
       setZoom(1.0);
-      mmdText = ev.target.result;
+      // 書き出し側で付けた末尾改行を1つだけ落とす (fileBody と対称)。
+      // 落とさないと、保存 → 開き直しのたびに末尾の空行が1つ増えていく。
+      mmdText = String(ev.target.result || '').replace(/\n$/, '');
       loadedFileName = openedName;
       // ファイルを開いたときも文書は入れ替わる。
       if (currentModule && currentModule.resetTransientState) currentModule.resetTransientState();
@@ -2065,22 +2194,21 @@ function init() {
       e.preventDefault(); openFile();
     } else if (e.key === 'Delete' && !inInput && !inEditor) {
       if (sel.length === 0) return;
-      if (!parsed || !parsed.tasks) { showTransient('Delete キーの削除は未対応 — 一覧の ✕ を使ってください', 3000); return; }
-      window.MA.history.pushHistory();
-      var lines = sel.map(function(s) {
-        var t = parsed.tasks.find(function(tk) { return tk.id === s.id; });
-        return t ? t.line : -1;
-      }).filter(function(l) { return l > 0; }).sort(function(a, b) { return b - a; });
-      lines.forEach(function(l) { mmdText = deleteTask(mmdText, l); });
-      suppressSync = true;
-      editorEl.value = mmdText;
-      suppressSync = false;
-      window.MA.selection.setSelected([]);
-      syncLineNumbers();
-      // 削除に確認を出さないのは Undo で戻せるからだが、戻せることを示して
-      // いるのはツールバーの Undo だけで、視線は図の上にある。消したその場で言う。
-      showTransient(deletedMessage(lines.length));
-      scheduleRefresh();
+      // 契約 (ADR-012 operations.delete) で消す。
+      //
+      // 以前は `parsed.tasks` を見て gantt だけを処理し、他の20図種には
+      // 「Delete キーの削除は未対応 — 一覧の ✕ を使ってください」と返していた。
+      // 契約は既に全21図種で揃っているのに、この経路だけが gantt 専用の
+      // 旧実装のまま残っていた。**削除1回ごとにマウス往復が1回**発生する。
+      // キーボード中心で1日100回消すなら100往復。
+      deleteSelectedElements(sel);
+    } else if ((e.key === 'a' || e.key === 'A') && !e.ctrlKey && !e.metaKey && !e.altKey && !inInput && !inEditor) {
+      // 修飾なし1打鍵。Delete / ? と同じ条件 (入力欄とエディタの外にいるとき) で受ける。
+      e.preventDefault();
+      focusAddForm();
+    } else if ((e.key === 'e' || e.key === 'E') && !e.ctrlKey && !e.metaKey && !e.altKey && !inInput && !inEditor) {
+      e.preventDefault();
+      focusEditor();
     } else if (e.key === '?' && !inInput && !inEditor) {
       // ショートカットが12個あるのに、それを知る手段が画面に無かった。
       // キーボード中心の人にとって一番価値のある部分が伝わっていない。

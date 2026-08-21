@@ -34,7 +34,14 @@ Object.keys(M).forEach((key) => {
   // 自動採番の id (`__bar_0`) は**位置由来**なので、入れ替えると `__line_0` になる。
   // そのまま比べると、正しく入れ替わっても「集合が変わった」と見える。
   // 末尾の連番を落としてから多重集合として比べる。
-  const idKey = (x) => String(x.key).replace(/_\d+$/, '');
+  //
+  // 同定できない要素 (gitGraph の無名コミット、checkout / merge) は鍵が添字になる。
+  // 添字は並べ替えで必ず変わるので、そのまま比べると正しい移動も「集合が変わった」
+  // と出る。これらは種別で数えるに留める — 「commit が3つ、checkout が1つ」が
+  // 保たれていることは言えるし、それ以上は本文から言えない。
+  const idKey = (x) => (x.identifiable
+    ? String(x.key).replace(/_\d+$/, '')
+    : '#' + String(x.kind || '?'));
   const keys0 = before.map(idKey).sort().join(',');
 
   // 行が違う要素を選ぶ。
