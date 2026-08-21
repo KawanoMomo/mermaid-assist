@@ -151,6 +151,43 @@ window.MA.modules.erDiagram = (function() {
   // disappeared instead.
   //
   // `entityId` is optional so older single-argument callers keep working.
+  // エンティティ名の変更。class と同じ理由 (R18 で発覚)。
+  //
+  // 選択時のパネルに入力欄が無く、名前を変えるにはテキストを直接触るしか
+  // なかった。関係行の端点も追従させないと幽霊エンティティが生える。
+  function updateEntityName(text, lineNum, oldId, newId) {
+    if (!newId || !String(newId).trim() || newId === oldId) return text;
+    var existing = parseER(text).elements.map(function(e) { return e.id; });
+    if (existing.indexOf(newId) >= 0) return text;
+
+    var lines = text.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      var indent = lines[i].match(/^(\s*)/)[1];
+      var trimmed = lines[i].trim();
+      if (!trimmed) continue;
+
+      // `NAME {` の宣言
+      var decl = trimmed.match(/^(\S+)\s*\{\s*$/);
+      if (decl && decl[1] === oldId) {
+        lines[i] = indent + newId + ' {';
+        continue;
+      }
+      // 関係行 `A ||--o{ B : label`
+      if (REL_RE.test(trimmed)) {
+        var rel = trimmed.match(/^(\S+)(\s+\S+\s+)(\S+)(\s*:\s*.*)?$/);
+        if (rel) {
+          var left = rel[1] === oldId ? newId : rel[1];
+          var right = rel[3] === oldId ? newId : rel[3];
+          if (left !== rel[1] || right !== rel[3]) {
+            lines[i] = indent + left + rel[2] + right + (rel[4] || '');
+          }
+        }
+        continue;
+      }
+    }
+    return lines.join('\n');
+  }
+
   function deleteEntity(text, lineNum, entityId) {
     if (!entityId) {
       var lines0 = text.split('\n');
@@ -392,7 +429,8 @@ window.MA.modules.erDiagram = (function() {
       if (!attrsList) attrsList = P.emptyListHtml('（属性なし）');
       propsEl.innerHTML =
         P.panelHeaderHtml(ent.label) +
-        '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">エンティティ: ' + escHtml(ent.id) + '</div>' +
+        // 名前を変えられるようにする (R18 で発覚した取り残し)。
+        P.fieldHtml('エンティティ名', 'sel-ent-name', ent.id) +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">属性一覧</label>' +
           '<div>' + attrsList + '</div>' +
@@ -406,6 +444,24 @@ window.MA.modules.erDiagram = (function() {
           move: false, delete: true,
           labels: { delete: 'エンティティ削除' },
         });
+
+      var entNameEl = document.getElementById('sel-ent-name');
+      if (entNameEl) {
+        entNameEl.addEventListener('change', function() {
+          var next = entNameEl.value.trim();
+          if (!next || next === ent.id) return;
+          var updated = updateEntityName(ctx.getMmdText(), ent.line, ent.id, next);
+          if (updated === ctx.getMmdText()) {
+            if (ctx.showTransient) ctx.showTransient('その名前は既に使われています — 別の名前にしてください', 3000);
+            entNameEl.value = ent.id;
+            return;
+          }
+          window.MA.history.pushHistory();
+          ctx.setMmdText(updated);
+          window.MA.selection.setSelected([{ type: 'entity', id: next }]);
+          ctx.onUpdate();
+        });
+      }
 
       P.bindConnectButton('sel-ent-connect', 'entity', ent.id,
         function(fromId, toId) { return addRelationship(ctx.getMmdText(), fromId, toId); });
@@ -545,6 +601,7 @@ window.MA.modules.erDiagram = (function() {
     parseER: parseER,
     addEntity: addEntity,
     deleteEntity: deleteEntity,
+    updateEntityName: updateEntityName,
     moveEntityUp: moveEntityUp,
     moveEntityDown: moveEntityDown,
     addAttribute: addAttribute,

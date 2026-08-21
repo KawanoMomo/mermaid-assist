@@ -277,6 +277,54 @@ window.MA.modules.classDiagram = (function() {
     return m[1] === classId || m[3] === classId;
   }
 
+  // クラス名の変更。
+  //
+  // 選択時のパネルはクラス名を読み取り専用の文字として出すだけで、入力欄が無かった。
+  // 他の図種 (flowchart / block / sequence / c4 / state / requirement) は ID 欄を持ち、
+  // 変更すると参照側も追従する。class だけ取り残されていた (R18 で発覚)。
+  //
+  // 参照の追従が要るのは削除と同じ理由。宣言だけ変えると関係行が古い名前を
+  // 指したまま残り、mermaid は参照だけで要素を作るので幽霊クラスが生える。
+  //
+  // 既にある名前への変更は拒否する。mermaid は2つを黙って統合するので、
+  // 利用者からは「クラスが消えた」としか見えない。
+  function updateClassName(text, lineNum, oldId, newId) {
+    if (!newId || !String(newId).trim() || newId === oldId) return text;
+    var existing = parseClass(text).elements.map(function(e) { return e.id; });
+    if (existing.indexOf(newId) >= 0) return text;
+
+    var lines = text.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      var indent = lines[i].match(/^(\s*)/)[1];
+      var trimmed = lines[i].trim();
+      if (!trimmed) continue;
+
+      // `class X {` / `class X`
+      var decl = trimmed.match(/^class\s+(\S+)(\s*\{\s*)?$/);
+      if (decl && decl[1] === oldId) {
+        lines[i] = indent + 'class ' + newId + (decl[2] ? ' {' : '');
+        continue;
+      }
+      // `A <|-- B` などの関係行
+      var rel = trimmed.match(/^(\S+)(\s+[<>|*o.\-]{2,}\s+)(\S+?)(\s*:\s*.*)?$/);
+      if (rel) {
+        var left = rel[1] === oldId ? newId : rel[1];
+        var right = rel[3] === oldId ? newId : rel[3];
+        if (left !== rel[1] || right !== rel[3]) {
+          lines[i] = indent + left + rel[2] + right + (rel[4] || '');
+        }
+        continue;
+      }
+      // `X : +member` 形式
+      var mem = trimmed.match(/^(\S+)(\s+:\s+.*)$/);
+      if (mem && mem[1] === oldId) {
+        lines[i] = indent + newId + mem[2];
+        continue;
+      }
+    }
+    return lines.join('\n');
+  }
+
   function addMember(text, classId, visibility, name, type, isMethod) {
     visibility = visibility || '+';
     var memberPart = visibility + name + (isMethod ? '()' : '') + (type ? ' ' + type : '');
@@ -522,7 +570,9 @@ window.MA.modules.classDiagram = (function() {
       if (!membersList) membersList = props.emptyListHtml('（メンバなし）');
       propsEl.innerHTML =
         props.panelHeaderHtml(cls.label) +
-        '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">クラス: ' + escHtml(cls.id) + '</div>' +
+        // 名前を変えられるようにする。以前は読み取り専用の文字だったので、
+        // リネームにはテキストを直接触るしかなかった (R18)。
+        props.fieldHtml('クラス名', 'sel-class-name', cls.id) +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">メンバ一覧</label>' +
           '<div>' + membersList + '</div>' +
@@ -538,6 +588,25 @@ window.MA.modules.classDiagram = (function() {
         });
 
       // 図の上でクリック2回で関係を引く
+      var clsNameEl = document.getElementById('sel-class-name');
+      if (clsNameEl) {
+        clsNameEl.addEventListener('change', function() {
+          var next = clsNameEl.value.trim();
+          if (!next || next === cls.id) return;
+          var updated = updateClassName(ctx.getMmdText(), cls.line, cls.id, next);
+          if (updated === ctx.getMmdText()) {
+            // 拒否されたときに黙っていると「押しても何も起きない」になる。
+            if (ctx.showTransient) ctx.showTransient('その名前は既に使われています — 別の名前にしてください', 3000);
+            clsNameEl.value = cls.id;
+            return;
+          }
+          window.MA.history.pushHistory();
+          ctx.setMmdText(updated);
+          window.MA.selection.setSelected([{ type: 'class', id: next }]);
+          ctx.onUpdate();
+        });
+      }
+
       props.bindConnectButton('sel-class-connect', 'class', cls.id,
         function(fromId, toId) { return addRelation(ctx.getMmdText(), fromId, toId); });
 
@@ -672,6 +741,7 @@ window.MA.modules.classDiagram = (function() {
     parseClass: parseClass,
     addClass: addClass,
     deleteClass: deleteClass,
+    updateClassName: updateClassName,
     moveClassUp: moveClassUp,
     moveClassDown: moveClassDown,
     addMember: addMember,
