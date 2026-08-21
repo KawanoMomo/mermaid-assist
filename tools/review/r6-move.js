@@ -10,87 +10,61 @@ const { loadModules, elementsOf, report } = require('./lib');
 const ROOT = process.argv[2];
 const M = loadModules(ROOT);
 
-const UP = ['moveNodeUp', 'moveTaskUp', 'moveParticipantUp', 'moveClassUp', 'moveEntityUp',
-  'moveStateUp', 'moveSectionUp', 'moveUp'];
-const DOWN = ['moveNodeDown', 'moveTaskDown', 'moveParticipantDown', 'moveClassDown',
-  'moveEntityDown', 'moveStateDown', 'moveSectionDown', 'moveDown'];
+// 全モジュールが `operations.moveUp / moveDown` を持つので、関数名の表を手で持たない。
+//
+// 以前は moveNodeUp / moveTaskUp / … という表を持っており、その名前を持たない
+// **15モジュールを黙って飛ばしていた** (r19 で発覚)。検査していたのは6だけ。
+// gantt が18観点から素通りしていたのと同じ形で、規模はこちらの方が大きい。
 
 const findings = [];
 
 Object.keys(M).forEach((key) => {
   const mod = M[key];
   if (!mod || !mod.template || !mod.parse) return;
+  if (!mod.operations || typeof mod.operations.moveUp !== 'function') {
+    findings.push({ module: key, fn: 'operations.moveUp', what: '統一入口が無い' });
+    return;
+  }
   const t0 = mod.template();
   const before = elementsOf(mod, t0);
   if (!before || before.length < 2) return;
 
-  const up = UP.find(f => typeof mod[f] === 'function');
-  const down = DOWN.find(f => typeof mod[f] === 'function');
-  if (!up || !down) return;
-
-  const keys0 = before.map(x => x.key).join(',');
+  // 並べ替えをまたぐ同一性の鍵。
+  //
+  // 自動採番の id (`__bar_0`) は**位置由来**なので、入れ替えると `__line_0` になる。
+  // そのまま比べると、正しく入れ替わっても「集合が変わった」と見える。
+  // 末尾の連番を落としてから多重集合として比べる。
+  const idKey = (x) => String(x.key).replace(/_\d+$/, '');
+  const keys0 = before.map(idKey).sort().join(',');
 
   // 行が違う要素を選ぶ。
-  // flowchart は `A[Start] --> B{Decision}` のように **要素が行を共有する**ので、
-  // 「2番目の要素」は先頭と同じ行を指す。それを上へ動かそうとしても先頭行を
-  // 上へ動かすことになり、何も起きない = 検査が素通りする。
-  // 実際それで move を壊しても検出できていなかった。
+  // flowchart は `A[Start] --> B{Decision}` のように **要素が行を共有**するので、
+  // 「2番目の要素」は先頭と同じ行を指す。それを上へ動かしても何も起きない。
   const firstLine = before[0].line;
   const second = before.filter(x => x.line !== firstLine)[0];
   if (!second) return;
-  let moved = null;
-  try { moved = mod[up](t0, second.line); } catch (e) {
-    findings.push({ module: key, fn: up, what: '例外: ' + String(e.message).slice(0, 50) });
-  }
-  if (moved && moved !== t0) {
-    const mid = elementsOf(mod, moved);
-    if (!mid) {
-      findings.push({ module: key, fn: up, what: '上へ動かすと parse できない' });
-    } else {
-      if (mid.map(x => x.key).sort().join(',') !== before.map(x => x.key).sort().join(',')) {
-        findings.push({ module: key, fn: up,
-          what: '上へ動かすと要素集合が変わる: ' + keys0 + ' -> ' + mid.map(x => x.key).join(',') });
-      }
-      // 動いた要素を元の位置へ戻す
-      const movedEl = mid.filter(x => x.key === second.key)[0];
-      if (movedEl) {
-        let back = null;
-        try { back = mod[down](moved, movedEl.line); } catch (e) { back = null; }
-        if (back !== null && back !== t0) {
-          findings.push({ module: key, fn: up + '/' + down,
-            what: '上→下 で元のテキストに戻らない' });
-        }
-      }
-    }
-  }
 
-  // 先頭要素を上へ (端) — 何も起きないのが正しい。壊れたら指摘
-  try {
-    const atTop = mod[up](t0, before[0].line);
-    if (atTop && atTop !== t0) {
-      const e = elementsOf(mod, atTop);
-      if (!e) findings.push({ module: key, fn: up, what: '先頭を上へ動かすと parse できない' });
-      else if (e.map(x => x.key).sort().join(',') !== before.map(x => x.key).sort().join(',')) {
-        findings.push({ module: key, fn: up, what: '先頭を上へ動かすと要素が変わる' });
-      }
+  const check = (label, out) => {
+    if (!out || out === t0) return;                 // 動かないのは設計上ありうる
+    const after = elementsOf(mod, out);
+    if (!after) {
+      findings.push({ module: key, fn: label, what: '動かすと parse できない' });
+      return;
     }
-  } catch (e) {
-    findings.push({ module: key, fn: up, what: '先頭を上へ動かすと例外: ' + String(e.message).slice(0, 50) });
-  }
+    if (after.map(idKey).sort().join(',') !== keys0) {
+      findings.push({ module: key, fn: label,
+        what: '動かすと要素集合が変わる: ' + keys0 + ' -> ' + after.map(idKey).join(',') });
+    }
+  };
 
-  // 末尾要素を下へ (端)
-  try {
-    const atEnd = mod[down](t0, before[before.length - 1].line);
-    if (atEnd && atEnd !== t0) {
-      const e = elementsOf(mod, atEnd);
-      if (!e) findings.push({ module: key, fn: down, what: '末尾を下へ動かすと parse できない' });
-      else if (e.map(x => x.key).sort().join(',') !== before.map(x => x.key).sort().join(',')) {
-        findings.push({ module: key, fn: down, what: '末尾を下へ動かすと要素が変わる' });
-      }
-    }
-  } catch (e) {
-    findings.push({ module: key, fn: down, what: '末尾を下へ動かすと例外: ' + String(e.message).slice(0, 50) });
-  }
+  try { check('U1 上へ', mod.operations.moveUp(t0, second.line)); }
+  catch (e) { findings.push({ module: key, fn: 'U1 上へ', what: '例外: ' + String(e.message).slice(0, 50) }); }
+
+  try { check('U2 先頭を上へ', mod.operations.moveUp(t0, before[0].line)); }
+  catch (e) { findings.push({ module: key, fn: 'U2 先頭を上へ', what: '例外: ' + String(e.message).slice(0, 50) }); }
+
+  try { check('U3 末尾を下へ', mod.operations.moveDown(t0, before[before.length - 1].line)); }
+  catch (e) { findings.push({ module: key, fn: 'U3 末尾を下へ', what: '例外: ' + String(e.message).slice(0, 50) }); }
 });
 
 report('r6-move', findings);
