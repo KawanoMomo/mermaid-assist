@@ -41,9 +41,129 @@
     return null;
   }
 
+  // gitGraph のブランチ名・タグ名は半角しか通らない (v11.13 実測)。
+  // 日本語のブランチ名は Lexer error になり、引用符で囲んでも変わらない。
+  function firstBadGitName(text) {
+    var lines = text.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      var m = lines[i].trim().match(/^(?:branch|checkout|merge)\s+(\S+)/);
+      if (m && /[^\x00-\x7F]/.test(m[1])) return m[1];
+    }
+    return null;
+  }
+
+  // requirement 図の要求名・要素名は識別子なので半角しか通らない (v11.13 実測)。
+  // 表示名を日本語にしたい場合は本文の text: に書く。
+  function firstBadReqName(text) {
+    var lines = text.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      var m = lines[i].trim().match(/^(?:requirement|functionalRequirement|interfaceRequirement|performanceRequirement|physicalRequirement|designConstraint|element)\s+([^\s{]+)/);
+      if (m && /[^\x00-\x7F]/.test(m[1])) return m[1];
+    }
+    return null;
+  }
+
+  // ラベルの中の " をエスケープできない図種がある。
+  //
+  // er / state / class は &quot; がそのまま " として描かれるので逃がせる。
+  // pie / quadrant / packet / radar / requirement は &quot; が文字どおり
+  // 「&quot;」と描かれてしまうので、逃がしても直らない (v11.13 実測)。
+  // つまりこちらでは直せない。せめて原因を告げる。
+  var NO_QUOTE_ESCAPE = /^(pie|quadrantChart|packet-beta|packet|radar-beta|requirementDiagram)/;
+
+  // 「引用符の数」で見てはいけない。1行に複数のラベルを置く図種があり
+  // (radar の `axis a["A"], b["B"]`)、素直に数えると正しい行を誤検知する。
+  //
+  // 見るのは「閉じ引用符の直後に文字が続いているか」。
+  //   "引"用"付き"  → `"引"` の直後が `用` → ラベルの途中で引用符が閉じている
+  //   a["A"], b["B"] → `"A"` の直後が `]` → 正しい区切り
+  var QUOTED = /"[^"]*"/g;
+  var SEPARATOR_AFTER = /^[\s,:\]\)\}]|^$/;
+
+  function firstOverQuotedLine(text) {
+    var lines = text.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      var t = lines[i].trim();
+      QUOTED.lastIndex = 0;
+      var m;
+      while ((m = QUOTED.exec(t))) {
+        var after = t.slice(m.index + m[0].length);
+        if (!SEPARATOR_AFTER.test(after)) return t.slice(0, 40);
+      }
+    }
+    return null;
+  }
+
+  // kanban の列名は行そのものが名前になる。括弧・角括弧・波括弧はカードの
+  // 記法 (`id[本文]` / `@{...}`) と衝突するので、名前に入れると落ちるか消える。
+  function firstBadKanbanColumn(text) {
+    var lines = text.split('\n');
+    for (var i = 1; i < lines.length; i++) {
+      var raw = lines[i];
+      if (!raw.trim()) continue;
+      var indent = raw.match(/^(\s*)/)[1].length;
+      // 列は最初の段。カード行はそれより深い。
+      if (indent === 0 || indent > 4) continue;
+      if (/[\[\](){}]/.test(raw.trim())) return raw.trim().slice(0, 40);
+    }
+    return null;
+  }
+
+  // journey / timeline の section 名は行末までが名前で、引用符も効かない。
+  // : や ; は文法上の区切りなので名前に入れられない。
+  function firstBadSectionName(text) {
+    var lines = text.split('\n');
+    for (var i = 0; i < lines.length; i++) {
+      var m = lines[i].trim().match(/^section\s+(.+)$/);
+      if (m && /[:;#]/.test(m[1])) return m[1].slice(0, 40);
+    }
+    return null;
+  }
+
   function diagnose(text, err) {
     if (!text) return '';
     var head = text.split('\n')[0].trim();
+
+    if (NO_QUOTE_ESCAPE.test(head)) {
+      var q = firstOverQuotedLine(text);
+      if (q !== null) {
+        return 'この図種のラベルには " を含められません' +
+          '(mermaid 側の制限。&quot; と書いてもそのまま文字として出ます)。' +
+          '「' + q + '」が該当します。';
+      }
+    }
+
+    if (/^kanban/.test(head)) {
+      var kc = firstBadKanbanColumn(text);
+      if (kc !== null) {
+        return 'kanban の列名には ( ) [ ] { } が使えません' +
+          '(mermaid 側の制限。カードの記法と衝突します)。「' + kc + '」が該当します。';
+      }
+    }
+
+    if (/^(journey|timeline)/.test(head)) {
+      var sn = firstBadSectionName(text);
+      if (sn !== null) {
+        return 'section 名には : ; # が使えません' +
+          '(mermaid 側の制限。引用符で囲んでも通りません)。「' + sn + '」が該当します。';
+      }
+    }
+
+    if (/^gitGraph/.test(head)) {
+      var gname = firstBadGitName(text);
+      if (gname !== null) {
+        return 'gitGraph のブランチ名には全角文字が使えません' +
+          '(mermaid 側の制限。引用符で囲んでも通りません)。「' + gname + '」が該当します。';
+      }
+    }
+
+    if (/^requirementDiagram/.test(head)) {
+      var rname = firstBadReqName(text);
+      if (rname !== null) {
+        return 'requirement 図の要求名・要素名には全角文字が使えません' +
+          '(mermaid 側の制限)。表示する文字は text: に書いてください。「' + rname + '」が該当します。';
+      }
+    }
 
     if (/^architecture-beta/.test(head)) {
       var bad = firstBadArchLabel(text);

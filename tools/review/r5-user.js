@@ -135,5 +135,5 @@ const TYPES = ['gantt', 'flowchart', 'block-beta', 'classDiagram', 'erDiagram', 
   }
 
   await b.close();
-  report('r5-user', findings);
+  report('r5-user', findings, { examined: TYPES.length, total: 21 });
 })();

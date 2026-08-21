@@ -194,5 +194,5 @@ const CANON = [
   }
   await b2.close();
 
-  report('r7-consistency', findings);
+  report('r7-consistency', findings, { examined: TYPES.length, total: 21 });
 })();

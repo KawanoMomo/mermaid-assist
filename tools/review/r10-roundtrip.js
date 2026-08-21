@@ -106,5 +106,5 @@ const TYPES = ['gantt', 'flowchart', 'sequenceDiagram', 'classDiagram', 'block-b
   }
 
   await b.close();
-  report('r10-roundtrip', findings);
+  report('r10-roundtrip', findings, { examined: TYPES.length, total: 21 });
 })();

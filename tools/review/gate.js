@@ -13,8 +13,8 @@ const path = require('path');
 const ROOT = process.argv[2] || process.cwd();
 
 // 下限。既存の件数を割り込んだら、テストが消されたということ。
-const MIN_UNIT = 848;
-const MIN_E2E = 357;
+const MIN_UNIT = 889;
+const MIN_E2E = 361;
 const MIN_RENDER = 30;          // rename 22 + delete 8
 const MIN_RENDER_SUITES = 2;    // case ファイルの本数。1本消されても気付けるように
 
@@ -61,7 +61,7 @@ check('G4/G5', 'e2e', (!eFail || +eFail[1] === 0) && ePass >= MIN_E2E,
 // 並行レビュー。4観点すべてで指摘ゼロ。
 // 実行済みの結果を読む (gate から起動すると2重に走って遅い)。
 const outDir = path.join(__dirname, 'out');
-const reviewers = ['r1-destructive', 'r2-delete', 'r3-render', 'r4-ui', 'r5-user', 'r6-move', 'r7-consistency', 'r8-scale', 'r9-workflow', 'r10-roundtrip', 'r11-specialchars', 'r12-noop', 'r13-unknown-syntax', 'r14-boundary', 'r15-state-carryover', 'r16-count-parity', 'r17-undo-redo', 'r18-keyboard-only', 'r19-coverage'];
+const reviewers = ['r1-destructive', 'r2-delete', 'r3-render', 'r4-ui', 'r5-user', 'r6-move', 'r7-consistency', 'r8-scale', 'r9-workflow', 'r10-roundtrip', 'r11-specialchars', 'r12-noop', 'r13-unknown-syntax', 'r14-boundary', 'r15-state-carryover', 'r16-count-parity', 'r17-undo-redo', 'r18-keyboard-only', 'r19-coverage', 'r20-unicode-names'];
 //
 // 出力の**鮮度**も見る。ここを見ていなかったせいで、変異注入したときの
 // 結果ファイルがそのまま残り、ゲートが古いソースへの指摘を読んでいた。
@@ -94,6 +94,31 @@ reviewers.forEach((r) => {
 check('LOOP', '並行レビューの指摘',
   reviewTotal === 0 && reviewMissing.length === 0,
   reviewMissing.length ? ('未実行: ' + reviewMissing.join(', ')) : (reviewTotal + ' 件'));
+
+// 網羅率の下限。
+//
+// 「指摘0件」は検査した範囲の外では何も意味しない。実際 r11 は関数名の表で
+// 対象を選んでいたので 21 図種中 6 図種しか見ておらず、その状態で 0 件だった。
+// 契約ベースに直したら同じ観点のまま 47 件出た。観点を増やす前に、まず
+// **見ている範囲が縮んでいないこと**を機械で押さえる。
+//
+// 下限は現状の実測値 (coverage-floor.json)。下回ったら FAIL。
+// 上げるのは自由、下げるにはファイルを書き換える必要がある = 意図が記録に残る。
+let covFail = [];
+try {
+  const floor = JSON.parse(fs.readFileSync(path.join(__dirname, 'coverage-floor.json'), 'utf8'));
+  Object.keys(floor).forEach((r) => {
+    const f = path.join(outDir, r + '.coverage.json');
+    if (!fs.existsSync(f)) { covFail.push(r + ': 網羅率の記録が無い'); return; }
+    const got = JSON.parse(fs.readFileSync(f, 'utf8'));
+    if (got.examined < floor[r].examined) {
+      covFail.push(r + ': ' + got.examined + '/' + got.total +
+        ' (下限 ' + floor[r].examined + ')');
+    }
+  });
+} catch (e) { covFail.push('下限ファイルが読めない: ' + e.message); }
+check('COV', 'レビューの網羅率', covFail.length === 0,
+  covFail.length ? covFail.join(' / ') : '全観点が下限以上');
 
 // G7: 権利。LICENSE と package.json の整合、同梱物のライセンス同梱。
 let rights = true, rightsDetail = [];

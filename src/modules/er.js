@@ -9,6 +9,18 @@ window.MA.modules.erDiagram = (function() {
   // Pattern: ENTITY1 LEFTCARD--RIGHTCARD ENTITY2 : label
   var REL_RE = /([|}o]{2})(--|\.\.)([|{o]{2})/;
 
+  // mermaid の ER は日本語名も引用符付き名も受け付ける。
+  // こちらの parser だけ ASCII 限定だったため、「顧客 ||--o{ 注文」のような
+  // 普通の図が**一覧にも重ね合わせにも一切出なかった** (mermaid は描画する)。
+  // id は引用符を含まない形で持つ (本文の書き戻し時に quoteEntity で付け直す)。
+  function unq(v) {
+    var s2 = String(v == null ? '' : v);
+    var inner = /^"[\s\S]*"$/.test(s2) ? s2.slice(1, -1) : s2;
+    // 書いたときに &quot; へ逃がした " を戻す。
+    // 戻さないと、入れた名前と一覧に出る名前が食い違う。
+    return inner.replace(/&quot;/g, '"');
+  }
+
   function parseER(text) {
     var result = {
       meta: {},
@@ -36,9 +48,9 @@ window.MA.modules.erDiagram = (function() {
       }
 
       // Entity block start: ENTITY {
-      var entityBlockMatch = trimmed.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*\{\s*$/);
+      var entityBlockMatch = trimmed.match(/^((?:"[^"]+"|[^\s{}|:"][^\s{}|:"]*))\s*\{\s*$/);
       if (entityBlockMatch) {
-        var eid = entityBlockMatch[1];
+        var eid = unq(entityBlockMatch[1]);
         if (!entityMap[eid]) {
           var ee = { kind: 'entity', id: eid, label: eid, attributes: [], line: lineNum };
           result.elements.push(ee);
@@ -65,13 +77,13 @@ window.MA.modules.erDiagram = (function() {
       }
 
       // Relationship line: ENTITY1 cardinality--cardinality ENTITY2 : label
-      var relMatch = trimmed.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s+([|}o]{2})(--|\.\.)([|{o]{2})\s+([A-Za-z_][A-Za-z0-9_-]*)\s*(?::\s*(.+))?$/);
+      var relMatch = trimmed.match(/^((?:"[^"]+"|[^\s{}|:"][^\s{}|:"]*))\s+([|}o]{2})(--|\.\.)([|{o]{2})\s+((?:"[^"]+"|[^\s{}|:"][^\s{}|:"]*))\s*(?::\s*(.+))?$/);
       if (relMatch) {
-        var fromId = relMatch[1];
+        var fromId = unq(relMatch[1]);
         var leftCard = relMatch[2];
         var midDash = relMatch[3];
         var rightCard = relMatch[4];
-        var toId = relMatch[5];
+        var toId = unq(relMatch[5]);
         var label = relMatch[6] || '';
 
         function ensureEntity(eid) {
@@ -155,6 +167,21 @@ window.MA.modules.erDiagram = (function() {
   //
   // 選択時のパネルに入力欄が無く、名前を変えるにはテキストを直接触るしか
   // なかった。関係行の端点も追従させないと幽霊エンティティが生える。
+  // エンティティ名はそのまま図に出る名前でもある。
+  // 括弧・コロン・斜線などを含む名前は引用符で囲わないと parse が落ちる。
+  // mermaid はラベル中の " をエスケープできないが、&quot; はそのまま " として
+  // 描かれる (v11.13 実測)。囲む前に逃がす。
+  function encQuote(v) {
+    return String(v == null ? '' : v).replace(/"/g, '&quot;');
+  }
+
+  function quoteEntity(v) {
+    var s = String(v == null ? '' : v);
+    if (/^"[\s\S]*"$/.test(s)) return s;
+    if (/^[A-Za-z0-9_\-぀-ヿ一-鿿０-ｚ]+$/.test(s)) return s;
+    return '"' + encQuote(s) + '"';
+  }
+
   function updateEntityName(text, lineNum, oldId, newId) {
     if (!newId || !String(newId).trim() || newId === oldId) return text;
     var existing = parseER(text).elements.map(function(e) { return e.id; });
@@ -169,15 +196,15 @@ window.MA.modules.erDiagram = (function() {
       // `NAME {` の宣言
       var decl = trimmed.match(/^(\S+)\s*\{\s*$/);
       if (decl && decl[1] === oldId) {
-        lines[i] = indent + newId + ' {';
+        lines[i] = indent + quoteEntity(newId) + ' {';
         continue;
       }
       // 関係行 `A ||--o{ B : label`
       if (REL_RE.test(trimmed)) {
         var rel = trimmed.match(/^(\S+)(\s+\S+\s+)(\S+)(\s*:\s*.*)?$/);
         if (rel) {
-          var left = rel[1] === oldId ? newId : rel[1];
-          var right = rel[3] === oldId ? newId : rel[3];
+          var left = rel[1] === oldId ? quoteEntity(newId) : rel[1];
+          var right = rel[3] === oldId ? quoteEntity(newId) : rel[3];
           if (left !== rel[1] || right !== rel[3]) {
             lines[i] = indent + left + rel[2] + right + (rel[4] || '');
           }
@@ -214,9 +241,9 @@ window.MA.modules.erDiagram = (function() {
         if (trimmed === '}') skipToBrace = false;
         continue;
       }
-      var block = trimmed.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*\{\s*$/);
+      var block = trimmed.match(/^((?:"[^"]+"|[^\s{}|:"][^\s{}|:"]*))\s*\{\s*$/);
       if (block && block[1] === entityId) { skipToBrace = true; continue; }
-      var rel = trimmed.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s+([|}o]{2})(--|\.\.)([|{o]{2})\s+([A-Za-z_][A-Za-z0-9_-]*)\s*(?::\s*(.+))?$/);
+      var rel = trimmed.match(/^((?:"[^"]+"|[^\s{}|:"][^\s{}|:"]*))\s+([|}o]{2})(--|\.\.)([|{o]{2})\s+((?:"[^"]+"|[^\s{}|:"][^\s{}|:"]*))\s*(?::\s*(.+))?$/);
       if (rel && (rel[1] === entityId || rel[5] === entityId)) continue;
       out.push(lines[i]);
     }
@@ -274,7 +301,7 @@ window.MA.modules.erDiagram = (function() {
     if (idx < 0 || idx >= lines.length) return text;
     var trimmed = lines[idx].trim();
     var indent = lines[idx].match(/^(\s*)/)[1];
-    var m = trimmed.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s+([|}o]{2})(--|\.\.)([|{o]{2})\s+([A-Za-z_][A-Za-z0-9_-]*)\s*(?::\s*(.+))?$/);
+    var m = trimmed.match(/^((?:"[^"]+"|[^\s{}|:"][^\s{}|:"]*))\s+([|}o]{2})(--|\.\.)([|{o]{2})\s+((?:"[^"]+"|[^\s{}|:"][^\s{}|:"]*))\s*(?::\s*(.+))?$/);
     if (!m) return text;
     var from = m[1], lc = m[2], dash = m[3], rc = m[4], to = m[5], label = m[6] || '';
 

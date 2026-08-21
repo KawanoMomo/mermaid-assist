@@ -477,7 +477,13 @@ window.MA.modules.gitGraph = (function() {
       update: function(text, lineNum, field, value, opts) {
         opts = opts || {};
         if (opts.kind === 'commit') return updateCommit(text, lineNum, field, value);
-        if (opts.kind === 'branch') return updateBranch(text, lineNum, value);
+        if (opts.kind === 'branch') {
+        // 知らない field で名前を書き換えない。
+        // 以前は field を見ず kind だけで分岐していたため、どんな field 名でも
+        // 名前が置き換わった。将来 field を増やしたときに黙って名前を潰す。
+          if (field !== 'name' && field !== 'label') return text;
+          return updateBranch(text, lineNum, value);
+        }
         if (opts.kind === 'checkout') return updateCheckout(text, lineNum, value);
         if (opts.kind === 'merge') return updateMerge(text, lineNum, field, value);
         if (opts.kind === 'cherry-pick') return updateCherryPick(text, lineNum, value);

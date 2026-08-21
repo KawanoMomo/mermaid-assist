@@ -116,5 +116,5 @@ const CASES = [
   }
 
   await b.close();
-  report('r17-undo-redo', findings);
+  report('r17-undo-redo', findings, { examined: CASES.length, total: 21 });
 })();

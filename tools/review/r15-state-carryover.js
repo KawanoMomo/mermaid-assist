@@ -87,5 +87,5 @@ const FORMS = [
   }
 
   await b.close();
-  report('r15-state-carryover', findings);
+  report('r15-state-carryover', findings, { examined: FORMS.length, total: 21 });
 })();

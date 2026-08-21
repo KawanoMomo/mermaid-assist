@@ -338,7 +338,17 @@ async function refresh(skipRender) {
 
     statusParseEl.textContent = 'OK';
     statusParseEl.classList.remove('error');
-    hideParseErrorBanner();
+
+    // 描けたのに一部が落ちている場合を黙って通さない。
+    //
+    // mermaid は必ず例外を投げるとは限らない。kanban の列名に括弧を入れると
+    // parse は通り、図も出るが、括弧の中だけが消える。journey の section 名に
+    // # を入れると以降が無かったことになる。利用者から見ると「入れたはずの文字が
+    // 図に無い」だけで、原因を突き止める手掛かりがどこにも出ていなかった。
+    // 失敗したときだけ原因を言うのでは足りない (R11 特殊文字)。
+    var warn = window.MA.diagnose ? window.MA.diagnose.diagnose(mmdText, null) : '';
+    if (warn) showRenderWarningBanner(warn);
+    else hideParseErrorBanner();
   } catch (e) {
     if (thisRender !== renderCounter) return;
     // mermaid のエラーは字句解析器の言葉なので、原因が分かる場合は先に日本語で言う。
@@ -495,7 +505,23 @@ function showParseErrorBanner(err) {
 }
 function hideParseErrorBanner() {
   var el = document.getElementById('parse-error-banner');
-  if (el) el.hidden = true;
+  if (el) { el.hidden = true; el.classList.remove('warn'); }
+}
+
+// 図は描けているが、入れた文字の一部が落ちているときの帯。
+// エラーではないので図はそのまま見せ、原因だけを添える。
+function showRenderWarningBanner(cause) {
+  var host = document.getElementById('preview-container') || previewSvgEl.parentElement;
+  if (!host) return;
+  var el = document.getElementById('parse-error-banner');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'parse-error-banner';
+    host.appendChild(el);
+  }
+  el.classList.add('warn');
+  el.textContent = '図は描けましたが一部が反映されていません — ' + cause;
+  el.hidden = false;
 }
 
 // D1: いまどのファイルを触っているかを常に見えるようにする。

@@ -425,6 +425,11 @@ html, body {
   pointer-events: none;
 }
 #parse-error-banner[hidden] { display: none; }
+/* 図は描けているが一部が落ちている場合。エラーとは区別する
+   (赤は「図が出ていない」の色として既に使っているため)。 */
+#parse-error-banner.warn {
+  background: rgba(190, 140, 40, 0.94);
+}
 
 #status-help {
   margin-left: auto;

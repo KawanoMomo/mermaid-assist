@@ -19,7 +19,7 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const { chromium } = require('E:/00_Git/05_MermaidAssist/node_modules/playwright');
-const { loadModules, report } = require('./lib');
+const { loadModules, report, markExamined } = require('./lib');
 const ROOT = process.argv[2];
 const M = loadModules(ROOT);
 
@@ -47,6 +47,7 @@ const srv = http.createServer((req, res) => {
     const text = mod.template();
     let els;
     try { els = (mod.parse(text).elements || []); } catch (e) { continue; }
+    markExamined(key);
     if (!els.length) continue;
 
     const p = await b.newPage();

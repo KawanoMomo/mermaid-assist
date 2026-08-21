@@ -66,6 +66,14 @@
 | A55 | class / er の名前変更が統一入口に繋がっていない | 済 |
 | A56 | flowchart の統一入口が node と edge を取り違える | 済 |
 | A57 | state / flowchart の統一入口の削除が id 認識を使っていない | 済 |
+| A58 | requirement の更新が未知の field を本文に書き込み、図が parse を通らなくなる | 済 |
+| A59 | erDiagram の parser が日本語エンティティ名を読めず、一覧が空になる (mermaid は描く) | 済 |
+| A60 | state の統一入口が状態と遷移を取り違え、状態のラベル変更が矢印を書き換える | 済 |
+| A61 | classDiagram のラベル欄がクラス名 (識別子) を書き換えていた (表示ラベルに対応) | 済 |
+| A62 | gitGraph / journey / kanban / timeline が field を見ず、どんな field 名でも名前を書き換える | 済 |
+| A63 | block / requirement が opts.id ではなく独自キーを要求し、契約どおりの呼出しが空振り | 済 |
+| A64 | requirement の element ブロックが requirement 専用キーを受け、書くと図が壊れる | 済 |
+| A65 | 描画に成功しても一部が落ちている場合、利用者に何も告げていなかった (警告帯を追加) | 済 |
 
 ## B. 仕様として着手した機能
 

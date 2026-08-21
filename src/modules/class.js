@@ -6,6 +6,52 @@ window.MA.modules.classDiagram = (function() {
   // Relation patterns (longest first for greedy matching)
   var RELATION_TYPES = ['<|--', '<|..', '*--', 'o--', '..>', '-->', '--'];
 
+  // 表示ラベルは `["..."]` の形で宣言行に付く。
+  function unqLabel(v) {
+    if (!v) return '';
+    var s2 = String(v);
+    return /^"[\s\S]*"$/.test(s2) ? s2.slice(1, -1) : s2;
+  }
+
+  // mermaid はラベルの中の " をエスケープできないが、&quot; はそのまま
+  // " として描かれる (v11.13 実測)。
+  function encLabel(v) {
+    return String(v == null ? '' : v).replace(/"/g, '&quot;');
+  }
+
+  // クラスの表示ラベルを変える。宣言行が無ければ作る。
+  //
+  // クラス名は識別子なので日本語や括弧を入れると図が壊れる。
+  // 以前はラベル欄がクラス名そのものを書き換えていたので、
+  // 「設計(詳細)」のような実務の名前を入れると parse が落ちていた。
+  function updateClassLabel(text, lineNum, classId, newLabel) {
+    var lines = text.split('\n');
+    var idx = lineNum - 1;
+    if (idx < 0 || idx >= lines.length) return text;
+    var enc = encLabel(newLabel);
+    var indent = lines[idx].match(/^(\s*)/)[1];
+    var trimmed = lines[idx].trim();
+    var m = trimmed.match(/^class\s+([^\s\[{]+)(?:\[".*?"\])?(\s*\{\s*)?$/);
+    if (m) {
+      // ラベルを外す指定 (空文字) なら ["..."] ごと消す
+      var suffix = enc ? '["' + enc + '"]' : '';
+      lines[idx] = indent + 'class ' + m[1] + suffix + (m[2] ? ' {' : '');
+      return lines.join('\n');
+    }
+    // 宣言行が無い (関係行だけで現れるクラス)。図種宣言の直後に作る。
+    if (!classId || !enc) return text;
+    var insertAt = 1;
+    for (var k = 0; k < lines.length; k++) {
+      if (/^classDiagram/.test(lines[k].trim())) { insertAt = k + 1; break; }
+    }
+    var baseIndent = '    ';
+    for (var k2 = insertAt; k2 < lines.length; k2++) {
+      if (lines[k2].trim()) { baseIndent = lines[k2].match(/^(\s*)/)[1]; break; }
+    }
+    lines.splice(insertAt, 0, baseIndent + 'class ' + classId + '["' + enc + '"]');
+    return lines.join('\n');
+  }
+
   function parseClass(text) {
     var result = {
       meta: {},
@@ -59,12 +105,17 @@ window.MA.modules.classDiagram = (function() {
         continue;
       }
 
-      // Class block start: class Name {
-      var classBlockMatch = trimmed.match(/^class\s+(\S+)\s*\{\s*$/);
+      // Class block start: class Name {  /  class Name["表示ラベル"] {
+      //
+      // mermaid は識別子とは別に表示ラベルを持てる (`class Animal["設計(詳細)"]`)。
+      // これまでこちらはその形を読めず、ラベル欄がクラス名そのものを書き換えていた。
+      // クラス名は識別子なので日本語や括弧を入れると図が壊れる。表示ラベルなら
+      // 「設計(詳細)」をそのまま出せる (v11.13 実測)。
+      var classBlockMatch = trimmed.match(/^class\s+([^\s\[{]+)(?:\[(".*?")\])?\s*\{\s*$/);
       if (classBlockMatch) {
         var cid = classBlockMatch[1];
         if (!classMap[cid]) {
-          var ce = { kind: 'class', id: cid, label: cid, members: [], line: lineNum };
+          var ce = { kind: 'class', id: cid, label: unqLabel(classBlockMatch[2]) || cid, members: [], line: lineNum };
           result.elements.push(ce);
           classMap[cid] = ce;
         }
@@ -73,11 +124,11 @@ window.MA.modules.classDiagram = (function() {
       }
 
       // Standalone class declaration: class Name
-      var classDeclMatch = trimmed.match(/^class\s+(\S+)\s*$/);
+      var classDeclMatch = trimmed.match(/^class\s+([^\s\[{]+)(?:\[(".*?")\])?\s*$/);
       if (classDeclMatch) {
         var cid2 = classDeclMatch[1];
         if (!classMap[cid2]) {
-          var ce2 = { kind: 'class', id: cid2, label: cid2, members: [], line: lineNum };
+          var ce2 = { kind: 'class', id: cid2, label: unqLabel(classDeclMatch[2]) || cid2, members: [], line: lineNum };
           result.elements.push(ce2);
           classMap[cid2] = ce2;
         }
@@ -726,9 +777,12 @@ window.MA.modules.classDiagram = (function() {
         // クラス名の変更を統一入口からも使えるようにする。
         // 関数は追加したのに入口へ繋いでいなかった。r12 を契約ベースに書き換えたら
         // 「どの field を渡しても本文が変わらない」として出てきた。
-        if (field === 'name' || field === 'id' || field === 'label') {
-          var decl = trimmed.match(/^class\s+(\S+)/);
-          var oldId = opts.id || (decl ? decl[1] : null);
+        var decl = trimmed.match(/^class\s+([^\s\[{]+)/);
+        var oldId = opts.id || (decl ? decl[1] : null);
+        // label = 図に出る文字 (識別子とは別)、name/id = 識別子の改名。
+        // 以前は label も改名に回していたので、実務の名前を入れると図が壊れた。
+        if (field === 'label') return updateClassLabel(text, lineNum, oldId, value);
+        if (field === 'name' || field === 'id') {
           if (oldId) return updateClassName(text, lineNum, oldId, value);
         }
         return text;
@@ -751,6 +805,7 @@ window.MA.modules.classDiagram = (function() {
     addClass: addClass,
     deleteClass: deleteClass,
     updateClassName: updateClassName,
+    updateClassLabel: updateClassLabel,
     moveClassUp: moveClassUp,
     moveClassDown: moveClassDown,
     addMember: addMember,

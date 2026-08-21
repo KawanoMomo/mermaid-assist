@@ -684,13 +684,16 @@ window.MA.modules.blockBeta = (function() {
       delete: function(text, lineNum, opts) {
         opts = opts || {};
         if (opts.kind === 'link') return deleteLink(text, lineNum);
-        return deleteBlock(text, lineNum, opts.blockId);
+        return deleteBlock(text, lineNum, opts.blockId || opts.id);
       },
       update: function(text, lineNum, field, value, opts) {
         opts = opts || {};
+        // 契約 (ADR-012) の識別子は opts.id。この図種だけ独自キーを要求していたため、
+        // 契約通り opts.id で呼ぶと黙って空振りしていた。既存呼出しを壊さず受ける。
+        var blockId = opts.blockId || opts.id;
         if (opts.kind === 'link') return updateLink(text, lineNum, field, value);
         if (field === 'columns') return setColumns(text, value);
-        if (field === 'label') return updateBlockLabel(text, lineNum, opts.blockId, value);
+        if (field === 'label') return updateBlockLabel(text, lineNum, blockId, value);
         return text;
       },
       moveUp: function(text, lineNum) {

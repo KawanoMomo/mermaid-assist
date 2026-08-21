@@ -79,6 +79,16 @@ window.MA.modules.quadrantChart = (function() {
     return window.MA.textUpdater.deleteLine(text, lineNum);
   }
 
+  // 点の名前は `名前: [x, y]` の左側にそのまま置かれる。
+  // 英数字と空白以外が入ると mermaid の字句解析が落ちるので、引用符で囲う。
+  // 「設計(詳細)」「配列[0]」のような実務の名前はこれが無いと図が出ない。
+  function quoteName(v) {
+    var s = String(v == null ? '' : v);
+    if (/^"[\s\S]*"$/.test(s)) return s;
+    if (/^[A-Za-z0-9_ ]+$/.test(s)) return s;
+    return '"' + s + '"';
+  }
+
   function updatePoint(text, lineNum, field, value) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
@@ -87,7 +97,7 @@ window.MA.modules.quadrantChart = (function() {
     var m = lines[idx].trim().match(/^(.+?):\s*\[\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\]\s*$/);
     if (!m) return text;
     var label = m[1].trim(), x = m[2], y = m[3];
-    if (field === 'label') label = value;
+    if (field === 'label') label = quoteName(value);
     else if (field === 'x') x = value;
     else if (field === 'y') y = value;
     lines[idx] = indent + label + ': [' + x + ', ' + y + ']';

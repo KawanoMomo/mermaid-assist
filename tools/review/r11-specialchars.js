@@ -14,7 +14,7 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const { chromium } = require('E:/00_Git/05_MermaidAssist/node_modules/playwright');
-const { loadModules, report } = require('./lib');
+const { loadModules, report, markExamined } = require('./lib');
 const ROOT = process.argv[2];
 const M = loadModules(ROOT);
 require(path.join(ROOT, 'src', 'core', 'diagnose.js'));
@@ -34,12 +34,16 @@ const LABELS = [
   'A#1',
 ];
 
-// ラベルを更新できるモジュールに限る (更新関数の形が3通りあるので分ける)
-const FIELD_FNS = ['updateNode', 'updateElement', 'updateParticipant', 'updateCard'];
-const VALUE_FNS = ['updateStateLabel', 'updateNodeText'];
-const ID_FNS = ['updateBlockLabel'];
+// 契約 (ADR-012 operations.update) で更新する。
+//
+// 以前はここに更新関数名の表 (updateNode / updateStateLabel / updateBlockLabel …) を
+// 置いていた。表に載っていない名前を持つモジュールは黙って検査から外れ、**21 図種中
+// 6 図種しか見ていなかった** (実測)。表は増えないので、モジュールが増えるほど
+// 検査は縮む。名前ではなく契約で呼べば、この縮みは起きない。
 
 const cases = [];
+const findings0 = [];   // 契約を満たさないモジュール (検査以前の問題)
+const noEffect = [];    // どの field でも本文が変わらなかった組 (縮みの可視化)
 Object.keys(M).forEach((key) => {
   const mod = M[key];
   if (!mod || !mod.template || !mod.parse) return;
@@ -49,21 +53,31 @@ Object.keys(M).forEach((key) => {
   if (!els.length) return;
   const el = els[0];
 
-  const ff = FIELD_FNS.find(f => typeof mod[f] === 'function');
-  const vf = VALUE_FNS.find(f => typeof mod[f] === 'function');
-  const idf = ID_FNS.find(f => typeof mod[f] === 'function');
+  if (!mod.operations || typeof mod.operations.update !== 'function') {
+    findings0.push({ module: key, fn: '契約',
+      what: 'operations.update を持たない (ADR-012 の必須要件)' });
+    return;
+  }
+
+  // 「ラベルに当たるもの」の呼び名は図種で違う (label / text / title / name)。
+  // 契約は field 名までは決めていないので、順に試して本文が変わったものを採る。
+  const FIELDS = ['label', 'text', 'title', 'name'];
 
   LABELS.forEach((label) => {
     let out = null;
-    try {
-      if (ff) out = mod[ff](t0, el.line, 'label', label);
-      else if (vf) out = mod[vf](t0, el.line, label);
-      else if (idf) out = mod[idf](t0, el.line, el.id, label);
-    } catch (e) {
-      cases.push({ module: key, label, text: null, err: String(e.message).slice(0, 60) });
-      return;
+    let usedField = null;
+    for (const f of FIELDS) {
+      let cand;
+      try {
+        cand = mod.operations.update(t0, el.line, f, label, { kind: el.kind, id: el.id });
+      } catch (e) {
+        cases.push({ module: key, label, text: null, err: f + ': ' + String(e.message).slice(0, 60) });
+        return;
+      }
+      if (cand && cand !== t0) { out = cand; usedField = f; break; }
     }
-    if (out && out !== t0) cases.push({ module: key, label, text: out });
+    if (out) { cases.push({ module: key, label, text: out, field: usedField }); markExamined(key); }
+    else { noEffect.push(key + ':' + label); }
   });
 });
 
@@ -83,7 +97,7 @@ const srv = http.createServer((req, res) => {
 });
 
 (async () => {
-  const findings = [];
+  const findings = findings0.slice();
   const known = [];   // mermaid 側の制限 + 診断済み (黙って落とさないよう数えて出す)
   cases.filter(c => !c.text).forEach(c =>
     findings.push({ module: c.module, fn: 'ラベル更新',
@@ -130,8 +144,13 @@ const srv = http.createServer((req, res) => {
       // 引用符や括弧が落ちる・別の文字に化ける場合もここで出る。
       const want = c.label.replace(/\s+/g, '');
       if (r.text.indexOf(want) < 0) {
-        findings.push({ module: c.module, fn: 'ラベル',
-          what: '「' + c.label + '」が図に出ない (描かれた文字: ' + r.text.slice(0, 60) + ')' });
+        // mermaid は例外を投げずにラベルの一部だけを落とすことがある。
+        // その場合も問うべきは「通るか」ではなく **原因を名指しできているか**。
+        // アプリは描けた場合でも diagnose を引いて警告帯を出す。
+        const dropCause = DIAG.diagnose(c.text, null);
+        if (dropCause) known.push(c.module + ': 「' + c.label + '」(一部が落ちる・警告あり)');
+        else findings.push({ module: c.module, fn: 'ラベル',
+          what: '「' + c.label + '」が図に出ず、原因も名指しできていない (描かれた文字: ' + r.text.slice(0, 60) + ')' });
       }
     }
     await p.close();
@@ -140,6 +159,10 @@ const srv = http.createServer((req, res) => {
   srv.close();
   if (known.length) {
     console.log('  (mermaid 側の制限、診断メッセージあり: ' + known.length + ' 件) ' + known.slice(0, 3).join(' / '));
+  }
+  // 検査から外れた組を黙って捨てない (「0 件」が網羅の証拠にならないため)
+  if (noEffect.length) {
+    console.log('  (どの field でも本文が変わらず未検査: ' + noEffect.length + ' 組) ' + noEffect.slice(0, 5).join(' / '));
   }
   report('r11-specialchars', findings);
 })();

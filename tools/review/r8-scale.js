@@ -165,5 +165,5 @@ const CASES = [
   }
 
   await b.close();
-  report('r8-scale', findings);
+  report('r8-scale', findings, { examined: CASES.length, total: 21 });
 })();

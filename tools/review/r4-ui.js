@@ -66,5 +66,5 @@ const TYPES = ['gantt', 'sequenceDiagram', 'flowchart', 'stateDiagram', 'classDi
     await p.close();
   }
   await b.close();
-  report('r4-ui', findings);
+  report('r4-ui', findings, { examined: TYPES.length, total: 21 });
 })();

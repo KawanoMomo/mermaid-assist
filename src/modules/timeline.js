@@ -483,7 +483,13 @@ window.MA.modules.timeline = (function() {
       delete: function(text, lineNum) { return deleteElement(text, lineNum); },
       update: function(text, lineNum, field, value, opts) {
         opts = opts || {};
-        if (opts.kind === 'section') return updateSection(text, lineNum, value);
+        if (opts.kind === 'section') {
+        // 知らない field で名前を書き換えない。
+        // 以前は field を見ず kind だけで分岐していたため、どんな field 名でも
+        // 名前が置き換わった。将来 field を増やしたときに黙って名前を潰す。
+          if (field !== 'name' && field !== 'label') return text;
+          return updateSection(text, lineNum, value);
+        }
         if (opts.kind === 'period') return updatePeriod(text, lineNum, field, value, opts.eventIndex);
         if (field === 'title') return setTitle(text, value);
         return text;

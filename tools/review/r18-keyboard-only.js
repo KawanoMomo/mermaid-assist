@@ -100,5 +100,5 @@ const MAX_TAB = 30;   // これを超えて届かないなら実用上「到達�
   }
 
   await b.close();
-  report('r18-keyboard-only', findings);
+  report('r18-keyboard-only', findings, { examined: TYPES.length, total: 21 });
 })();

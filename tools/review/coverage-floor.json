@@ -1,0 +1,82 @@
+{
+ "r1-destructive": {
+  "examined": 21,
+  "total": 21
+ },
+ "r10-roundtrip": {
+  "examined": 6,
+  "total": 21
+ },
+ "r11-specialchars": {
+  "examined": 18,
+  "total": 21
+ },
+ "r12-noop": {
+  "examined": 21,
+  "total": 21
+ },
+ "r13-unknown-syntax": {
+  "examined": 21,
+  "total": 21
+ },
+ "r14-boundary": {
+  "examined": 21,
+  "total": 21
+ },
+ "r15-state-carryover": {
+  "examined": 5,
+  "total": 21
+ },
+ "r16-count-parity": {
+  "examined": 21,
+  "total": 21
+ },
+ "r17-undo-redo": {
+  "examined": 2,
+  "total": 21
+ },
+ "r18-keyboard-only": {
+  "examined": 4,
+  "total": 21
+ },
+ "r19-coverage": {
+  "examined": 21,
+  "total": 21
+ },
+ "r2-delete": {
+  "examined": 21,
+  "total": 21
+ },
+ "r20-unicode-names": {
+  "examined": 19,
+  "total": 21
+ },
+ "r3-render": {
+  "examined": 10,
+  "total": 21
+ },
+ "r4-ui": {
+  "examined": 21,
+  "total": 21
+ },
+ "r5-user": {
+  "examined": 6,
+  "total": 21
+ },
+ "r6-move": {
+  "examined": 21,
+  "total": 21
+ },
+ "r7-consistency": {
+  "examined": 21,
+  "total": 21
+ },
+ "r8-scale": {
+  "examined": 4,
+  "total": 21
+ },
+ "r9-workflow": {
+  "examined": 21,
+  "total": 21
+ }
+}
