@@ -134,3 +134,41 @@ describe('gantt: parse の返す形', function() {
     expect(missing).toEqual([]);
   });
 });
+
+describe('flowchart: 統一入口が node と edge を取り違えない', function() {
+  // r1 を契約ベースに書き換えて出てきた本物の欠陥。
+  //
+  // flowchart の operations.update は「行にエッジ記号があればエッジ」と判定していた。
+  // `A[Start] --> B{Decision}` はノードの宣言とエッジが同じ行にあるので、A のラベルを
+  // 変えようとすると **エッジのラベル** が付く (`A --> |新ラベル| B`)。
+  //
+  // updateNode は第5引数に id を受け取れるのに、入口が渡していなかった。
+  // 「入口に必要なものを渡していない」形はこれで3件目 (A55 / block の blockId / これ)。
+  var F = window.MA.modules.flowchart;
+  var src = 'flowchart TD\n    A[Start] --> B{Decision}\n    B -->|Yes| C[OK]\n';
+
+  test('FO-1: id を渡せばノードのラベルが変わる', function() {
+    var out = F.operations.update(src, 2, 'label', '開始', { kind: 'node', id: 'A' });
+    expect(out).toContain('A[開始]');
+    expect(out).not.toContain('|開始|');
+  });
+
+  test('FO-2: 右辺のノードも変えられる', function() {
+    var out = F.operations.update(src, 2, 'label', '判定', { kind: 'node', id: 'B' });
+    expect(out).toContain('B{判定}');
+  });
+
+  test('FO-3: エッジを指定したときはエッジのラベルが変わる', function() {
+    var out = F.operations.update(src, 3, 'label', 'はい', { kind: 'edge' });
+    expect(out).toContain('|はい|');
+  });
+
+  test('FO-4: 同じ値の書き戻しで何も変わらない', function() {
+    var els = F.parse(src).elements;
+    els.forEach(function(el) {
+      var out = F.operations.update(src, el.line, 'label', el.label, { kind: 'node', id: el.id });
+      expect(F.parse(out).elements.map(function(x) { return x.id; }).join(',')).toBe(
+        els.map(function(x) { return x.id; }).join(','));
+    });
+  });
+});

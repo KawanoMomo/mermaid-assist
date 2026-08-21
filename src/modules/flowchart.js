@@ -1130,16 +1130,37 @@ window.MA.modules.flowchart = (function() {
         if (kind === 'classDef') return addClassDef(text, props.name, props.style);
         return text;
       },
-      delete: function(text, lineNum) {
+      delete: function(text, lineNum, opts) {
+        opts = opts || {};
+        // id を渡されたら id 認識の削除を使う (state と同型)。
+        //
+        // ここは単なる deleteLine だったので、`B -->|Yes| C[OK]` の C を消そうと
+        // しても行ごと消えるだけで、B や他の参照が残る。A4 で UI の経路は
+        // 直したが、契約の経路が古いまま残っていた。
+        if (opts.id && opts.kind !== 'edge') return deleteNode(text, lineNum, opts.id);
         return window.MA.textUpdater.deleteLine(text, lineNum);
       },
-      update: function(text, lineNum, field, value) {
+      update: function(text, lineNum, field, value, opts) {
+        opts = opts || {};
         var lines = text.split('\n');
         var trimmed = (lines[lineNum - 1] || '').trim();
         var hasEdge = false;
         for (var i = 0; i < EDGE_TYPES.length; i++) {
           if (trimmed.indexOf(EDGE_TYPES[i]) > 0) { hasEdge = true; break; }
         }
+        // 「行にエッジ記号があればエッジ」では取り違える。
+        //
+        // `A[Start] --> B{Decision}` はノードの宣言とエッジが同じ行にあるので、
+        // A のラベルを変えようとすると**エッジのラベル**が付いていた
+        // (`A --> |新ラベル| B`)。updateNode は第5引数に id を受け取れるのに、
+        // 入口が渡していなかった。呼び出し側が「どちらを指しているか」を言えるようにする。
+        //
+        // 何も言われなければ従来どおり (エッジ行はエッジ扱い) にして、既存の
+        // 呼び出しを壊さない。
+        if (opts.kind === 'node' || opts.id) {
+          return updateNode(text, lineNum, field, value, opts.id);
+        }
+        if (opts.kind === 'edge') return updateEdge(text, lineNum, field, value);
         return hasEdge ? updateEdge(text, lineNum, field, value) : updateNode(text, lineNum, field, value);
       },
       moveUp: function(text, lineNum) {

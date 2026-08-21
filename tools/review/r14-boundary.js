@@ -13,19 +13,16 @@ const { loadModules, elementsOf, report } = require('./lib');
 const ROOT = process.argv[2];
 const M = loadModules(ROOT);
 
-const DELETE_FNS = ['deleteNode', 'deleteTask', 'deleteParticipant', 'deleteClass',
-  'deleteEntity', 'deleteState', 'deleteBlock', 'deleteElement', 'deleteField',
-  'deleteSlice', 'deletePoint', 'deleteCurve', 'deleteFlow', 'deleteSeries'];
-const MOVE_UP = ['moveNodeUp', 'moveTaskUp', 'moveParticipantUp', 'moveClassUp',
-  'moveEntityUp', 'moveStateUp', 'movePeriodUp'];
+// 削除は契約 (operations.delete) で呼ぶ。関数名の表を持つと、
+// その名前を持たないモジュール (c4 / gitGraph は `deleteLine`) を黙って飛ばす。
+// 移動も契約 (operations.moveUp) で呼ぶ。
 
 const findings = [];
 
 Object.keys(M).forEach((key) => {
   const mod = M[key];
   if (!mod || !mod.template || !mod.parse) return;
-  const del = DELETE_FNS.find(f => typeof mod[f] === 'function');
-  if (!del) return;
+  if (!mod.operations || typeof mod.operations.delete !== 'function') return;
 
   // 全部消す。毎回 parse し直して、最後の1つまで消えるかを見る。
   let text = mod.template();
@@ -40,7 +37,7 @@ Object.keys(M).forEach((key) => {
     if (!els.length) break;
     const last = els[els.length - 1];
     let out = null;
-    try { out = mod[del](text, last.line, last.id !== undefined ? last.id : last.key); }
+    try { out = mod.operations.delete(text, last.line, { kind: last.kind, id: last.id, blockId: last.id }); }
     catch (e) {
       findings.push({ module: key, fn: 'B1 全削除',
         what: '残り ' + els.length + ' 個で例外: ' + String(e.message).slice(0, 40) });
@@ -75,14 +72,15 @@ Object.keys(M).forEach((key) => {
       const els = elementsOf(mod, one);
       if (!els || els.length <= 1) break;
       const e = els[els.length - 1];
-      try { one = mod[del](one, e.line, e.id !== undefined ? e.id : e.key) || one; } catch (err) { break; }
+      try { one = mod.operations.delete(one, e.line, { kind: e.kind, id: e.id, blockId: e.id }) || one; } catch (err) { break; }
     }
     const left = elementsOf(mod, one);
     if (left && left.length === 1) {
-      const mv = MOVE_UP.find(f => typeof mod[f] === 'function');
-      if (mv) {
+      if (typeof mod.operations.moveUp === 'function') {
+        const mv = 'operations.moveUp';
         try {
-          const moved = mod[mv](one, left[0].line);
+          const moved = mod.operations.moveUp(one, left[0].line,
+            { kind: left[0].kind, id: left[0].id, blockId: left[0].id });
           const after = elementsOf(mod, moved);
           if (!after) {
             findings.push({ module: key, fn: 'B3 要素1個',

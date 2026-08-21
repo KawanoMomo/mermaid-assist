@@ -30,11 +30,9 @@ function changedLines(before, after) {
   return Object.keys(count).filter(k => count[k] !== 0);
 }
 
-const DELETE_FNS = ['deleteNode', 'deleteTask', 'deleteParticipant', 'deleteClass',
-  'deleteEntity', 'deleteState', 'deleteBlock', 'deleteElement', 'deleteField',
-  'deleteSlice', 'deletePoint', 'deleteCurve', 'deleteFlow', 'deleteSeries'];
-const MOVE_FNS = ['moveNodeUp', 'moveTaskUp', 'moveParticipantUp', 'moveClassUp',
-  'moveEntityUp', 'moveStateUp', 'movePeriodUp'];
+// 削除は契約 (operations.delete) で呼ぶ。関数名の表を持つと、
+// その名前を持たないモジュール (c4 / gitGraph は `deleteLine`) を黙って飛ばす。
+// 移動も契約 (operations.moveUp) で呼ぶ。
 
 Object.keys(M).forEach((key) => {
   const mod = M[key];
@@ -57,11 +55,13 @@ Object.keys(M).forEach((key) => {
 
   const target = before[before.length - 1];
 
-  const del = DELETE_FNS.find(f => typeof mod[f] === 'function');
-  if (del) {
+  if (mod.operations && typeof mod.operations.delete === 'function') {
+    const del = 'operations.delete';
     let after = null;
-    try { after = mod[del](src, target.line, target.id !== undefined ? target.id : target.key); }
-    catch (e) { after = null; }
+    try {
+      after = mod.operations.delete(src, target.line,
+        { kind: target.kind, id: target.id, blockId: target.id });
+    } catch (e) { after = null; }
     if (after && after !== src) {
       // W1 コメントが巻き添えで消えていないか
       if (after.indexOf(COMMENT) < 0) {
@@ -81,13 +81,16 @@ Object.keys(M).forEach((key) => {
     }
   }
 
-  const mv = MOVE_FNS.find(f => typeof mod[f] === 'function');
-  if (mv) {
+  if (mod.operations && typeof mod.operations.moveUp === 'function') {
+    const mv = 'operations.moveUp';
     const firstLine = before[0].line;
     const second = before.filter(x => x.line !== firstLine)[0];
     if (second) {
       let after = null;
-      try { after = mod[mv](src, second.line); } catch (e) { after = null; }
+      try {
+        after = mod.operations.moveUp(src, second.line,
+          { kind: second.kind, id: second.id, blockId: second.id });
+      } catch (e) { after = null; }
       if (after && after !== src) {
         if (after.indexOf(COMMENT) < 0) {
           findings.push({ module: key, fn: 'W1 コメント消失',

@@ -84,3 +84,61 @@ describe('erDiagram: エンティティ名の変更', function() {
     expect(E.updateEntityName(src, 2, 'CUSTOMER', 'ORDER')).toBe(src);
   });
 });
+
+describe('state: 統一入口が id 認識の削除を使う', function() {
+  // r2 を契約ベースに書き換えて出てきた本物の欠陥。
+  //
+  // state の operations.delete は単なる deleteLine で、A10 で直した id 認識の
+  // deleteState を使っていなかった。宣言行だけ消えて参照が残るので、mermaid は
+  // 参照だけで状態を作り、**一覧から消えても図には残る**。
+  // A10 で UI の経路は直したが、契約の経路が古いままだった。
+  var S = window.MA.modules.state;
+  var src = 'stateDiagram-v2\n    [*] --> Idle\n    Idle --> Running\n    Running --> [*]\n';
+
+  test('SR-1: 契約経由で状態を消すと参照も消える', function() {
+    var el = S.parse(src).elements.filter(function(e) { return e.id === 'Idle'; })[0];
+    var out = S.operations.delete(src, el.line, { kind: el.kind, id: el.id });
+    expect(S.parse(out).elements.map(function(e) { return e.id; })).not.toContain('Idle');
+    expect(out).not.toContain('Idle');
+  });
+
+  test('SR-2: 巻き添えを出さない', function() {
+    var el = S.parse(src).elements.filter(function(e) { return e.id === 'Idle'; })[0];
+    var out = S.operations.delete(src, el.line, { kind: el.kind, id: el.id });
+    expect(out).toContain('Running');
+  });
+
+  test('SR-3: id を渡さない場合は行削除のまま (後方互換)', function() {
+    var out = S.operations.delete(src, 2);
+    expect(out).not.toBe(src);
+  });
+});
+
+describe('flowchart: 統一入口が id 認識の削除を使う', function() {
+  // state と同型。operations.delete が単なる deleteLine で、A4 で直した id 認識の
+  // deleteNode を使っていなかった。`B -->|Yes| C[OK]` の C を消そうとしても
+  // 行ごと消えるだけで、B や他の参照が残る。
+  //
+  // A4 / A10 で UI の経路は直したが、契約の経路が古いまま残っていた。
+  // 「同じ欠陥を UI 経路だけ直して契約経路を忘れる」形はこれで2件目。
+  var F = window.MA.modules.flowchart;
+  var src = 'flowchart TD\n    A[Start] --> B{Decision}\n    B -->|Yes| C[OK]\n    C --> D[End]\n';
+
+  test('FD-1: 契約経由でノードを消すと要素が減る', function() {
+    var el = F.parse(src).elements.filter(function(e) { return e.id === 'C'; })[0];
+    var out = F.operations.delete(src, el.line, { kind: el.kind, id: el.id });
+    expect(F.parse(out).elements.map(function(e) { return e.id; })).not.toContain('C');
+  });
+
+  test('FD-2: 巻き添えを出さない', function() {
+    var el = F.parse(src).elements.filter(function(e) { return e.id === 'C'; })[0];
+    var out = F.operations.delete(src, el.line, { kind: el.kind, id: el.id });
+    var ids = F.parse(out).elements.map(function(e) { return e.id; });
+    expect(ids).toContain('A');
+    expect(ids).toContain('B');
+  });
+
+  test('FD-3: id を渡さない場合は行削除のまま (後方互換)', function() {
+    expect(F.operations.delete(src, 3)).not.toBe(src);
+  });
+});

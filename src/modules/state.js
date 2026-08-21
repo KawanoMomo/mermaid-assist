@@ -583,7 +583,16 @@ window.MA.modules.state = (function() {
         if (kind === 'note') return addNote(text, props.position, props.target, props.text);
         return text;
       },
-      delete: function(text, lineNum) { return window.MA.textUpdater.deleteLine(text, lineNum); },
+      delete: function(text, lineNum, opts) {
+        opts = opts || {};
+        // id を渡されたら id 認識の削除を使う。
+        //
+        // ここは単なる deleteLine だったので、宣言行だけ消えて参照が残る。
+        // mermaid は参照だけで状態を作るので、**一覧から消えても図には残る**。
+        // A10 で UI の経路は直したが、契約の経路が古いままだった (r2 を契約ベースにして発覚)。
+        if (opts.id) return deleteState(text, lineNum, opts.id);
+        return window.MA.textUpdater.deleteLine(text, lineNum);
+      },
       update: function(text, lineNum, field, value) {
         var lines = text.split('\n');
         var trimmed = (lines[lineNum - 1] || '').trim();
