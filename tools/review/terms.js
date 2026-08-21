@@ -71,6 +71,32 @@ Object.keys(seen).forEach((low) => {
   }
 });
 
+// 記号だけのボタン (`+` / `✕` / `↑`) は、説明が無いと何が起きるか分からない。
+//
+// 実測 (2026-08-22、21図種): 文字のあるボタン164個 / 記号だけ114個。
+// **そのうち8個が説明を持っていなかった** — いずれも `+` で、
+// サブグラフ・状態・複合状態・クラス・名前空間・セクション・ブロック・
+// エンティティの追加ボタンだった。他の追加ボタンは「+ ブロック追加」のように
+// 文字を持つので、**この8個だけが読めなかった**。
+//
+// 欄名と同じで、直しただけでは戻る。ソースで数える。
+const noTitle = [];
+fs.readdirSync(dir).filter(f => f.endsWith('.js')).forEach((f) => {
+  const src2 = fs.readFileSync(path.join(dir, f), 'utf8');
+  const re2 = /<button([^>]*)>\s*([+✕×↑↓])\s*<\/button>/g;
+  let m2;
+  while ((m2 = re2.exec(src2)) !== null) {
+    if (m2[1].indexOf('title=') < 0 && m2[1].indexOf('aria-label=') < 0) {
+      const idm = m2[1].match(/id="([^"]*)"/);
+      noTitle.push(f.replace('.js', '') + ':' + (idm ? idm[1] : '(idなし)') + ' "' + m2[2] + '"');
+    }
+  }
+});
+noTitle.forEach((x) => {
+  findings.push({ module: x.split(':')[0], fn: 'T3 記号ボタンの説明',
+    what: '記号だけのボタンに説明 (title) が無い: ' + x });
+});
+
 const nameish = Object.keys(counts).filter(k => NAMEISH.test(k));
 // 欄名の日英混在。**まだ直していない**ので指摘にはしないが、数だけ出す。
 // 出さないと「0件 = 揃っている」に見えてしまう。

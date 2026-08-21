@@ -467,7 +467,7 @@ window.MA.modules.state = (function() {
           fieldHtml('ラベル', 'st-add-state-label', '', 'Running State') +
           '<div style="display:flex;gap:4px;margin-bottom:8px;">' +
             '<select id="st-add-state-type" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' + typeOpts + '</select>' +
-            '<button id="st-add-state-btn" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">+</button>' +
+            '<button id="st-add-state-btn" title="状態を追加" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">+</button>' +
           '</div>' +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
@@ -482,7 +482,7 @@ window.MA.modules.state = (function() {
           '<div style="display:flex;gap:4px;">' +
             '<input id="st-add-comp-id" type="text" placeholder="ID" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' +
             '<input id="st-add-comp-label" type="text" placeholder="label" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' +
-            '<button id="st-add-comp-btn" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">+</button>' +
+            '<button id="st-add-comp-btn" title="複合状態を追加" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">+</button>' +
           '</div>' +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +

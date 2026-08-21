@@ -1169,7 +1169,7 @@ window.MA.modules.gantt = (function() {
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション追加</label>' +
           '<div style="display:flex;gap:4px;">' +
             '<input id="prop-add-sec-name" type="text" placeholder="セクション名" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
-            '<button id="prop-add-sec-btn" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:12px;">+</button>' +
+            '<button id="prop-add-sec-btn" title="セクションを追加" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:12px;">+</button>' +
           '</div>' +
         '</div>' +
         sectionListHtml +

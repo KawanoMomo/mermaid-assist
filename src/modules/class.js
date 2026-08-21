@@ -513,7 +513,7 @@ window.MA.modules.classDiagram = (function() {
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">クラスを追加</label>' +
           '<div style="display:flex;gap:4px;">' +
             '<input id="cl-add-class-id" type="text" placeholder="ClassName" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' +
-            '<button id="cl-add-class-btn" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">+</button>' +
+            '<button id="cl-add-class-btn" title="クラスを追加" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">+</button>' +
           '</div>' +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
@@ -541,7 +541,7 @@ window.MA.modules.classDiagram = (function() {
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">名前空間を追加</label>' +
           '<div style="display:flex;gap:4px;">' +
             '<input id="cl-add-ns-id" type="text" placeholder="NamespaceName" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' +
-            '<button id="cl-add-ns-btn" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">+</button>' +
+            '<button id="cl-add-ns-btn" title="名前空間を追加" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">+</button>' +
           '</div>' +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +

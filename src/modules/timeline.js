@@ -365,7 +365,7 @@ window.MA.modules.timeline = (function() {
         for (var ei = 0; ei < per.events.length; ei++) {
           eventsHtml += '<div style="display:flex;gap:4px;margin-bottom:4px;">' +
             '<input id="tl-edit-ev-' + ei + '" type="text" value="' + escHtml(per.events[ei]) + '" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' +
-            '<button class="tl-edit-ev-delete" data-event-index="' + ei + '" style="background:var(--danger);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">×</button>' +
+            '<button class="tl-edit-ev-delete" title="このイベントを削除" data-event-index="' + ei + '" style="background:var(--danger);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">×</button>' +
             '</div>';
         }
 
