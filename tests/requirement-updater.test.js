@@ -7,7 +7,9 @@ describe('addRequirement', function() {
     var t = 'requirementDiagram\n';
     var out = req.addRequirement(t, 'functionalRequirement', 'fr1');
     expect(out).toContain('functionalRequirement fr1 {');
-    expect(out).toContain('id: ""');
+    // 空の `id: ""` を期待していたが、**mermaid はそれを拒否する** (実測)。
+    // このテストは壊れた出力の方を固定していた。行を出さないのが正しい。
+    expect(out).not.toContain('id: ""');
     expect(out).toContain('risk: medium');
     expect(out).toContain('verifymethod: analysis');
   });
@@ -24,8 +26,9 @@ describe('addElement', function() {
   test('adds element block', function() {
     var out = req.addElement('requirementDiagram\n', 'ecu');
     expect(out).toContain('element ecu {');
-    expect(out).toContain('type: ""');
-    expect(out).toContain('docref: ""');
+    // 同上。`type: ""` は Parse error になる。
+    expect(out).not.toContain('type: ""');
+    expect(out).not.toContain('docref: ""');
   });
 });
 

@@ -31,7 +31,9 @@ window.MA.modules.quadrantChart = (function() {
       if ((tm = trimmed.match(/^(.+?):\s*\[\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\]\s*$/))) {
         result.elements.push({
           kind: 'point', id: '__p_' + (pointCounter++),
-          label: tm[1].trim(), x: parseFloat(tm[2]), y: parseFloat(tm[3]),
+          // 書く側 (updatePoint) は引用符を付けるのに、読む側が外していなかった。
+          // 日本語の点名を付け直すたびに `""見本""` と重なっていく。
+          label: stripQuotes(tm[1].trim()), x: parseFloat(tm[2]), y: parseFloat(tm[3]),
           line: lineNum,
         });
       }
@@ -71,7 +73,9 @@ window.MA.modules.quadrantChart = (function() {
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
-    lines.splice(insertAt, 0, '    ' + label + ': [' + x + ', ' + y + ']');
+    // 追加も引用符を通す。updatePoint だけ直っていて、addPoint は裸のままだった
+    // ため、**日本語の点を1つ足すだけで図が壊れていた** (実測: 引用符なら通る)。
+    lines.splice(insertAt, 0, '    ' + quoteName(label) + ': [' + x + ', ' + y + ']');
     return lines.join('\n');
   }
 
@@ -82,6 +86,11 @@ window.MA.modules.quadrantChart = (function() {
   // 点の名前は `名前: [x, y]` の左側にそのまま置かれる。
   // 英数字と空白以外が入ると mermaid の字句解析が落ちるので、引用符で囲う。
   // 「設計(詳細)」「配列[0]」のような実務の名前はこれが無いと図が出ない。
+  function stripQuotes(v) {
+    var s = String(v == null ? '' : v);
+    return /^"[\s\S]*"$/.test(s) ? s.slice(1, -1) : s;
+  }
+
   function quoteName(v) {
     var s = String(v == null ? '' : v);
     if (/^"[\s\S]*"$/.test(s)) return s;

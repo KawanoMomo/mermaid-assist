@@ -59,6 +59,10 @@
   "examined": 2,
   "total": 3
  },
+ "r23-add-renders": {
+  "examined": 21,
+  "total": 21
+ },
  "r3-render": {
   "examined": 10,
   "total": 21

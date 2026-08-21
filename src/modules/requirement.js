@@ -8,10 +8,19 @@ window.MA.modules.requirementDiagram = (function() {
   var VERIFY_METHODS = ['analysis', 'inspection', 'test', 'demonstration'];
   var RELTYPES = ['contains', 'copies', 'derives', 'satisfies', 'verifies', 'refines', 'traces'];
 
-  var REQ_BLOCK_RE = new RegExp('^(' + REQ_TYPES.join('|') + ')\\s+([A-Za-z_][A-Za-z0-9_-]*)\\s*\\{\\s*$');
-  var ELEMENT_BLOCK_RE = /^element\s+([A-Za-z_][A-Za-z0-9_-]*)\s*\{\s*$/;
+  // 要求名・要素名は引用符で囲えば日本語が使える。
+  //
+  // diagnose には「requirement 図の要求名・要素名には全角文字が使えません」と
+  // 書いていたが、**実測すると引用符で通る**
+  // (`requirement "受信要求" { … }` → 「<<Requirement>>受信要求」を描画、v11.13)。
+  // architecture (A83) と同じ形で、直せる問題を制限として扱っていた。
+  //
+  // C 区分の再検証で r16 の逆向き検査を全図種に広げたら出た。
+  var NAME = '(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_-]*)';
+  var REQ_BLOCK_RE = new RegExp('^(' + REQ_TYPES.join('|') + ')\\s+(' + NAME + ')\\s*\\{\\s*$');
+  var ELEMENT_BLOCK_RE = new RegExp('^element\\s+(' + NAME + ')\\s*\\{\\s*$');
   var FIELD_RE = /^([A-Za-z]+)\s*:\s*(.+)$/;
-  var REL_RE = new RegExp('^([A-Za-z_][A-Za-z0-9_-]*)\\s+-\\s+(' + RELTYPES.join('|') + ')\\s+->\\s+([A-Za-z_][A-Za-z0-9_-]*)\\s*$');
+  var REL_RE = new RegExp('^(' + NAME + ')\\s+-\\s+(' + RELTYPES.join('|') + ')\\s+->\\s+(' + NAME + ')\\s*$');
 
   function stripQuotes(s) {
     if (s.length >= 2 && s.charAt(0) === '"' && s.charAt(s.length - 1) === '"') {
@@ -39,7 +48,7 @@ window.MA.modules.requirementDiagram = (function() {
       var rm = trimmed.match(REQ_BLOCK_RE);
       if (rm) {
         current = {
-          kind: 'requirement', reqType: rm[1], name: rm[2],
+          kind: 'requirement', reqType: rm[1], name: stripQuotes(rm[2]),
           id: '', text: '', risk: '', verifymethod: '',
           line: lineNum,
         };
@@ -50,7 +59,7 @@ window.MA.modules.requirementDiagram = (function() {
       var em = trimmed.match(ELEMENT_BLOCK_RE);
       if (em) {
         current = {
-          kind: 'element', name: em[1],
+          kind: 'element', name: stripQuotes(em[1]),
           type: '', docref: '',
           line: lineNum,
         };
@@ -80,7 +89,7 @@ window.MA.modules.requirementDiagram = (function() {
       if (lm) {
         result.relations.push({
           id: '__rel_' + (relCounter++),
-          from: lm[1], reltype: lm[2], to: lm[3],
+          from: stripQuotes(lm[1]), reltype: lm[2], to: stripQuotes(lm[3]),
           line: lineNum,
         });
       }
@@ -89,11 +98,28 @@ window.MA.modules.requirementDiagram = (function() {
     return result;
   }
 
+  // 名前に半角英数字以外が入るときは引用符で囲う (mermaid の要件)。
+  // 囲まないと Lexical error になる。囲えば通ることを実測済み。
+  function quoteName(v) {
+    var s2 = String(v == null ? '' : v);
+    if (/^"[\s\S]*"$/.test(s2)) return s2;
+    if (/^[A-Za-z_][A-Za-z0-9_-]*$/.test(s2)) return s2;
+    return '"' + s2.replace(/"/g, '') + '"';
+  }
+
+  // requirement 図の属性は **空欄を書けない**。実測 (mermaid v11.13):
+  //
+  //   id: ""            → Parse error      id 行なし        → OK
+  //   text: ""          → Parse error      text 行なし      → OK
+  //   risk:             → Parse error      risk 行なし      → OK
+  //   type: ""          → Parse error      type 行なし      → OK
+  //
+  // 追加ボタンは空の `id: ""` `text: ""` を出していたので、
+  // **「+ 要件追加」「+ エレメント追加」を押しただけで図が壊れていた**。
+  // 空欄は行ごと出さない / 消すのが正しい形。
   function addRequirement(text, reqType, name) {
     var block = [
-      reqType + ' ' + name + ' {',
-      '    id: ""',
-      '    text: ""',
+      reqType + ' ' + quoteName(name) + ' {',
       '    risk: medium',
       '    verifymethod: analysis',
       '}',
@@ -107,9 +133,7 @@ window.MA.modules.requirementDiagram = (function() {
 
   function addElement(text, name) {
     var block = [
-      'element ' + name + ' {',
-      '    type: ""',
-      '    docref: ""',
+      'element ' + quoteName(name) + ' {',
       '}',
     ];
     var lines = text.split('\n');
@@ -120,7 +144,7 @@ window.MA.modules.requirementDiagram = (function() {
   }
 
   function addRelation(text, from, reltype, to) {
-    var newLine = from + ' - ' + reltype + ' -> ' + to;
+    var newLine = quoteName(from) + ' - ' + reltype + ' -> ' + quoteName(to);
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
@@ -143,11 +167,13 @@ window.MA.modules.requirementDiagram = (function() {
       lines.splice(idx, 1);
     }
     if (elementName) {
-      var relRe = new RegExp('^\\s*([A-Za-z_][A-Za-z0-9_-]*)\\s+-\\s+\\S+\\s+->\\s+([A-Za-z_][A-Za-z0-9_-]*)\\s*$');
+      // 引用符付きの名前も見る。見ないと日本語名の関係行が残り、
+      // mermaid は参照だけで要素を作るので**消したはずの要求が図に残る**。
+      var relRe = new RegExp('^\\s*(' + NAME + ')\\s+-\\s+\\S+\\s+->\\s+(' + NAME + ')\\s*$');
       lines = lines.filter(function(ln) {
         var m = ln.match(relRe);
         if (!m) return true;
-        return m[1] !== elementName && m[2] !== elementName;
+        return stripQuotes(m[1]) !== elementName && stripQuotes(m[2]) !== elementName;
       });
     }
     // 末尾に空行を残さない。
@@ -180,19 +206,20 @@ window.MA.modules.requirementDiagram = (function() {
     var fieldKey = String(field || '').toLowerCase();
     if (!(allowed || KNOWN_REQ_FIELDS)[fieldKey]) return text;
     var quotedFields = { id: 1, text: 1, type: 1, docref: 1 };
-    var formatted = value;
-    if (quotedFields[fieldKey]) {
-      var clean = typeof value === 'string' ? value.replace(/^"|"$/g, '') : value;
-      formatted = '"' + clean + '"';
-    }
+    var raw = typeof value === 'string' ? value.replace(/^"|"$/g, '') : value;
+    // 空欄は属性行として書けない (mermaid が拒否する)。行ごと消す。
+    var isEmpty = (raw === undefined || raw === null || String(raw).trim() === '');
+    var formatted = quotedFields[fieldKey] ? '"' + raw + '"' : value;
     for (var j = idx + 1; j < lines.length; j++) {
       var t2 = lines[j].trim();
       if (t2 === '}') {
+        if (isEmpty) return text;               // 無い属性を空で足す必要はない
         lines.splice(j, 0, '    ' + fieldKey + ': ' + formatted);
         return lines.join('\n');
       }
       var m = t2.match(/^([A-Za-z]+)\s*:\s*(.*)$/);
       if (m && m[1].toLowerCase() === fieldKey) {
+        if (isEmpty) { lines.splice(j, 1); return lines.join('\n'); }
         var indent = lines[j].match(/^(\s*)/)[1];
         lines[j] = indent + fieldKey + ': ' + formatted;
         return lines.join('\n');
@@ -221,12 +248,14 @@ window.MA.modules.requirementDiagram = (function() {
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var indent = lines[idx].match(/^(\s*)/)[1];
-    var m = lines[idx].trim().match(/^([A-Za-z_][A-Za-z0-9_-]*)\s+-\s+(\S+)\s+->\s+([A-Za-z_][A-Za-z0-9_-]*)\s*$/);
+    // 端点が引用付き ("受信要求") の関係行を読めないと、日本語名を含む関係の
+    // 編集が黙って無反応になる。読む側と書く側の両方を引用に合わせる。
+    var m = lines[idx].trim().match(REL_RE);
     if (!m) return text;
     var from = m[1], reltype = m[2], to = m[3];
-    if (field === 'from') from = value;
+    if (field === 'from') from = quoteName(value);
     else if (field === 'reltype') reltype = value;
-    else if (field === 'to') to = value;
+    else if (field === 'to') to = quoteName(value);
     lines[idx] = indent + from + ' - ' + reltype + ' -> ' + to;
     return lines.join('\n');
   }
@@ -237,21 +266,25 @@ window.MA.modules.requirementDiagram = (function() {
     if (idx < 0 || idx >= lines.length) return text;
     var indent = lines[idx].match(/^(\s*)/)[1];
     var trimmed = lines[idx].trim();
+    var q = quoteName(newName);
     var rm = trimmed.match(REQ_BLOCK_RE);
     if (rm) {
-      lines[idx] = indent + rm[1] + ' ' + newName + ' {';
+      lines[idx] = indent + rm[1] + ' ' + q + ' {';
     } else {
       var em = trimmed.match(ELEMENT_BLOCK_RE);
       if (em) {
-        lines[idx] = indent + 'element ' + newName + ' {';
+        lines[idx] = indent + 'element ' + q + ' {';
       }
     }
-    var relRe = /^(\s*)([A-Za-z_][A-Za-z0-9_-]*)(\s+-\s+\S+\s+->\s+)([A-Za-z_][A-Za-z0-9_-]*)(\s*)$/;
+    // 追加と削除だけ引用に対応させて、**名前の変更を忘れていた**。
+    // 端点の照合も裸の英数字しか見ておらず、引用付きの名前は書き換わらない。
+    var relRe = new RegExp('^(\\s*)(' + NAME + ')(\\s+-\\s+\\S+\\s+->\\s+)(' +
+      NAME + ')(\\s*)$');
     for (var j = 0; j < lines.length; j++) {
       var rm2 = lines[j].match(relRe);
       if (rm2) {
-        var from = rm2[2] === oldName ? newName : rm2[2];
-        var to = rm2[4] === oldName ? newName : rm2[4];
+        var from = stripQuotes(rm2[2]) === oldName ? q : rm2[2];
+        var to = stripQuotes(rm2[4]) === oldName ? q : rm2[4];
         lines[j] = rm2[1] + from + rm2[3] + to + rm2[5];
       }
     }
@@ -592,9 +625,14 @@ window.MA.modules.requirementDiagram = (function() {
       update: function(text, lineNum, field, value, opts) {
         opts = opts || {};
         if (opts.kind === 'relation') return updateRelation(text, lineNum, field, value);
+        // 名前の変更は要求もエレメントも updateName が受け持つ。
+        // ここで kind を先に見ていたため、エレメントの name は
+        // updateElementField (type/docref しか知らない) に流れて**黙って無反応**
+        // だった。パネルの経路は updateName を直に呼ぶので気づけなかった
+        // ——「UI 経路だけ動いて契約経路が動かない」形の14件目。
+        if (field === 'name') return updateName(text, lineNum, opts.oldName || opts.name || opts.id, value);
         if (opts.kind === 'element') return updateElementField(text, lineNum, field, value);
         if (field === 'reqType') return updateRequirementType(text, lineNum, value);
-        if (field === 'name') return updateName(text, lineNum, opts.oldName || opts.name || opts.id, value);
         return updateRequirementField(text, lineNum, field, value);
       },
       moveUp: function(text, lineNum) {

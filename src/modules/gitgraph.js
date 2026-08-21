@@ -5,6 +5,30 @@ window.MA.modules = window.MA.modules || {};
 window.MA.modules.gitGraph = (function() {
   var COMMIT_TYPES = ['NORMAL', 'REVERSE', 'HIGHLIGHT'];
 
+  // ブランチ名に日本語を入れるには引用符が要る。実測 (mermaid v11.13):
+  //
+  //   branch 機能A     → Lexer error
+  //   branch "機能A"   → OK (図に「機能A」が出る)
+  //
+  // 裸のまま書いていたので、**日本語のブランチ名を作ると図が壊れていた**。
+  // architecture (A83) / requirement と同じ形で、これが5例目。
+  // 読む側も `\S+` のままだと `"機能A"` を引用符ごと名前として扱ってしまい、
+  // checkout / merge の照合が外れる。読む側と書く側を同時に合わせる。
+  var BRANCH = '(?:"[^"]*"|\\S+)';
+
+  function stripQuotes(v) {
+    var s = String(v == null ? '' : v);
+    return /^"[\s\S]*"$/.test(s) ? s.slice(1, -1) : s;
+  }
+
+  // git のブランチ名として裸で書ける文字だけなら、そのまま出す。
+  function quoteBranch(v) {
+    var s = String(v == null ? '' : v);
+    if (/^"[\s\S]*"$/.test(s)) return s;
+    if (/^[A-Za-z0-9_./-]+$/.test(s)) return s;
+    return '"' + s.replace(/"/g, '') + '"';
+  }
+
   function parseArgsToken(str) {
     // Parse space-separated `key: value` pairs where value may be "quoted" or bare
     var result = {};
@@ -45,37 +69,37 @@ window.MA.modules.gitGraph = (function() {
       }
 
       // branch
-      var bm = trimmed.match(/^branch\s+(\S+)/);
+      var bm = trimmed.match(new RegExp('^branch[ \\t]+(' + BRANCH + ')'));
       if (bm) {
         result.elements.push({
           kind: 'branch',
-          name: bm[1],
+          name: stripQuotes(bm[1]),
           fromBranch: currentBranch,
           line: lineNum,
         });
-        currentBranch = bm[1];
+        currentBranch = stripQuotes(bm[1]);
         continue;
       }
 
       // checkout
-      var cm = trimmed.match(/^checkout\s+(\S+)/);
+      var cm = trimmed.match(new RegExp('^checkout[ \\t]+(' + BRANCH + ')'));
       if (cm) {
         result.elements.push({
           kind: 'checkout',
-          target: cm[1],
+          target: stripQuotes(cm[1]),
           line: lineNum,
         });
-        currentBranch = cm[1];
+        currentBranch = stripQuotes(cm[1]);
         continue;
       }
 
       // merge
-      var mm = trimmed.match(/^merge\s+(\S+)(.*)/);
+      var mm = trimmed.match(new RegExp('^merge[ \\t]+(' + BRANCH + ')(.*)'));
       if (mm) {
         var margs = parseArgsToken(mm[2]);
         result.elements.push({
           kind: 'merge',
-          target: mm[1],
+          target: stripQuotes(mm[1]),
           tag: margs.tag || '',
           mergeType: margs.type || 'NORMAL',
           line: lineNum,
@@ -117,7 +141,7 @@ window.MA.modules.gitGraph = (function() {
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
-    lines.splice(insertAt, 0, '    branch ' + name);
+    lines.splice(insertAt, 0, '    branch ' + quoteBranch(name));
     return lines.join('\n');
   }
 
@@ -125,7 +149,7 @@ window.MA.modules.gitGraph = (function() {
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
-    lines.splice(insertAt, 0, '    checkout ' + target);
+    lines.splice(insertAt, 0, '    checkout ' + quoteBranch(target));
     return lines.join('\n');
   }
 
@@ -133,7 +157,7 @@ window.MA.modules.gitGraph = (function() {
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
-    var line = '    merge ' + target + (tag ? ' tag: "' + tag + '"' : '');
+    var line = '    merge ' + quoteBranch(target) + (tag ? ' tag: "' + tag + '"' : '');
     lines.splice(insertAt, 0, line);
     return lines.join('\n');
   }
@@ -175,9 +199,9 @@ window.MA.modules.gitGraph = (function() {
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var indent = lines[idx].match(/^(\s*)/)[1];
-    var bm = lines[idx].trim().match(/^branch\s+(\S+)/);
-    var oldName = bm ? bm[1] : null;
-    lines[idx] = indent + 'branch ' + newName;
+    var bm = lines[idx].trim().match(new RegExp('^branch[ \\t]+(' + BRANCH + ')'));
+    var oldName = bm ? stripQuotes(bm[1]) : null;
+    lines[idx] = indent + 'branch ' + quoteBranch(newName);
     if (oldName && oldName !== newName) renameBranchRefs(lines, oldName, newName, idx);
     return lines.join('\n');
   }
@@ -194,8 +218,10 @@ window.MA.modules.gitGraph = (function() {
       if (j === skipIdx) continue;
       var indent = lines[j].match(/^(\s*)/)[1];
       var trimmed = lines[j].trim();
-      var m = trimmed.match(/^(checkout|merge)\s+(\S+)(.*)$/);
-      if (m && m[2] === oldName) lines[j] = indent + m[1] + ' ' + newName + m[3];
+      var m = trimmed.match(new RegExp('^(checkout|merge)[ \\t]+(' + BRANCH + ')(.*)$'));
+      if (m && stripQuotes(m[2]) === oldName) {
+        lines[j] = indent + m[1] + ' ' + quoteBranch(newName) + m[3];
+      }
     }
   }
 
@@ -204,7 +230,7 @@ window.MA.modules.gitGraph = (function() {
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var indent = lines[idx].match(/^(\s*)/)[1];
-    lines[idx] = indent + 'checkout ' + newTarget;
+    lines[idx] = indent + 'checkout ' + quoteBranch(newTarget);
     return lines.join('\n');
   }
 
@@ -213,14 +239,14 @@ window.MA.modules.gitGraph = (function() {
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var trimmed = lines[idx].trim();
-    var m = trimmed.match(/^merge\s+(\S+)(.*)/);
+    var m = trimmed.match(new RegExp('^merge[ \\t]+(' + BRANCH + ')(.*)'));
     if (!m) return text;
-    var target = m[1];
+    var target = stripQuotes(m[1]);
     var args = parseArgsToken(m[2]);
     if (field === 'target') target = value;
     else if (field === 'tag') args.tag = value;
     else if (field === 'type') args.type = value;
-    var parts = ['merge', target];
+    var parts = ['merge', quoteBranch(target)];
     if (args.type && args.type !== 'NORMAL') parts.push('type: ' + args.type);
     if (args.tag) parts.push('tag: "' + args.tag + '"');
     var indent = lines[idx].match(/^(\s*)/)[1];
