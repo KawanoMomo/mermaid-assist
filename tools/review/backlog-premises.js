@@ -82,6 +82,19 @@ const PREMISES = {
         detail: capped ? '一覧に上限か仮想化が入った → G6 を見直す' : '全行を作るまま' };
     },
   },
+  G7: {
+    what: 'classDiagram と timeline で未知の行が黙って消える (mermaid の挙動)',
+    human: true,
+    check: () => {
+      // 前提は「アプリは捏造していない」= r13 の規約を守っていること。
+      // 捏造を始めたら、それは別の欠陥として r13 が捕まえる。
+      // mermaid 側が将来エラーを返すようになったら、この項目は不要になる。
+      const s2 = read('tools/review/out/r13-unknown-syntax.json');
+      return { ok: true,
+        detail: s2 ? 'r13 が捏造を見張っている・警告の範囲は人の判断待ち'
+                   : 'r13 が未実行' };
+    },
+  },
 };
 
 const md = read('docs/backlog.md');
