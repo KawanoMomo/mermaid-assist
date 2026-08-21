@@ -2413,6 +2413,13 @@ function init() {
     } else if ((e.key === 'e' || e.key === 'E') && !e.ctrlKey && !e.metaKey && !e.altKey && !inInput && !inEditor) {
       e.preventDefault();
       focusEditor();
+    } else if (e.key === 'F1' && !e.ctrlKey && !e.altKey) {
+      // `?` は本文に打てる文字なので、エディタと入力欄では出せない。
+      // **利用者が一番長くいる場所 (エディタ) でだけヘルプを呼べなかった。**
+      // 実測: エディタにカーソルがある状態で `?` を押すと、ヘルプは出ず
+      // 本文に「?」が入る。F1 はどこにいても効かせる。
+      e.preventDefault();
+      toggleShortcutHelp();
     } else if (e.key === '?' && !inInput && !inEditor) {
       // ショートカットが12個あるのに、それを知る手段が画面に無かった。
       // キーボード中心の人にとって一番価値のある部分が伝わっていない。
