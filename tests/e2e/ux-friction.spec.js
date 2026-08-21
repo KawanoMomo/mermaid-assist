@@ -314,3 +314,53 @@ test.describe('UI-013: 本文を編集しても追加フォームの書きかけ
     await expect(page.locator('#fc-add-node-id')).toHaveValue('');
   });
 });
+
+test.describe('kanban: 図をクリックして選べる', () => {
+  // 「mermaid が DSL の id を SVG に出さないので入れない」という判断で
+  // 11図種まとめて重ね合わせを見送っていたが、kanban は当てはまらなかった。
+  //   列  → <g class="cluster" id="設計 中">  … 列名そのもの
+  //   札  → <g class="node" id="t1">          … DSL の id (無ければ本文)
+  // どちらも順序に依らない。見送りの理由が全図種に当てはまるかを
+  // 確かめずに一括りにしていた。
+  test('列と札に当たり判定が出る', async ({ page }) => {
+    await open(page, 'kanban');
+    const hits = await page.locator('#overlay-layer [data-element-id]').evaluateAll(
+      (els) => els.map((e) => e.getAttribute('data-element-id')));
+    expect(hits).toContain('Todo');
+    expect(hits).toContain('InProgress');
+    expect(hits).toContain('Done');
+    expect(hits.length).toBe(7);   // 列3 + 札4
+  });
+
+  test('列を押すと列が選ばれる (札に取られない)', async ({ page }) => {
+    // 列の枠は札の上に重なって見えるので、枠全体を当たり判定にすると
+    // 列を押したつもりで札が選ばれる (実測した)。列は見出しの帯だけをつかむ。
+    await open(page, 'kanban');
+    await page.locator('#overlay-layer [data-element-id="Todo"]').click({ force: true });
+    await page.waitForTimeout(700);
+    expect(await page.evaluate(() => window.MA.selection.getSelected()))
+      .toEqual([{ type: 'column', id: 'Todo' }]);
+  });
+
+  test('札を押すと札が選ばれる', async ({ page }) => {
+    await open(page, 'kanban');
+    await page.locator('#overlay-layer [data-element-id="__c_0"]').click({ force: true });
+    await page.waitForTimeout(700);
+    expect(await page.evaluate(() => window.MA.selection.getSelected()))
+      .toEqual([{ type: 'card', id: '__c_0' }]);
+  });
+
+  test('id 付きの札も図から選べる', async ({ page }) => {
+    await open(page, 'kanban');
+    await setText(page, 'kanban\n    設計 中\n        t1[やること]\n    レビュー待ち\n        t2[確認]\n');
+    await page.waitForTimeout(1500);
+    const hits = await page.locator('#overlay-layer [data-element-id]').evaluateAll(
+      (els) => els.map((e) => e.getAttribute('data-element-id')));
+    expect(hits).toContain('t1');
+    expect(hits).toContain('t2');
+    await page.locator('#overlay-layer [data-element-id="t2"]').click({ force: true });
+    await page.waitForTimeout(700);
+    expect(await page.evaluate(() => window.MA.selection.getSelected()))
+      .toEqual([{ type: 'card', id: 't2' }]);
+  });
+});

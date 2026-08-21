@@ -202,3 +202,48 @@ test.describe('UI-014/UI-015: クリップボードのコピーが黙って失�
     await ctx.close();
   });
 });
+
+test.describe('書き出した SVG に手を入れても、隣の図に影響しない', () => {
+  // UI-009 では「2枚並べるとスタイルが混ざる」と書いたが、当時は再現できず
+  // 「未確認」として残していた。両方が同じテーマだから見分けられなかっただけで、
+  // 片方を手で書き換えれば測れる (印刷用に色を変えるのは実務で普通にやる)。
+  //
+  // 測った結果、害の向きは2通りあった:
+  //   url(#id) の参照      … **最初の一致が勝つ** → 2枚目が1枚目のマーカーを使う
+  //   同じセレクタの CSS   … **後が勝つ**       → 1枚目が自分のスタイルを失う
+  //
+  // 後者が今回の確認対象。id を一意にしたので、書き換えた側が書き換えのまま残る。
+  test('片方の塗りを変えても、もう片方は元の色のまま', async ({ browser }, testInfo) => {
+    test.setTimeout(120000);
+    const a = await exportSvgFrom(browser, testInfo, 'painted',
+      'flowchart TD\n    A[開始] --> B[処理]\n');
+    const b = await exportSvgFrom(browser, testInfo, 'plain',
+      'flowchart TD\n    X[入力] --> Y[検証]\n');
+
+    // 「印刷用に節の塗りを変える」を手で当てる。
+    // セレクタは `#<id> .node rect, … path{…}` の並びなので、
+    // `.node rect{` を探すと当たらない (最初それで測定を空振りさせた)。
+    const re = /(#[\w-]+ \.node rect[^{]*\{[^}]*?fill\s*:\s*)([^;]+)(;)/;
+    expect(a).toMatch(re);
+    const painted = a.replace(re, '$1#ff0000$3');
+    expect(painted).toContain('#ff0000');
+
+    const page = await browser.newPage();
+    await page.setContent('<!doctype html><meta charset="utf-8"><body>' +
+      painted.replace(/^<\?xml[^>]*>/, '') + '<hr>' + b.replace(/^<\?xml[^>]*>/, '') + '</body>');
+    await page.waitForTimeout(500);
+    const r = await page.evaluate(() => {
+      const svgs = document.querySelectorAll('svg');
+      const fill = (s) => {
+        const el = s.querySelector('.label-container');
+        return el ? getComputedStyle(el).fill : '?';
+      };
+      return { first: fill(svgs[0]), second: fill(svgs[1]) };
+    });
+    // 書き換えた側は書き換えのまま
+    expect(r.first).toBe('rgb(255, 0, 0)');
+    // もう片方は巻き添えにならない
+    expect(r.second).not.toBe('rgb(255, 0, 0)');
+    await page.close();
+  });
+});

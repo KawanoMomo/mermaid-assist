@@ -20,14 +20,22 @@ window.MA.modules.kanban = (function() {
 
       var indent = raw.match(/^(\s*)/)[1].length;
 
-      // Card: starts with [
-      var cm = trimmed.match(/^\[([^\]]*)\](.*)$/);
+      // カード。`[本文]` と `id[本文]` の両方を受ける。
+      //
+      // mermaid の正規表記は `id[本文]` で、`@{ assigned: '…' }` の割り当てを
+      // 付けるにはこの形が要る。ところが `^\[` 始まりしか見ていなかったので、
+      // **id 付きのカードは行ごと消えていた** (列判定の indent にも掛からない)。
+      // mermaid は描くので、図には出るのに一覧にも重ね合わせにも出ない。
+      var cm = trimmed.match(/^([A-Za-z_][\w-]*)?\[([^\]]*)\](.*)$/);
       if (cm) {
+        // mermaid は SVG の id に DSL の id をそのまま使う (無ければ本文)。
+        // 重ね合わせの照合をそこに合わせるため、こちらも同じものを id にする。
         result.elements.push({
           kind: 'card',
-          id: '__c_' + (cardCounter++),
-          text: cm[1],
-          meta: (cm[2] || '').trim(),
+          id: cm[1] || ('__c_' + (cardCounter++)),
+          cardId: cm[1] || '',
+          text: cm[2],
+          meta: (cm[3] || '').trim(),
           parentId: currentColumn,
           line: lineNum,
         });
@@ -295,15 +303,59 @@ window.MA.modules.kanban = (function() {
         '        [Initial release]',
       ].join('\n');
     },
+    // 重ね合わせ。
+    //
+    // 「mermaid が DSL の id を SVG に出さないので入れない」という判断で
+    // 11図種まとめて見送っていたが、**kanban は当てはまらなかった**。実測すると
+    //
+    //   列  → `<g class="cluster" id="設計 中">`   … 列名そのもの
+    //   札  → `<g class="node" id="t1">`           … DSL の id (無ければ本文)
+    //
+    // どちらも順序に依らない。見送りの理由が全図種に当てはまるかを確かめずに
+    // 一括りにしていた。10図種については理由は今も正しい (id が `node-1` や
+    // `edge_0_1` のような位置由来で、並べ替えると別の要素を指す)。
     buildOverlay: function(svgEl, parsedData, overlayEl) {
       if (!overlayEl) return;
       while (overlayEl.firstChild) overlayEl.removeChild(overlayEl.firstChild);
       if (!svgEl) return;
-      var viewBox = svgEl.getAttribute('viewBox');
-      if (viewBox) overlayEl.setAttribute('viewBox', viewBox);
-      var svgW = svgEl.getAttribute('width'); var svgH = svgEl.getAttribute('height');
-      if (svgW) overlayEl.setAttribute('width', svgW);
-      if (svgH) overlayEl.setAttribute('height', svgH);
+      var G = window.MA.overlayGeom;
+      G.syncViewport(svgEl, overlayEl);
+      if (!parsedData || !parsedData.elements) return;
+
+      // 札は DSL の id、無ければ本文で照合する (mermaid と同じ規則)。
+      var byKey = {};
+      parsedData.elements.forEach(function(e) {
+        if (e.kind === 'column') byKey['c:' + e.id] = e;
+        else if (e.kind === 'card') byKey['k:' + (e.cardId || e.text)] = e;
+      });
+
+      function place(selector, prefix, useLabelBand) {
+        var nodes = svgEl.querySelectorAll(selector);
+        for (var i = 0; i < nodes.length; i++) {
+          var el = byKey[prefix + nodes[i].getAttribute('id')];
+          if (!el) continue;
+          // 列の枠は札の上に重なって見えるので、枠全体を当たり判定にすると
+          // 札を押せなくなる (実測: 列を押したつもりで札が選ばれた)。
+          // 列は見出しの帯だけをつかみ所にする。札は列とは別のグループにあるので
+          // 重ならない。
+          var target = nodes[i];
+          if (useLabelBand) {
+            var lab = nodes[i].querySelector('.cluster-label');
+            if (lab) target = lab;
+          }
+          var box = G.boxInSvgSpace(svgEl, target);
+          if (!box) continue;
+          overlayEl.appendChild(G.hitRect(document, box, {
+            id: el.id,
+            kind: el.kind,
+            line: el.line,
+            selected: window.MA.selection.isSelected(el.id),
+            className: 'overlay-node',
+          }));
+        }
+      }
+      place('g.cluster[id]', 'c:', true);
+      place('g.node[id]', 'k:', false);
     },
     renderProps: renderProps,
     operations: {

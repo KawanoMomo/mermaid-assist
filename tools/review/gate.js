@@ -13,8 +13,8 @@ const path = require('path');
 const ROOT = process.argv[2] || process.cwd();
 
 // 下限。既存の件数を割り込んだら、テストが消されたということ。
-const MIN_UNIT = 931;
-const MIN_E2E = 401;
+const MIN_UNIT = 938;
+const MIN_E2E = 406;
 const MIN_RENDER = 34;          // rename 26 + delete 8
 const MIN_RENDER_SUITES = 2;    // case ファイルの本数。1本消されても気付けるように
 
