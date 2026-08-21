@@ -55,6 +55,10 @@
   "examined": 21,
   "total": 21
  },
+ "r22-silent-failure": {
+  "examined": 2,
+  "total": 3
+ },
  "r3-render": {
   "examined": 10,
   "total": 21

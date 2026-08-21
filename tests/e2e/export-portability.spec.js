@@ -142,3 +142,63 @@ test.describe('PNG の書き出し倍率', () => {
     expect(buf.readUInt32BE(20)).toBe(vb.h);
   });
 });
+
+test.describe('UI-014/UI-015: クリップボードのコピーが黙って失敗しない', () => {
+  // 以前は navigator.clipboard.write を呼びっぱなしで、返る Promise を誰も
+  // 見ていなかった。実測すると失敗が2通りあり、どちらも画面に何も出なかった。
+  //
+  //   権限が下りない        → コンソールに Write permission denied、画面は無反応
+  //   ClipboardItem が無い  → コンソールに ReferenceError、画面は無反応
+  //
+  // 押しても何も起きないので、そのまま資料へ貼り付けると前にコピーしていた
+  // 何かが入る。失敗が成功と見分けられないのが一番悪い。
+  async function copy(page) {
+    await page.goto(HTML_URL);
+    await page.waitForSelector('#preview-svg svg', { timeout: 20000 });
+    await page.locator('#btn-export').click();
+    await page.waitForTimeout(250);
+    await page.locator('#exp-clipboard').click();
+    await page.waitForTimeout(1600);
+  }
+
+  test('成功したらコピーしたことが画面に出る', async ({ browser }) => {
+    const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
+    const page = await ctx.newPage();
+    const uncaught = [];
+    page.on('pageerror', (e) => uncaught.push(String(e.message)));
+    await copy(page);
+    await expect(page.locator('#status-info')).toContainText('クリップボードにコピーしました');
+    expect(uncaught).toEqual([]);
+    await ctx.close();
+  });
+
+  test('権限が下りないときは理由が画面に出る', async ({ browser }) => {
+    const ctx = await browser.newContext();   // 権限を与えない
+    const page = await ctx.newPage();
+    const uncaught = [];
+    page.on('pageerror', (e) => uncaught.push(String(e.message)));
+    await copy(page);
+    await expect(page.locator('#status-info')).toContainText('コピーできませんでした');
+    // 未処理の例外は利用者に届かないので、残してはいけない
+    expect(uncaught).toEqual([]);
+    await ctx.close();
+  });
+
+  test('非対応ブラウザではその旨を出す', async ({ browser }) => {
+    const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
+    const page = await ctx.newPage();
+    const uncaught = [];
+    page.on('pageerror', (e) => uncaught.push(String(e.message)));
+    await page.goto(HTML_URL);
+    await page.waitForSelector('#preview-svg svg', { timeout: 20000 });
+    await page.evaluate(() => { delete window.ClipboardItem; });
+    await page.locator('#btn-export').click();
+    await page.waitForTimeout(250);
+    await page.locator('#exp-clipboard').click();
+    await page.waitForTimeout(1200);
+    await expect(page.locator('#status-info')).toContainText('非対応');
+    await expect(page.locator('#status-info')).toContainText('PNG');
+    expect(uncaught).toEqual([]);
+    await ctx.close();
+  });
+});

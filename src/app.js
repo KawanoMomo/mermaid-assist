@@ -1295,11 +1295,38 @@ function exportPNG(transparent, scale) {
   }, scale);
 }
 
+// クリップボードへコピーする。
+//
+// 以前は `navigator.clipboard.write(...)` を呼びっぱなしで、返る Promise を
+// 誰も見ていなかった。実測すると失敗が2通りあり、**どちらも画面には何も出ない**:
+//
+//   権限が下りない          → コンソールに Write permission denied、画面は無反応
+//   ClipboardItem が無い     → コンソールに ReferenceError、画面は無反応
+//                             (Firefox / Safari / 古いブラウザ)
+//
+// 押しても何も起きないので、利用者はそのまま資料へ貼り付ける。すると
+// **前にコピーしていた何か**が入る。失敗が成功と見分けられないのが一番悪い。
+// 上書き保存の非対応を告げているのと同じ作法に揃える。
 function exportClipboard() {
   if (blockExportIfStale()) return;
+  if (typeof ClipboardItem === 'undefined' || !navigator.clipboard || !navigator.clipboard.write) {
+    showTransient('このブラウザは図のコピーに非対応 — Chrome / Edge なら使えます。PNG で保存してください', 6000);
+    return;
+  }
   svgToCanvas(false, function(canvas) {
     canvas.toBlob(function(blob) {
-      navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      if (!blob) { showTransient('図を画像にできませんでした', 4000); return; }
+      Promise.resolve()
+        .then(function() { return navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); })
+        .then(function() {
+          showTransient('図をクリップボードにコピーしました (' +
+            Math.round(blob.size / 1024) + ' KB)');
+        })
+        .catch(function(e) {
+          // 何が起きたか分からないまま貼り付けさせない。
+          showTransient('クリップボードにコピーできませんでした — ' +
+            String((e && e.message) || e).slice(0, 60), 6000);
+        });
     });
   });
 }

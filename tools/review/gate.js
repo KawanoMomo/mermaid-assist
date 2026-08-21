@@ -14,7 +14,7 @@ const ROOT = process.argv[2] || process.cwd();
 
 // 下限。既存の件数を割り込んだら、テストが消されたということ。
 const MIN_UNIT = 931;
-const MIN_E2E = 398;
+const MIN_E2E = 401;
 const MIN_RENDER = 34;          // rename 26 + delete 8
 const MIN_RENDER_SUITES = 2;    // case ファイルの本数。1本消されても気付けるように
 
@@ -61,7 +61,7 @@ check('G4/G5', 'e2e', (!eFail || +eFail[1] === 0) && ePass >= MIN_E2E,
 // 並行レビュー。4観点すべてで指摘ゼロ。
 // 実行済みの結果を読む (gate から起動すると2重に走って遅い)。
 const outDir = path.join(__dirname, 'out');
-const reviewers = ['r1-destructive', 'r2-delete', 'r3-render', 'r4-ui', 'r5-user', 'r6-move', 'r7-consistency', 'r8-scale', 'r9-workflow', 'r10-roundtrip', 'r11-specialchars', 'r12-noop', 'r13-unknown-syntax', 'r14-boundary', 'r15-state-carryover', 'r16-count-parity', 'r17-undo-redo', 'r18-keyboard-only', 'r19-coverage', 'r20-unicode-names', 'r21-reachable'];
+const reviewers = ['r1-destructive', 'r2-delete', 'r3-render', 'r4-ui', 'r5-user', 'r6-move', 'r7-consistency', 'r8-scale', 'r9-workflow', 'r10-roundtrip', 'r11-specialchars', 'r12-noop', 'r13-unknown-syntax', 'r14-boundary', 'r15-state-carryover', 'r16-count-parity', 'r17-undo-redo', 'r18-keyboard-only', 'r19-coverage', 'r20-unicode-names', 'r21-reachable', 'r22-silent-failure'];
 //
 // 出力の**鮮度**も見る。ここを見ていなかったせいで、変異注入したときの
 // 結果ファイルがそのまま残り、ゲートが古いソースへの指摘を読んでいた。
