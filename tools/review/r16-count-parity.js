@@ -38,6 +38,9 @@ const srv = http.createServer((req, res) => {
 (async () => {
   const findings = [];
   const skipped = [];
+  const jpChecked = [];   // 逆向きを実際に検査できた図種
+  const jpSkipped = [];   // 置き換えを mermaid が受け付けず対象外にした図種
+  const jpNoId = [];      // 置き換えられる id が無い図種 (自動採番のみ) = 逆向きが空振り
   await new Promise(r => srv.listen(PORT, r));
   const b = await chromium.launch();
 
@@ -106,18 +109,37 @@ const srv = http.createServer((req, res) => {
     // **同じ図の識別子を日本語にしたとき、こちらの要素数が変わらないこと**を見る。
     // mermaid が両方を同じように描くなら、数が変わるのはこちらの読み取りが
     // 狭いということ。これが A59 / A80 の archetype そのもの。
-    const jpMap = {};
+    // 置き換えるのは **そのモジュール自身が id と呼んでいるもの** だけ。
+    //
+    // 最初は本文中の英単語をすべて置き換えたが、`CUSTOMER ||--o{ ORDER` の
+    // `o` (基数記号の一部) まで巻き込んで mermaid が拒否し、**21図種中9図種が
+    // 黙って対象外**になっていた。しかもその9図種に erDiagram が含まれる —
+    // A59 が出た図種そのもので、**この検査では A59 を見つけられなかった**。
+    //
+    // 予約語の一覧を持つと必ず漏れる (r11 の関数名の表と同じ形)。
+    // parse が返す id だけを対象にすれば、何が識別子かはモジュールが答える。
+    let jp = text;
     let jpSeq = 1;
-    const jp = text.replace(/\b[A-Za-z][A-Za-z0-9_]*\b/g, (w) => {
-      // 図種宣言と予約語は置き換えない (置き換えると別の図になる)
-      if (/^(gantt|sequenceDiagram|flowchart|stateDiagram|classDiagram|erDiagram|journey|kanban|mindmap|timeline|gitGraph|pie|quadrantChart|xychart|sankey|C4Context|packet|architecture|radar|beta|title|section|participant|actor|state|class|note|end|loop|alt|opt|par|else|and|subgraph|direction|columns|block|service|group|commit|branch|checkout|merge|axis|curve|bar|line|dateFormat|axisFormat|requirement|element|id|text|risk|verifymethod|type|docref|left|right|of|over|as|in|TD|LR|RL|BT|v2|string|int|date|PK|FK|UK)$/i.test(w)) return w;
-      // **同じ語には同じ置き換え、違う語には違う置き換え**を返す。
-      // 最初は `'識' + w.length` と書いたので `A` と `B` がどちらも `識1` になり、
-      // 別々のノードが1つに潰れて「5 → 1 に減る」という偽の指摘を出した。
-      // 置き換えが単射でないと、減ったのが読み取りのせいか置き換えのせいか分からない。
-      if (!jpMap[w]) jpMap[w] = '識' + (jpSeq++);
-      return jpMap[w];
+    els.forEach((e) => {
+      const id = String(e.id === undefined || e.id === null ? '' : e.id);
+      // 自動採番 (`__s_0`) は本文に無いので置き換えようがない
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(id)) return;
+      const rep = '識' + (jpSeq++);
+      // 単語境界を手で見る (前後が英数字・下線でないこと)。
+      let out2 = '';
+      let i2 = 0;
+      while (i2 < jp.length) {
+        const at = jp.indexOf(id, i2);
+        if (at < 0) { out2 += jp.slice(i2); break; }
+        const before = at > 0 ? jp[at - 1] : '';
+        const after = jp[at + id.length] || '';
+        const bad = /[A-Za-z0-9_]/.test(before) || /[A-Za-z0-9_]/.test(after);
+        out2 += jp.slice(i2, at) + (bad ? id : rep);
+        i2 = at + id.length;
+      }
+      jp = out2;
     });
+    if (jp === text) { jpNoId.push(key); }
     if (jp !== text) {
       let jpEls = null;
       try { jpEls = (mod.parse(jp).elements || []); } catch (e) { jpEls = null; }
@@ -130,8 +152,13 @@ const srv = http.createServer((req, res) => {
         try { await window.mermaid.parse(t); return { ok: true }; } catch (e) { return { ok: false }; }
       }, jp);
       await q.close();
-      // mermaid が描けない置き換えは、こちらの責任ではないので対象外
+      // mermaid が描けない置き換えは、こちらの責任ではないので対象外。
+      // ただし黙って捨てない。**0件が何件分の0なのか**が分からなくなる
+      // (この検査で block-beta の欠陥が出たとき、他の20図種が実際に
+      //  検査されたのかは出力からは読めなかった)。
+      if (!rr.ok) { jpSkipped.push(key); }
       if (rr.ok) {
+        jpChecked.push(key);
         if (jpEls === null) {
           findings.push({ module: key, fn: 'P2 逆向き',
             what: '識別子を日本語にすると parse が例外 (mermaid は通る)' });
@@ -149,5 +176,10 @@ const srv = http.createServer((req, res) => {
   if (skipped.length) {
     console.log('  (mermaid が描けないひな形: ' + skipped.length + ' 件を対象外) ' + skipped.join(','));
   }
+  console.log('  (逆向きの検査: ' + jpChecked.length + ' 図種を検査 / ' +
+    jpSkipped.length + ' 図種は日本語に置き換えると mermaid が受け付けないため対象外' +
+    (jpSkipped.length ? ': ' + jpSkipped.join(',') : '') +
+    ' / ' + jpNoId.length + ' 図種は置き換えられる id を持たない (自動採番のみ)' +
+    (jpNoId.length ? ': ' + jpNoId.join(',') : '') + ')');
   report('r16-count-parity', findings);
 })();
