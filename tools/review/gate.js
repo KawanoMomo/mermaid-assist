@@ -147,6 +147,29 @@ try {
 check('BACKLOG', '棚卸しの未着手', backlogOpen === 0,
   backlogOpen < 0 ? 'docs/backlog.md が読めない' : (backlogOpen + ' 件が「残」'));
 
+// 棚卸しが現実に追いついていること。
+//
+// これまでゲートは D 区分 (残) しか見ていなかった。そのため C 区分 (検証の仕組み)
+// が **6ラウンド分・7項目遅れていても毎回 PASS していた**。
+// 観点を足しても棚卸しに書かなければ、次に読む人はその観点の存在を知らない。
+//
+// 「プランが現実を写す測定器」であるためには、機械で照合できる部分は
+// 機械で照合する。ここではレビュアーの実体と記録の対応だけを見る。
+let missingDoc = [];
+try {
+  const bl = fs.readFileSync(path.join(ROOT, 'docs', 'backlog.md'), 'utf8');
+  fs.readdirSync(__dirname)
+    .filter(f => /^r\d+-.*\.js$/.test(f))
+    .forEach(f => {
+      const n = f.match(/^r(\d+)-/)[1];
+      // 「R22」「r22」のどちらの書き方でもよい。R2 が R22 に誤って一致しないよう
+      // 後ろに数字が続かないことまで見る。
+      if (!new RegExp('[Rr]' + n + '(?![0-9])').test(bl)) missingDoc.push(f);
+    });
+} catch (e) { missingDoc.push('docs/backlog.md が読めない'); }
+check('DOC', '棚卸しと実体の対応', missingDoc.length === 0,
+  missingDoc.length ? ('棚卸しに記録が無い: ' + missingDoc.join(', ')) : '全レビュアーが記録されている');
+
 const failed = results.filter(r => !r.ok);
 console.log('');
 results.forEach(r => console.log('  ' + (r.ok ? 'PASS' : 'FAIL') + '  ' +
