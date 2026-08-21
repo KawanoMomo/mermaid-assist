@@ -25,7 +25,13 @@ const VIEWPORT = { width: 1366, height: 768 };
 
 const HTML = 'file:///' + path.resolve(ROOT, 'mermaid-assist.html').split(path.sep).join('/');
 
-const TYPES = ['gantt', 'flowchart', 'sequenceDiagram', 'classDiagram', 'block-beta', 'C4Context'];
+// 図種の一覧を直書きしていた。**検査の中身は図種に依存していない**のに、
+// 一覧だけが範囲を狭めていた。r1 / r2 / r6 / r11 / r12 / r14 / r18 は
+// 契約ベースへ書き換え済みで、この検査には書き換えが届いていなかった。
+const TYPES = ['gantt', 'sequenceDiagram', 'flowchart', 'stateDiagram', 'classDiagram',
+  'erDiagram', 'requirementDiagram', 'block-beta', 'timeline', 'mindmap', 'gitGraph',
+  'pie', 'journey', 'quadrantChart', 'xychart-beta', 'sankey-beta', 'C4Context',
+  'packet-beta', 'architecture-beta', 'kanban', 'radar-beta'];
 
 (async () => {
   const findings = [];

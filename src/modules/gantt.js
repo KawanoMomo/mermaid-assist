@@ -1076,7 +1076,12 @@ window.MA.modules.gantt = (function() {
             if (parsedData.tasks[sti].sectionIndex === sli) taskCount++;
           }
           sectionListHtml +=
-            '<div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;">' +
+            // 他の20図種の一覧行は `ma-list-row` と `data-element-id` を持つ。
+            // gantt のセクション行だけ持っておらず、**検査から数え落ちていた**
+            // (100要素の図で「一覧は4件しか出ない」と見えた)。見た目は変えない。
+            '<div class="ma-list-row" data-element-id="' + window.MA.htmlUtils.escHtml(sec.name) +
+              '" data-line="' + sec.line +
+              '" style="display:flex;align-items:center;gap:4px;margin-bottom:4px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;">' +
               '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + window.MA.htmlUtils.escHtml(sec.name) + '">' + window.MA.htmlUtils.escHtml(sec.name) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + taskCount + ')</span></div>' +
               '<button class="prop-section-up" data-section-line="' + sec.line + '" title="上のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:10px;padding:0;">↑</button>' +
               '<button class="prop-section-down" data-section-line="' + sec.line + '" title="下のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:10px;padding:0;">↓</button>' +
@@ -1084,7 +1089,7 @@ window.MA.modules.gantt = (function() {
               // 以前はここだけ confirm を出していて、同じ画面のタスク ✕ は無言、
               // block は件数表示と、3通りの作法が混在していた。押す前に何が起きるかを
               // ボタンの文字で示し、確認は出さない (Undo で戻せる)。
-              '<button class="prop-section-delete" data-section-name="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-line="' + sec.line + '" data-task-count="' + taskCount + '" title="セクション「' + window.MA.htmlUtils.escHtml(sec.name) + '」と含まれるタスク' + taskCount + '件を削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">✕' + (taskCount > 0 ? taskCount : '') + '</button>' +
+              '<button class="prop-section-delete" data-element-id="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-name="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-line="' + sec.line + '" data-task-count="' + taskCount + '" title="セクション「' + window.MA.htmlUtils.escHtml(sec.name) + '」と含まれるタスク' + taskCount + '件を削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">✕' + (taskCount > 0 ? taskCount : '') + '</button>' +
             '</div>';
 
           // セクションの下にタスクを並べる。

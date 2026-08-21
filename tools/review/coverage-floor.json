@@ -4,7 +4,7 @@
   "total": 21
  },
  "r10-roundtrip": {
-  "examined": 6,
+  "examined": 21,
   "total": 21
  },
  "r11-specialchars": {
@@ -24,7 +24,7 @@
   "total": 21
  },
  "r15-state-carryover": {
-  "examined": 5,
+  "examined": 21,
   "total": 21
  },
  "r16-count-parity": {
@@ -76,7 +76,7 @@
   "total": 21
  },
  "r5-user": {
-  "examined": 6,
+  "examined": 21,
   "total": 21
  },
  "r6-move": {
@@ -88,7 +88,7 @@
   "total": 21
  },
  "r8-scale": {
-  "examined": 4,
+  "examined": 19,
   "total": 21
  },
  "r9-workflow": {

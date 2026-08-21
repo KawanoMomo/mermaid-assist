@@ -25,19 +25,37 @@ const VIEWPORT = { width: 1366, height: 768 };
 const HTML = 'file:///' + path.resolve(ROOT, 'mermaid-assist.html').split(path.sep).join('/');
 
 // 図種と、その図種の追加フォームの入力欄
-const FORMS = [
-  ['gantt', ['#prop-add-label', '#prop-add-id']],
-  ['flowchart', ['#fc-add-node-id', '#fc-add-node-label']],
-  ['classDiagram', ['#cl-add-class-id']],
-  ['C4Context', ['#c4-add-id', '#c4-add-label']],
-  ['block-beta', ['#block-add-id', '#block-add-label']],
-];
+// 図種と**入力欄のセレクタ**を直書きしていた (5図種)。
+// セレクタの表を持つと必ず漏れる — r11 / r18 で2度学んだのに、
+// この検査には書き換えが届いていなかった。
+//
+// 追加フォームの欄は、何も選んでいないときにパネルに出ている文字入力欄。
+// 名前ではなく**その場にあるもの**を拾う。
+const TYPES = ['gantt', 'sequenceDiagram', 'flowchart', 'stateDiagram', 'classDiagram',
+  'erDiagram', 'requirementDiagram', 'block-beta', 'timeline', 'mindmap', 'gitGraph',
+  'pie', 'journey', 'quadrantChart', 'xychart-beta', 'sankey-beta', 'C4Context',
+  'packet-beta', 'architecture-beta', 'kanban', 'radar-beta'];
+
+// パネルに出ている「打ち込める欄」の id を集める。
+// 絞り込み欄は追加フォームではないので外す。
+async function addFormFields(page) {
+  return page.evaluate(() => {
+    const panel = document.getElementById('props-content');
+    if (!panel) return [];
+    return [...panel.querySelectorAll('input')]
+      .filter(i => !i.type || i.type === 'text' || i.type === 'search')
+      .filter(i => i.id && i.id !== 'ma-list-filter')
+      .map(i => '#' + i.id);
+  });
+}
 
 (async () => {
   const findings = [];
+  const checked = [];    // 打ち込める欄があった図種
+  const noFields = [];   // 追加フォームに打ち込める欄が無い図種
   const b = await chromium.launch();
 
-  for (const [type, fields] of FORMS) {
+  for (const type of TYPES) {
     const p = await b.newPage({ viewport: { width: VIEWPORT.width, height: VIEWPORT.height } });
     p.on('dialog', async d => { await d.accept(); });
     await p.goto(HTML);
@@ -46,13 +64,17 @@ const FORMS = [
     if (type !== 'gantt') { await p.locator('#diagram-type').selectOption(type); await p.waitForTimeout(1700); }
     await p.waitForTimeout(400);
 
-    // 入力欄に値を入れる
+    // 入力欄に値を入れる (その場にある欄を拾う)
+    const fields = await addFormFields(p);
     let filled = 0;
     for (const f of fields) {
       const loc = p.locator(f);
-      if (await loc.count()) { await loc.fill('ZZ持ち越しZZ'); filled++; }
+      if (await loc.count()) {
+        try { await loc.fill('ZZ持ち越しZZ'); filled++; } catch (e) { /* 読み取り専用など */ }
+      }
     }
-    if (!filled) { await p.close(); continue; }
+    if (!filled) { noFields.push(type); await p.close(); continue; }
+    checked.push(type);
 
     // 別の図種へ行って戻る (本文はひな形に置き換わる)
     const other = type === 'flowchart' ? 'classDiagram' : 'flowchart';
@@ -95,5 +117,9 @@ const FORMS = [
   }
 
   await b.close();
-  report('r15-state-carryover', findings, { examined: FORMS.length, total: 21 });
+  // 0件が何件分の0なのかを出す。
+  console.log('  (持ち越しを試した: ' + checked.length + ' 図種 / ' +
+    '追加フォームに打ち込める欄が無く試せない: ' + noFields.length +
+    (noFields.length ? ' (' + noFields.join(',') + ')' : '') + ')');
+  report('r15-state-carryover', findings, { examined: TYPES.length, total: 21 });
 })();
