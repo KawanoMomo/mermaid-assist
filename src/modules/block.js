@@ -8,11 +8,23 @@ window.MA.modules.blockBeta = (function() {
   // Every place that asks "is this a group start?" must use this one regex —
   // a depth counter and an identity check that disagree will pair the wrong
   // braces and delete the wrong range.
-  var GROUP_START_RE = /^block:([A-Za-z_][A-Za-z0-9_-]*)(?::\d+)?\s*(?:columns\s+\d+)?\s*$/;
+  // 識別子は半角英数字に限らない。
+  //
+  // mermaid は日本語のブロック id を受け付けて正しく描く
+  // (v11.13 実測: `受信["受信部"]` で図形11個・文字も出る)。ところがこちらは
+  // `[A-Za-z_]` 始まりでしか拾っていなかったので、**要素が1件も出ず、
+  // 一覧も重ね合わせも空になっていた**。
+  // erDiagram (A59) / sequence (A80) と同じ「述語の非対称」で3例目。
+  //
+  // 記号は形状やリンクの記法に使うので識別子から外す。
+  // `-` を先頭に許すと `-->` の一部を id と読むので、先頭だけ別に書く。
+  var ID = '[^\\s\\[\\](){}"<>:,\\-][^\\s\\[\\](){}"<>:,]*';
+  var GROUP_START_RE = new RegExp('^block:(' + ID + ')(?::\\d+)?\\s*(?:columns\\s+\\d+)?\\s*$');
   // 形状付きトークン。菱形 `{"..."}` と六角 `{{"..."}}` を知らないと、
   // `c{"Actuator"}` が `c` と `Actuator` の2ブロックに割れて幽霊が出る。
-  var BLOCK_TOKEN_RE = /([A-Za-z_][A-Za-z0-9_-]*)(?:\["([^"]*)"\]|\(\("([^"]*)"\)\)|\("([^"]*)"\)|\{\{"([^"]*)"\}\}|\{"([^"]*)"\})?/g;
-  var LINK_RE = /^([A-Za-z_][A-Za-z0-9_-]*)\s*(?:--\s*"?([^"]*?)"?\s*)?-->\s*([A-Za-z_][A-Za-z0-9_-]*)\s*$/;
+  var BLOCK_TOKEN_RE = new RegExp('(' + ID + ')' +
+    '(?:\\["([^"]*)"\\]|\\(\\("([^"]*)"\\)\\)|\\("([^"]*)"\\)|\\{\\{"([^"]*)"\\}\\}|\\{"([^"]*)"\\})?', 'g');
+  var LINK_RE = new RegExp('^(' + ID + ')\\s*(?:--\\s*"?([^"]*?)"?\\s*)?-->\\s*(' + ID + ')\\s*$');
 
   // 追加フォームの親グループ選択。renderProps は毎回パネルを作り直すので、
   // 保持しないと同じ group へ続けて入れるたびに選び直しになる。
@@ -188,7 +200,7 @@ window.MA.modules.blockBeta = (function() {
       // Remove just this block token from the line, or whole line if only this token
       var tokens = trimmed.split(/\s+/);
       var kept = tokens.filter(function(tok) {
-        var idMatch = tok.match(/^([A-Za-z_][A-Za-z0-9_-]*)/);
+        var idMatch = tok.match(new RegExp('^(' + ID + ')'));
         return !idMatch || idMatch[1] !== blockId;
       });
       if (kept.length === 0) {
@@ -207,7 +219,7 @@ window.MA.modules.blockBeta = (function() {
     var removedIds = idsBefore.filter(function(id) { return idsAfter.indexOf(id) === -1; });
     if (removedIds.length === 0) return result;
 
-    var linkRe = /^(\s*)([A-Za-z_][A-Za-z0-9_-]*)\s*(?:--\s*"?[^"]*?"?\s*)?-->\s*([A-Za-z_][A-Za-z0-9_-]*)\s*$/;
+    var linkRe = new RegExp('^(\\s*)(' + ID + ')\\s*(?:--\\s*"?[^"]*?"?\\s*)?-->\\s*(' + ID + ')\\s*$');
     lines = result.split('\n').filter(function(ln) {
       var m = ln.match(linkRe);
       if (!m) return true;
@@ -316,7 +328,7 @@ window.MA.modules.blockBeta = (function() {
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var indent = lines[idx].match(/^(\s*)/)[1];
-    var m = lines[idx].trim().match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*(?:--\s*"?([^"]*?)"?\s*)?-->\s*([A-Za-z_][A-Za-z0-9_-]*)\s*$/);
+    var m = lines[idx].trim().match(LINK_RE);
     if (!m) return text;
     var from = m[1], label = m[2] || '', to = m[3];
     if (field === 'from') from = value;

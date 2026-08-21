@@ -11,11 +11,26 @@ function loadModules(ROOT) {
    'core/history', 'core/selection', 'core/connection-mode'].forEach((f) => {
     try { require(path.join(ROOT, 'src', f + '.js')); } catch (e) { /* DOM 依存は無視 */ }
   });
+  // モジュールの読み込み失敗は握り潰さない。
+  //
+  // 以前は core と同じく黙って捨てていた。そのため1つのモジュールが構文エラーで
+  // 落ちると、そのモジュールは `window.MA.modules` に載らず、
+  // **総数も 21 → 20 に下がるので「20/20」= 満点に見えた**。
+  // 実測: pie.js を壊すと `[r12-noop] findings=0 / 検査した図種 20/20` と出た。
+  //
+  // ゲートの `COV` は下限 (21) と比べるので落ちるが、**レビュアーの出力だけを
+  // 読んでいる人には何も見えない**。0件と満点が同時に出るのが一番危ない。
+  const failed = [];
   fs.readdirSync(path.join(ROOT, 'src', 'modules')).filter(f => f.endsWith('.js')).forEach((f) => {
-    try { require(path.join(ROOT, 'src', 'modules', f)); } catch (e) { /* 同上 */ }
+    try { require(path.join(ROOT, 'src', 'modules', f)); }
+    catch (e) { failed.push(f + ': ' + String(e.message).split('\n')[0].slice(0, 60)); }
   });
+  if (failed.length) {
+    console.log('  !! モジュールを読み込めない (検査対象から外れる): ' + failed.join(' / '));
+  }
   const mods = global.window.MA.modules;
   _totalModules = Object.keys(mods).length;
+  _loadFailed = failed.length;
   Object.keys(mods).forEach((k) => { if (mods[k]) _moduleKeys.set(mods[k], k); });
   return mods;
 }
@@ -28,6 +43,7 @@ function loadModules(ROOT) {
 const _examined = new Set();
 const _moduleKeys = new WeakMap();
 let _totalModules = 0;
+let _loadFailed = 0;   // 読み込めなかったモジュールの数 (0 でないと網羅率が嘘になる)
 
 function markExamined(key) { if (key) _examined.add(key); }
 
@@ -75,7 +91,9 @@ function report(name, findings, opts) {
   // 網羅率を残す。ブラウザを使うレビュアーは図種の一覧を自分で持っているので、
   // opts.examined / opts.total で渡す。モジュール層のレビュアーは土台が自動で数える。
   const examined = (opts.examined !== undefined) ? opts.examined : _examined.size;
-  const total = (opts.total !== undefined) ? opts.total : _totalModules;
+  // 読み込めなかったモジュールも母数に入れる。
+  // 入れないと 20/20 = 満点に見えてしまい、1つ落ちていることが出力から消える。
+  const total = (opts.total !== undefined) ? opts.total : (_totalModules + _loadFailed);
   if (total) {
     fs.writeFileSync(path.join(dir, name + '.coverage.json'),
       JSON.stringify({ name, examined, total }, null, 1));
