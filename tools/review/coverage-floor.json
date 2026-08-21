@@ -51,6 +51,10 @@
   "examined": 19,
   "total": 21
  },
+ "r21-reachable": {
+  "examined": 21,
+  "total": 21
+ },
  "r3-render": {
   "examined": 10,
   "total": 21

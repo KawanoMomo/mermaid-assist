@@ -197,3 +197,120 @@ test.describe('UI-008: 追加とエディタにキーボードから入れる', 
     await expect(table).toContainText('エディタへ移動');
   });
 });
+
+test.describe('UI-011: パネルに続きがあることが画面から分かる', () => {
+  // 13インチのノートPC (1366x768) では 21図種中15図種でパネルが画面に収まらない
+  // (flowchart は 320px はみ出す)。スクロールバーは実測で幅0だったので、
+  // 続きがあることを示すものが画面に1つも無かった。
+  //
+  // パネルの構成そのものを変える案 (折り畳み見出し / タブ分割) は GUI の
+  // 作り替えなので合意が要る。ここでは「続きがある」ことを告げるだけ。
+  test.use({ viewport: { width: 1366, height: 768 } });
+
+  test('はみ出している図種では帯が出る', async ({ page }) => {
+    await open(page, 'flowchart');
+    const over = await page.evaluate(() => {
+      const el = document.getElementById('props-content');
+      return el.scrollHeight - el.clientHeight;
+    });
+    expect(over).toBeGreaterThan(4);
+    await expect(page.locator('#props-more')).toBeVisible();
+  });
+
+  test('一番下まで送ると帯が消える', async ({ page }) => {
+    await open(page, 'flowchart');
+    await expect(page.locator('#props-more')).toBeVisible();
+    await page.evaluate(() => {
+      const el = document.getElementById('props-content');
+      el.scrollTop = el.scrollHeight;
+      el.dispatchEvent(new Event('scroll'));
+    });
+    await page.waitForTimeout(300);
+    await expect(page.locator('#props-more')).toBeHidden();
+  });
+
+  test('帯が中身に重ならない', async ({ page }) => {
+    await open(page, 'flowchart');
+    const overlap = await page.evaluate(() => {
+      const el = document.getElementById('props-content');
+      const hint = document.getElementById('props-more');
+      const cr = el.getBoundingClientRect();
+      const hr = hint.getBoundingClientRect();
+      let n = 0;
+      el.querySelectorAll('*').forEach((x) => {
+        const r = x.getBoundingClientRect();
+        if (r.height <= 0) return;
+        if (r.top < cr.top - 1 || r.bottom > cr.bottom + 1) return;   // 窓の外
+        if (r.bottom > hr.top + 1 && r.top < hr.bottom - 1) n++;
+      });
+      return n;
+    });
+    expect(overlap).toBe(0);
+  });
+
+  test('収まっている図種では帯が出ない (狼少年にしない)', async ({ page }) => {
+    // 21図種のうち6図種は 1366x768 に収まる。そこで帯が出ると合図として働かなくなる。
+    await page.goto(HTML_URL);
+    await page.waitForSelector('#preview-svg svg', { timeout: 20000 });
+    const types = await page.locator('#diagram-type option').evaluateAll((os) => os.map((o) => o.value));
+    let fits = 0;
+    for (const t of types) {
+      await page.locator('#diagram-type').selectOption(t);
+      await page.waitForTimeout(1200);
+      const r = await page.evaluate(() => {
+        const el = document.getElementById('props-content');
+        const h = document.getElementById('props-more');
+        return { over: el.scrollHeight - el.clientHeight, shown: !h.hidden };
+      });
+      if (r.over <= 4) { fits++; expect(r.shown, t + ' は収まっているのに帯が出ている').toBe(false); }
+      else { expect(r.shown, t + ' ははみ出しているのに帯が出ていない').toBe(true); }
+    }
+    expect(fits).toBeGreaterThan(0);
+  });
+});
+
+test.describe('UI-013: 本文を編集しても追加フォームの書きかけが消えない', () => {
+  // パネルは毎回 innerHTML を作り直すので、書きかけの追加フォームが消えていた。
+  // 実測: 「WIP」と入れてからエディタに1文字打つと空になり、
+  // 打鍵の途中で再描画が挟まると先頭の文字も落ちた (「ae」→「e」)。
+  //
+  // ただし「+追加」の直後は空になるのが正しい。そこで書き戻すと、
+  // 同じ要素をもう一度足しかねない。引き金で区別する。
+  test('エディタを編集しても書きかけが残る', async ({ page }) => {
+    await open(page, 'flowchart');
+    await page.locator('#fc-add-node-id').fill('WIP');
+    await page.locator('#editor').focus();
+    await page.keyboard.type('  %% メモ');
+    await page.waitForTimeout(1500);
+    await expect(page.locator('#fc-add-node-id')).toHaveValue('WIP');
+  });
+
+  test('打鍵の途中で再描画が挟まっても文字が落ちない', async ({ page }) => {
+    await open(page, 'flowchart');
+    await page.locator('#editor').focus();
+    await page.keyboard.type('X');
+    await page.locator('#fc-add-node-id').focus();
+    await page.keyboard.type('ae');
+    await page.waitForTimeout(1600);
+    await expect(page.locator('#fc-add-node-id')).toHaveValue('ae');
+  });
+
+  test('追加ボタンを押したあとは空になる (書き戻さない)', async ({ page }) => {
+    await open(page, 'flowchart');
+    await page.locator('#fc-add-node-id').fill('NEW1');
+    await page.locator('#fc-add-node-btn').click();
+    await page.waitForTimeout(1400);
+    await expect(page.locator('#fc-add-node-id')).toHaveValue('');
+    expect(await page.locator('#editor').inputValue()).toContain('NEW1');
+  });
+
+  test('図種を切り替えたら持ち越さない (R15 を壊していない)', async ({ page }) => {
+    await open(page, 'flowchart');
+    await page.locator('#fc-add-node-id').fill('ZZ持ち越しZZ');
+    await page.locator('#diagram-type').selectOption('classDiagram');
+    await page.waitForTimeout(1700);
+    await page.locator('#diagram-type').selectOption('flowchart');
+    await page.waitForTimeout(1700);
+    await expect(page.locator('#fc-add-node-id')).toHaveValue('');
+  });
+});

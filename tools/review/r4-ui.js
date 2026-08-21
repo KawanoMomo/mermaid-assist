@@ -9,6 +9,14 @@ const path = require('path');
 const { chromium } = require('E:/00_Git/05_MermaidAssist/node_modules/playwright');
 const { report } = require('./lib');
 const ROOT = process.argv[2];
+// 測定条件も検査対象。
+//
+// これまで 1400x900 で測っていた。実利用は 13インチのノートPC (1366x768) が
+// 普通で、132px 低い。この差でプロパティパネルの収まりが 8/21 → 15/21 に
+// 変わっていた (UI-011)。**観点が足りなかったのではなく、測る場所が
+// 実利用と違っていた**。指摘が出ないのは、出ない条件で測っているからかもしれない。
+const VIEWPORT = { width: 1366, height: 768 };
+
 const HTML = 'file:///' + path.resolve(ROOT, 'mermaid-assist.html').split(path.sep).join('/');
 const TYPES = ['gantt', 'sequenceDiagram', 'flowchart', 'stateDiagram', 'classDiagram',
   'erDiagram', 'requirementDiagram', 'block-beta', 'timeline', 'mindmap', 'gitGraph',
@@ -19,7 +27,7 @@ const TYPES = ['gantt', 'sequenceDiagram', 'flowchart', 'stateDiagram', 'classDi
   const findings = [];
   const b = await chromium.launch();
   for (const t of TYPES) {
-    const p = await b.newPage({ viewport: { width: 1400, height: 900 } });
+    const p = await b.newPage({ viewport: { width: VIEWPORT.width, height: VIEWPORT.height } });
     p.on('dialog', d => d.accept());
     const errs = [];
     p.on('pageerror', e => errs.push(String(e).slice(0, 80)));

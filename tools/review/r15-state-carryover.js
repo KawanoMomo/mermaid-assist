@@ -14,6 +14,14 @@ const path = require('path');
 const { chromium } = require('E:/00_Git/05_MermaidAssist/node_modules/playwright');
 const { report } = require('./lib');
 const ROOT = process.argv[2];
+// 測定条件も検査対象。
+//
+// これまで 1400x900 で測っていた。実利用は 13インチのノートPC (1366x768) が
+// 普通で、132px 低い。この差でプロパティパネルの収まりが 8/21 → 15/21 に
+// 変わっていた (UI-011)。**観点が足りなかったのではなく、測る場所が
+// 実利用と違っていた**。指摘が出ないのは、出ない条件で測っているからかもしれない。
+const VIEWPORT = { width: 1366, height: 768 };
+
 const HTML = 'file:///' + path.resolve(ROOT, 'mermaid-assist.html').split(path.sep).join('/');
 
 // 図種と、その図種の追加フォームの入力欄
@@ -30,7 +38,7 @@ const FORMS = [
   const b = await chromium.launch();
 
   for (const [type, fields] of FORMS) {
-    const p = await b.newPage({ viewport: { width: 1400, height: 900 } });
+    const p = await b.newPage({ viewport: { width: VIEWPORT.width, height: VIEWPORT.height } });
     p.on('dialog', async d => { await d.accept(); });
     await p.goto(HTML);
     await p.waitForSelector('#preview-svg svg', { timeout: 20000 });
@@ -68,7 +76,7 @@ const FORMS = [
   // 選択が持ち越されないこと (本文が入れ替わったのに選択が残ると
   // パネルが「見つかりません」になる)
   {
-    const p = await b.newPage({ viewport: { width: 1400, height: 900 } });
+    const p = await b.newPage({ viewport: { width: VIEWPORT.width, height: VIEWPORT.height } });
     p.on('dialog', async d => { await d.accept(); });
     await p.goto(HTML);
     await p.waitForSelector('#preview-svg svg', { timeout: 20000 });

@@ -332,6 +332,7 @@ html, body {
 
 /* ── Properties Pane ───────────────────────────────────────────────────────── */
 #props-pane {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 220px;
@@ -359,6 +360,44 @@ html, body {
   font-size: 12px;
   color: var(--text-secondary);
 }
+
+/* パネルに続きがあることを画面で示す。
+
+   13インチのノートPC (1366x768) では 21図種中15図種でプロパティパネルが
+   画面に収まらない (flowchart は 320px はみ出す)。共通のスクロールバーは 6px で
+   --border 色 (#30363d)、背景とほぼ同じ明度しかなく、環境によっては幅0の
+   オーバーレイになる。実測でスクロールバーの幅は 0px だった。
+
+   つまり **320px 分の続きがあるのに、画面上の手掛かりがゼロ** だった。
+   初見の利用者は「この図種には関連を追加する手段が無い」と判断する。
+
+   パネルの構成そのものを変える案 (折り畳み見出し / タブ分割) は GUI の
+   作り替えなので合意が要る。ここでは「続きがある」ことを告げるだけにする。 */
+#props-content::-webkit-scrollbar { width: 10px; }
+#props-content::-webkit-scrollbar-thumb {
+  background: var(--text-secondary);
+  border-radius: 5px;
+}
+#props-content {
+  scrollbar-width: thin;
+  scrollbar-color: var(--text-secondary) var(--bg-secondary);
+}
+
+/* 重ねずに、パネルの一番下へ「続きがある」ことを置く。
+   最初は図の上に浮かせる形にしたが、実機で最後の行に重なって読めなくなった
+   (計測は通っていた。スクリーンショットでしか出ない種類の壊れ方)。
+   必要なときだけ現れるので、収まっている 6/21 図種では高さを取らない。 */
+#props-more {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-size: 10px;
+  text-align: center;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border);
+  user-select: none;
+}
+#props-more[hidden] { display: none; }
 
 /* ── Status Bar ────────────────────────────────────────────────────────────── */
 #shortcut-help {
@@ -654,6 +693,7 @@ html, body {
       <div id="props-content">
         <p style="color:var(--text-secondary);font-size:11px;">タスクを選択してください</p>
       </div>
+      <div id="props-more" hidden>↓ さらに項目があります</div>
     </div>
 
   </div><!-- /#main -->

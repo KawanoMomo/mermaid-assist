@@ -533,6 +533,22 @@ function deleteSelectedElements(sel) {
   scheduleRefresh();
 }
 
+// プロパティパネルに続きがあるかを見て、帯の出し入れをする。
+//
+// 13インチのノートPC (1366x768) では 21図種中15図種でパネルが画面に収まらない
+// (flowchart は 320px はみ出す)。スクロールバーは実測で幅0だったので、
+// **続きがあることを示すものが画面に1つも無かった**。
+//
+// 一番下まで見えているときは出さない。常に出すと「まだ下がある」の合図が
+// 意味を失い、無視されるようになる。
+function updatePropsOverflowHint() {
+  var el = document.getElementById('props-content');
+  var hint = document.getElementById('props-more');
+  if (!el || !hint) return;
+  var more = el.scrollHeight - el.clientHeight - el.scrollTop;
+  hint.hidden = more <= 4;   // 端数の丸めで1〜2px残ることがある
+}
+
 // 追加フォームの先頭欄へ飛ぶ。
 //
 // 追加は一番よく使う操作なのに、欄へ入る手段がマウスのクリックしか無かった。
@@ -746,11 +762,52 @@ function filterRows() {
   }
 }
 
+// 本文の編集で再描画が起きたのか、パネルの操作で起きたのかを区別する。
+//
+// パネルは毎回 innerHTML を作り直すので、書きかけの追加フォームは消える。
+// 実測: 追加フォームに「WIP」と入れてからエディタに1文字打つと、空になった。
+// 打鍵の途中で再描画が挟まると先頭の文字も落ちる (「ae」と打って「e」になった)。
+//
+// ただし**いつでも復元してよいわけではない**。「+追加」を押した直後の再描画では
+// フォームが空になるのが正しく、そこで書き戻すと同じ要素をもう一度足しかねない。
+// 引き金で分ける。
+var refreshCause = 'other';
+
+// 追加フォームの書きかけを持ち越す。
+//
+// id に 'add' を含む入力欄だけを対象にする。図種ごとに id は違う
+// (`fc-add-node-id` / `prop-add-label` / `kb-add-col-name`) が、接頭辞の表は持たない。
+// 図種を切り替えると id ごと入れ替わるので、別の図種へ持ち越されることはない
+// (持ち越してはいけない — R15 状態の持ち越し)。
+function snapshotAddForm() {
+  var snap = {};
+  if (!propsEl) return snap;
+  var els = propsEl.querySelectorAll('input[id*="add"], textarea[id*="add"]');
+  for (var i = 0; i < els.length; i++) {
+    if (els[i].type === 'radio' || els[i].type === 'checkbox') continue;
+    if (els[i].value) snap[els[i].id] = els[i].value;
+  }
+  return snap;
+}
+
+function restoreAddForm(snap) {
+  if (!propsEl) return;
+  Object.keys(snap).forEach(function(id) {
+    var el = document.getElementById(id);
+    // 空のときだけ戻す。モジュールが意図して値を置き直した場合は触らない。
+    if (el && propsEl.contains(el) && !el.value) el.value = snap[id];
+  });
+}
+
 function renderProps() {
+  var snap = (refreshCause === 'editor') ? snapshotAddForm() : null;
   withFocusKept(function() {
     renderPropsInner();
     applyListFilter();
   });
+  if (snap) restoreAddForm(snap);
+  // パネルの中身が入れ替わると高さも変わる。帯の出し入れはここで見る。
+  updatePropsOverflowHint();
 }
 
 function renderPropsInner() {
@@ -775,7 +832,7 @@ function renderPropsInner() {
           try { parsed = currentModule.parse(mmdText); } catch (e) { /* leave stale */ }
         }
       },
-      onUpdate: function() { scheduleRefresh(); },
+      onUpdate: function() { refreshCause = 'panel'; scheduleRefresh(); },
       // gantt のパネルは拒否理由をステータスに出すので、その口も渡す。
       // 他のモジュールは使わないが、契約にあって困るものではない。
       showTransient: function(msg, ms) { showTransient(msg, ms); },
@@ -1348,12 +1405,22 @@ function init() {
     // the pre-edit text once a line grew past 80 characters.
     window.MA.history.pushHistoryCoalesced('editor', EDITOR_UNDO_COALESCE_MS);
     mmdText = editorEl.value;
+    refreshCause = 'editor';
     scheduleRefresh();
   });
 
   editorEl.addEventListener('scroll', function() {
     syncLineNumbers();
   });
+
+  // パネルを下まで送ったら「続きがあります」を引っ込める。
+  // 出しっぱなしにすると合図として働かなくなる。
+  var propsContentEl = document.getElementById('props-content');
+  if (propsContentEl) {
+    propsContentEl.addEventListener('scroll', updatePropsOverflowHint);
+  }
+  // 窓の高さが変われば収まりも変わる。ペインの幅変更でも折り返しが変わる。
+  window.addEventListener('resize', updatePropsOverflowHint);
 
   // Tab / Shift+Tab: indent / outdent with 2 spaces (see workspace ADR-011)
   editorEl.addEventListener('keydown', function(e) {
