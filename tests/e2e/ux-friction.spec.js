@@ -364,3 +364,83 @@ test.describe('kanban: 図をクリックして選べる', () => {
       .toEqual([{ type: 'card', id: 't2' }]);
   });
 });
+
+test.describe('UI-021: 一覧の絞り込みが文書を跨いで残らない', () => {
+  // 前の文書で「ノード1」と絞り込んだまま別の文書を開くと、当てはまる行が
+  // 1つも無いので **一覧が完全に空に見える** (実測: 20行あって表示0行)。
+  // 絞り込み欄は残っているが、パネルの一番上にあり、ノートPC では
+  // スクロールしないと見えない (UI-011)。素直に読むと「要素が無い図」に見える。
+  //
+  // R15 (状態の持ち越し) は追加フォームの入力欄しか見ていなかったので
+  // この状態は網に掛かっていなかった。
+  test.use({ viewport: { width: 1366, height: 768 } });
+
+  async function twentyNodes(page, prefix) {
+    await setText(page, 'flowchart TD\n' + Array.from({ length: 20 },
+      (_, i) => '    ' + prefix + i + '[' + prefix + i + ']').join('\n') + '\n');
+    await page.waitForTimeout(1600);
+  }
+
+  test('20行以上で絞り込み欄が出て、件数が欄の外に出る', async ({ page }) => {
+    await open(page, 'flowchart');
+    await twentyNodes(page, 'ノード');
+    await expect(page.locator('#ma-list-filter')).toBeVisible();
+    // 絞り込み前は件数を出さない (常に出すと合図として働かない)
+    await expect(page.locator('#ma-list-filter-count')).toBeHidden();
+
+    await page.locator('#ma-list-filter').fill('ノード1');
+    await page.waitForTimeout(500);
+    await expect(page.locator('#ma-list-filter-count')).toBeVisible();
+    await expect(page.locator('#ma-list-filter-count')).toContainText('20件中 11件');
+  });
+
+  test('0件のとき理由が画面に出る', async ({ page }) => {
+    // 以前は件数を placeholder に書いていたが、placeholder は値が入ると隠れる。
+    // つまり絞り込んでいるときだけ件数が見えなかった。
+    await open(page, 'flowchart');
+    await twentyNodes(page, 'ノード');
+    await page.locator('#ma-list-filter').fill('存在しない文字');
+    await page.waitForTimeout(500);
+    await expect(page.locator('#ma-list-filter-count')).toContainText('0件が一致');
+    await expect(page.locator('#ma-list-filter-count')).toContainText('絞り込みを消すと');
+  });
+
+  test('図種を切り替えると絞り込みが消える', async ({ page }) => {
+    page.on('dialog', (d) => d.accept());   // 本文の置き換え確認
+    await open(page, 'flowchart');
+    await twentyNodes(page, 'ノード');
+    await page.locator('#ma-list-filter').fill('ノード1');
+    await page.waitForTimeout(500);
+
+    await page.locator('#diagram-type').selectOption('classDiagram');
+    await page.waitForTimeout(2000);
+    // 行数が少ないので欄自体が出ない。残っていても値は空であること。
+    const v = await page.evaluate(() => {
+      const b = document.getElementById('ma-list-filter');
+      return b ? b.value : '';
+    });
+    expect(v).toBe('');
+  });
+
+  test('別のファイルを開くと絞り込みが消え、一覧が全部出る', async ({ page }, testInfo) => {
+    page.on('dialog', (d) => d.accept());
+    await open(page, 'flowchart');
+    await twentyNodes(page, 'ノード');
+    await page.locator('#ma-list-filter').fill('ノード1');
+    await page.waitForTimeout(500);
+
+    const f = testInfo.outputPath('other.mmd');
+    require('fs').writeFileSync(f, 'flowchart TD\n' + Array.from({ length: 20 },
+      (_, i) => '    X' + i + '[別図' + i + ']').join('\n') + '\n');
+    await page.locator('input[type="file"]').first().setInputFiles(f);
+    await page.waitForTimeout(2200);
+
+    const r = await page.evaluate(() => {
+      const b = document.getElementById('ma-list-filter');
+      const rows = Array.from(document.querySelectorAll('#props-content .ma-list-row'));
+      return { v: b ? b.value : '', shown: rows.filter((x) => x.offsetParent !== null).length };
+    });
+    expect(r.v).toBe('');
+    expect(r.shown).toBe(20);
+  });
+});

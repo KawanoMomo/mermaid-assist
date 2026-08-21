@@ -716,6 +716,20 @@ function withFocusKept(fn) {
 var listFilterText = '';
 var LIST_FILTER_MIN_ROWS = 12;
 
+// 一覧の絞り込みも文書に紐づく状態。
+//
+// 前の文書で「ノード1」と絞り込んだまま別の文書を開くと、当てはまる行が
+// 1つも無いので **一覧が完全に空に見える** (実測: 20行あって表示0行)。
+// 絞り込み欄は残っているが、パネルの一番上にあり、ノートPC では
+// スクロールしないと見えない (UI-011)。素直に読むと「要素が無い図」に見える。
+//
+// R15 (状態の持ち越し) は追加フォームの入力欄しか見ていなかったので
+// この状態は網に掛かっていなかった。文書が入れ替わったら捨てる。
+function clearListFilter() {
+  listFilterText = '';
+  var box = document.getElementById('ma-list-filter');
+  if (box) box.value = '';
+}
 function applyListFilter() {
   if (!propsEl) return;
   var rows = propsEl.querySelectorAll('.ma-list-row');
@@ -727,7 +741,8 @@ function applyListFilter() {
     wrap.style.cssText = 'margin-bottom:6px;';
     wrap.innerHTML = '<input id="ma-list-filter" type="text" placeholder="一覧を絞り込む (' +
       rows.length + '件)" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);' +
-      'color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">';
+      'color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+      '<div id="ma-list-filter-count" hidden style="font-size:10px;margin-top:2px;"></div>';
     propsEl.insertBefore(wrap, propsEl.firstChild);
     box = document.getElementById('ma-list-filter');
     box.value = listFilterText;
@@ -756,9 +771,21 @@ function filterRows() {
     if (show) hit++;
   }
   var box = document.getElementById('ma-list-filter');
-  if (box) {
-    // 絞った結果0件を無言で見せると「一覧が消えた」と読めるので、件数を常に出す。
-    box.placeholder = q ? ('絞り込み中: ' + hit + '件') : ('一覧を絞り込む (' + rows.length + '件)');
+  if (box) box.placeholder = '一覧を絞り込む (' + rows.length + '件)';
+  // 件数は欄の外に出す。
+  //
+  // 以前は placeholder に書いていたが、**placeholder は値が入ると隠れる**。
+  // つまり絞り込んでいるときだけ件数が見えなかった。0件のときに
+  // 「一覧が空」と「絞り込みで0件」を見分ける手掛かりが、必要な場面でだけ消えていた。
+  var cnt = document.getElementById('ma-list-filter-count');
+  if (cnt) {
+    if (!q) { cnt.hidden = true; }
+    else {
+      cnt.hidden = false;
+      cnt.textContent = rows.length + '件中 ' + hit + '件が一致' +
+        (hit === 0 ? ' — 絞り込みを消すと全部出ます' : '');
+      cnt.style.color = hit === 0 ? 'var(--accent-orange)' : 'var(--text-secondary)';
+    }
   }
 }
 
@@ -1509,6 +1536,7 @@ function init() {
       loadedFileName = openedName;
       // ファイルを開いたときも文書は入れ替わる。
       if (currentModule && currentModule.resetTransientState) currentModule.resetTransientState();
+      clearListFilter();
       // 別のファイルを開いたら、前の保存先への参照は捨てる。
       // 残しておくと、開いたつもりの無いファイルを上書きする。
       saveHandle = null;
@@ -2534,6 +2562,7 @@ function init() {
       // 文書が入れ替わったので、モジュールが持っている一時状態を捨てさせる。
       // 実装していないモジュールは何もしなくてよい (フォームを毎回作り直すため)。
       if (mod.resetTransientState) mod.resetTransientState();
+      clearListFilter();
       markSaved();
       suppressSync = true;
       editorEl.value = mmdText;
