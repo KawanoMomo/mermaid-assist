@@ -1952,6 +1952,15 @@ function init() {
     rebuildOverlay();
   });
 
+  // 接続モードの起点が変わったらオーバレイを描き直す (UI-077)。
+  //
+  // cancelConnectionMode の呼び出しはこのファイルに3か所ある。
+  // そこへ個別に再描画を足すと**1つ忘れて「中止したのに印が残る」**
+  // 状態を作る (実測でそうなった)。状態を持つ側から1回だけ知らせる。
+  window.MA.connectionMode.init(function() {
+    rebuildOverlay();
+  });
+
   // Initialize history button states
   (function() {
     var btnUndo = document.getElementById('btn-undo');

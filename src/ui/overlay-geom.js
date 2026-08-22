@@ -19,6 +19,10 @@ window.MA.overlayGeom = (function() {
   // 選択の印の色。scrollSelectedIntoView が同じ値で印を探すので、
   // リテラルを2か所に書かない (片方だけ変えると探せなくなる)。
   var SELECTED_STROKE = '#7ee787';
+  // 接続モードの起点の印。**選択とは別の色**にする。
+  // 同じ色だと「選ばれている」のか「ここから線を引こうとしている」のかが
+  // 区別できない。橙は選択の緑と紛れない。
+  var CONNECT_SOURCE_STROKE = '#f0883e';
 
   function boxInSvgSpace(svgEl, el) {
     if (!svgEl || !el || !el.getBBox || !el.getScreenCTM || !svgEl.getScreenCTM) return null;
@@ -87,7 +91,24 @@ window.MA.overlayGeom = (function() {
     rect.setAttribute('width', Math.max(0, box.width + pad * 2));
     rect.setAttribute('height', Math.max(0, box.height + pad * 2));
     rect.setAttribute('fill', 'transparent');
-    rect.setAttribute('stroke', opts.selected ? SELECTED_STROKE : 'none');
+    // **接続モードの起点は、選択の印より優先して出す。**
+    //
+    // 実測 (直す前): 要素を選ぶと図で光る (stroke が1個) が、
+    // 「ここから線を引く」を押すと**0個になる**。ステータス行は
+    // 「接続モード: C から線を引きます」と言うが、視線は図にある。
+    // 起点を確かめるにはステータス行へ視線を移す1手が要った。
+    // **接続元の判定はここでする。** hitRect を直接呼ぶモジュールが
+    // 4つある (flowchart / block / c4 / kanban)。呼び出し側に渡させると
+    // 21図種のうち一部だけ光る不揃いを作る — このコードベースが繰り返し
+    // 踏んできた型 (UI 経路だけ直して契約経路を忘れる) そのもの。
+    var isConnectSrc = (function() {
+      if (opts.connectSource) return true;
+      var s = window.MA.connectionMode && window.MA.connectionMode.getSource();
+      return !!(s && s.id === opts.id);
+    })();
+    rect.setAttribute('stroke',
+      isConnectSrc ? CONNECT_SOURCE_STROKE :
+      (opts.selected ? SELECTED_STROKE : 'none'));
     rect.setAttribute('stroke-width', '2');
     rect.setAttribute('stroke-dasharray', '4');
     rect.setAttribute('cursor', 'pointer');
