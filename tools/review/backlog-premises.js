@@ -33,6 +33,37 @@ const read = (rel) => {
 
 // 項目ごとの前提。`check` は { ok, detail } を返す。
 // `human: true` は「人が決めるまで動かない」= 自動判定しない。
+// 滞留の長さを機械に数えさせる (N4)。
+//
+// **これを人が数えていて失敗した。** G7 はラウンド43 で
+// 「ラウンド45までに指示が無ければ凍結する」と予告しながら、
+// **6サイクル実行を忘れていた**。しかも直前の診断で
+// 「G7/G8/G9 はいずれも記録してから2サイクル以内」と**誤って書いた**
+// (実際は G7 が11サイクル、G8 が7サイクル)。
+//
+// 機械監視は「忘れられること」を防いだが、**「どれだけ待っているか」は
+// 誰も数えていなかった**。F5 が22サイクル溜まったのと同じ穴。
+//
+//   since    その項目を記録したラウンド
+//   deadline 期限として予告したラウンド (予告していなければ null)
+//
+// 期限を過ぎていたら FAIL する。予告したのに実行しない、が起きなくなる。
+const SINCE = {
+  G1: { since: 33, deadline: null },
+  G8: { since: 44, deadline: 54 },
+  G9: { since: 50, deadline: null },
+};
+
+// review-log の最後の「# ラウンドNN」を今のラウンドとみなす。
+function currentRound() {
+  const log = read('docs/review-log.md');
+  let last = 0;
+  const re = /^# ラウンド(\d+)/gm;
+  let m;
+  while ((m = re.exec(log)) !== null) last = Math.max(last, Number(m[1]));
+  return last;
+}
+
 const PREMISES = {
   G1: {
     what: 'class / er / state が move: false のまま (実害が出ていない)',
@@ -150,7 +181,24 @@ ids.forEach((id) => {
     findings.push({ module: id, fn: '前提が崩れた',
       what: p.what + ' → ' + r.detail });
   }
-  lines.push(id + ': ' + (p.human ? '[人の判断待ち] ' : '') + r.detail);
+  const age = SINCE[id];
+  let ageText = '';
+  if (age) {
+    const now = currentRound();
+    const waited = now - age.since;
+    ageText = ' (' + waited + 'サイクル';
+    if (age.deadline) {
+      ageText += ' / 期限 R' + age.deadline;
+      if (now > age.deadline) {
+        findings.push({ module: id, fn: '期限の超過',
+          what: 'ラウンド' + age.deadline + ' を期限として予告したが、' +
+                'いまラウンド' + now + '。**予告どおり凍結するか、期限を引き直す**' });
+        ageText += ' **超過**';
+      }
+    }
+    ageText += ')';
+  }
+  lines.push(id + ': ' + (p.human ? '[人の判断待ち] ' : '') + r.detail + ageText);
 });
 
 // 検査だけあって項目が消えた場合も出す (棚卸しと検査の対応を両方向で見る)
