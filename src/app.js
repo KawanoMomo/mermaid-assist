@@ -658,6 +658,32 @@ function focusAddForm() {
   if (el.select) el.select();
 }
 
+// 一覧の絞り込み欄へ飛ぶ (UI-063)。
+//
+// 目的の要素に届くコストが、経路で桁違いに違っていた。実測 (flowchart):
+//
+//   要素数 |  ↓ で辿る | 絞り込み
+//   -------|-----------|---------
+//       20 |     18 手 |    6 手
+//       60 |     50 手 |    6 手
+//      120 |   **98 手** |  **6 手**
+//
+// 絞り込みは「欄へ行く + 打つ + Enter」なので**要素数によらず一定**。
+// ところが図へ移ったときの案内は `↑↓` しか名指ししておらず、
+// **線形に伸びる方だけが目に入っていた**。1日100回なら 9200 手の差になる。
+//
+// 欄は一覧が 12 行を超えたときだけ出る (LIST_FILTER_MIN_ROWS)。
+// 出ていないときは「まだ要らない」ので、そう言って終わる。
+function focusListFilter() {
+  var el = document.getElementById('ma-list-filter');
+  if (!el) {
+    showTransient('一覧が短いので絞り込み欄は出ていません — ↑↓ で選べます', 2500);
+    return;
+  }
+  el.focus();
+  if (el.select) el.select();
+}
+
 // エディタへ戻る。
 // プレビューへ戻す focusPreview の逆向きが無く、本文を直すたびにマウスへ持ち替えていた。
 function focusEditor() {
@@ -2827,6 +2853,11 @@ function init() {
       // 修飾なし1打鍵。Delete / ? と同じ条件 (入力欄とエディタの外にいるとき) で受ける。
       e.preventDefault();
       focusAddForm();
+    } else if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey && !inInput && !inEditor) {
+      // 一覧の絞り込みへ (UI-063)。`A` / `E` と同じ条件 (入力欄とエディタの外) で受ける。
+      // `/` は多くのツールで検索の入口なので、覚え直しが要らない。
+      e.preventDefault();
+      focusListFilter();
     } else if ((e.key === 'e' || e.key === 'E') && !e.ctrlKey && !e.metaKey && !e.altKey && !inInput && !inEditor) {
       e.preventDefault();
       focusEditor();
@@ -2867,7 +2898,9 @@ function init() {
       // エディタでの Escape は今まで何もしていなかったので、奪う操作は無い。
       e.preventDefault();
       focusPreview();
-      showTransient('図に移りました — E でエディタへ / A で追加フォームへ / ↑↓ で要素を選ぶ', 3500);
+      // 案内には**定数コストの経路も**書く。`↑↓` だけを名指ししていたので、
+      // 120要素で 98手かかる方だけが目に入っていた (UI-063)。
+      showTransient('図に移りました — / で絞り込み / ↑↓ で要素を選ぶ / E でエディタへ / A で追加フォームへ', 3500);
     } else if (e.key === 'Escape') {
       // Escape has to get out of connection mode too. Without it the only way
       // to leave was to complete the edge — clicking anywhere else on the canvas
