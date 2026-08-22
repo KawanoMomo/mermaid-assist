@@ -483,11 +483,38 @@ window.MA.modules.gantt = (function() {
   // does not work: they hold raw tokens, so a chart written as
   // `A :a1, 2026-01-01, 365d` / `B :a2, after a1, 365d` — the most ordinary way to
   // write a gantt — exposes exactly one ISO date and looks like a single day.
+  // 宙に浮いた依存 — `after` の指す先が、どのタスクの id でもないもの。
+  //
+  // mermaid は警告を出さず、解決できない `after` を任意の位置に置く。
+  // resolveSpan もここで黙って `prevEnd` に落ちる。図は描かれるので
+  // 「OK」と表示され、**位置が意図と違うことに気付けない**。
+  // タスクの id を書き換えた直後に一番当たりやすい。
+  //
+  // 実測 (直す前): `after NOSUCH` を書いても status-parse は "OK"、
+  // status-info は「タスク: 2 | セクション: 1」のままだった。
+  //
+  // `after` は空白区切りで複数を取れる (改名処理が split しているのと同じ)
+  // ので、1つずつ確かめる。
+  function danglingAfter(parsedData) {
+    var out = [];
+    if (!parsedData || !parsedData.tasks) return out;
+    var known = {};
+    parsedData.tasks.forEach(function(t) { if (t.id) known[t.id] = true; });
+    parsedData.tasks.forEach(function(t) {
+      if (!t.after) return;
+      String(t.after).split(/\s+/).forEach(function(dep) {
+        if (dep && !known[dep]) out.push({ label: t.label, id: t.id, missing: dep });
+      });
+    });
+    return out;
+  }
+
   // Returns null when no task has a resolvable anchor date.
   function resolveSpan(parsedData) {
     if (!parsedData || !parsedData.tasks || !parsedData.tasks.length) return null;
     var addDays = window.MA.dateUtils.addDays;
     var ends = {};   // task id -> resolved end date
+    var starts = []; // task index -> resolved start date
     var prevEnd = null;
     var min = null, max = null;
 
@@ -521,6 +548,7 @@ window.MA.modules.gantt = (function() {
       }
 
       ends[t.id] = end;
+      starts[i] = start;   // 較正の原点に使う。after で解決した分もここに入る
       prevEnd = end;
       if (!min || start < min) min = start;
       if (!max || end > max) max = end;
@@ -529,7 +557,7 @@ window.MA.modules.gantt = (function() {
     if (!min || !max) return null;
     var days = window.MA.dateUtils.daysBetween(min, max);
     if (!isFinite(days) || days < 0) return null;
-    return { min: min, max: max, days: Math.max(1, days) };
+    return { min: min, max: max, days: Math.max(1, days), starts: starts };
   }
 
   // The lines a section owns: its own `section` line through the line before the
@@ -898,6 +926,51 @@ window.MA.modules.gantt = (function() {
           calibration.pxPerDay = st.rect.width / dur;
           calibration.originX = st.rect.x;
           calibration.baseDate = st.task.startDate;
+          calibrated = true;
+        }
+      }
+    }
+
+    // 倍率と原点を**別のタスクから**取る。
+    //
+    // ここまでは「1本のタスクが開始日と期間の両方を持つ」ことを求めていた。
+    // マイルストーンを起点にする書き方はそれを満たさない:
+    //
+    //     節目 :milestone, m1, 2026-03-01, 0d
+    //     実装 :t2, after m1, 10d
+    //
+    // m1 は開始日を持つが期間が 0d (割ると壊れる)。t2 は期間を持つが
+    // 開始日が無い。どちらも単独では失格で、2点較正にも足りない。
+    // しかし**倍率は幅と期間から**、**原点は開始日を持つバーから**取れる。
+    // 別々の相手から取ってよい。
+    //
+    // 実測: この形は利用者の版でも直した版でも pxPerDay=0 のままで、
+    // バーもハンドルも描かれるのに掴んでも動かなかった。
+    if (!calibrated) {
+      var scale = null;
+      for (var ki = 0; ki < parsedData.tasks.length && scale === null; ki++) {
+        var kt = parsedData.tasks[ki], kr = barRects[ki];
+        if (!kr || !(kr.width > 0) || !kt.endDate) continue;
+        var kd = (kt.startDate && DATE_RE.test(kt.startDate) && DATE_RE.test(kt.endDate))
+          ? window.MA.dateUtils.daysBetween(kt.startDate, kt.endDate)
+          : durationDays(kt.endDate);
+        if (typeof kd === 'number' && isFinite(kd) && kd > 0) scale = kr.width / kd;
+      }
+      if (scale !== null) {
+        // 原点は「開始日が書いてあるバー」に限らない。マイルストーンは菱形で
+        // 描かれるため矩形として照合できず (実測: barRects[0] が null)、
+        // 開始日を持つ唯一のタスクにバーが無いことがある。
+        // `after` を解決した開始日 (resolveSpan) を使えば、後続のバーを原点にできる。
+        var span = resolveSpan(parsedData);
+        var resolved = (span && span.starts) ? span.starts : [];
+        for (var oi = 0; oi < parsedData.tasks.length && !calibrated; oi++) {
+          var ot = parsedData.tasks[oi], or_ = barRects[oi];
+          if (!or_) continue;
+          var base = (ot.startDate && DATE_RE.test(ot.startDate)) ? ot.startDate : resolved[oi];
+          if (!base || !DATE_RE.test(base)) continue;
+          calibration.pxPerDay = scale;
+          calibration.originX = or_.x;
+          calibration.baseDate = base;
           calibrated = true;
         }
       }
@@ -1782,6 +1855,7 @@ window.MA.modules.gantt = (function() {
     deleteTask: deleteTask,
     sanitizeAfterDependencies: sanitizeAfterDependencies,
     addSection: addSection, moveSection: moveSection, resolveSpan: resolveSpan,
+    danglingAfter: danglingAfter,
     deleteSection: deleteSection,
     updateGlobalSetting: updateGlobalSetting,
     removeGlobalSetting: removeGlobalSetting,

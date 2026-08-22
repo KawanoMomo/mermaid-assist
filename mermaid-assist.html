@@ -525,6 +525,9 @@ html, body {
 #status-parse { color: var(--accent-green); }
 #status-parse.error { color: var(--accent-red); }
 #status-info  { color: var(--text-secondary); margin-left: auto; }
+/* 版はステータス行の右端に小さく置く。縦には増やさない。 */
+#status-version { color: var(--text-secondary); opacity: .7; font-size: 11px;
+                  margin-left: 12px; white-space: nowrap; }
 
 /* ── Scrollbar Styling ─────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -575,6 +578,15 @@ html, body {
 }
 .action-btn:hover {
   background: var(--bg-primary);
+}
+/* できない操作は、消さずに淡く出して理由をツールチップに置く (UI-049)。
+   ボタンが無いと「探しても見つからない」時間がそのまま失われる。 */
+.action-btn[disabled] {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.action-btn[disabled]:hover {
+  background: var(--bg-tertiary);
 }
 .action-btn-danger {
   width: 100%;
@@ -730,6 +742,14 @@ html, body {
   <div id="statusbar">
     <span id="status-parse">Ready</span>
     <span id="status-info"></span>
+    <!-- 版の刻印。
+         不具合の報告を受けても、利用者がどの版を動かしているか分からないと
+         原因を絞れない。実測: 74コミット遅れた版で「ガントのバーが動かない」を
+         踏んでいたが、画面には版を示すものが何も無く (`\d+\.\d+\.\d+` が
+         1つも見つからなかった)、どの版かの特定に調査の大半を費やした。
+         単一HTMLでビルド工程が無いので値は直書きし、VERSION との一致は
+         テストで固定する (人が2箇所を揃え続けるのは必ず失敗する)。 -->
+    <span id="status-version" title="MermaidAssist の版。不具合を報告するときはこの番号を添えてください">v1.2.0</span>
     <button id="status-help" title="キーボードショートカットを開く (F1 / 図・パネルでは ?)">F1 ショートカット</button>
   </div>
 

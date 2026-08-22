@@ -512,6 +512,17 @@ function ganttStatusText(parsedData) {
   if (allDates.length >= 2) {
     info += ' | 期間: ' + allDates[0] + ' ~ ' + allDates[allDates.length - 1];
   }
+  // 宙に浮いた依存は、件数ではなく**どのタスクのどの id か**を出す。
+  // 「1件あります」では探す手間が残り、数百行の図では見つからない。
+  // 多いときは先頭2件だけ挙げて残りは数で示す (ステータス行は1行しかない)。
+  var dangling = window.MA.modules.gantt.danglingAfter(parsedData);
+  if (dangling.length) {
+    var head = dangling.slice(0, 2).map(function(d) {
+      return '「' + d.label + '」→ ' + d.missing;
+    }).join(', ');
+    info += ' | 依存先が無い: ' + head +
+      (dangling.length > 2 ? ' ほか' + (dangling.length - 2) + '件' : '');
+  }
   return info;
 }
 
@@ -1505,10 +1516,110 @@ function exportSVG() {
 //
 // Chrome は幅 65,535px を超える canvas を作れないので、超える倍率は落とす。
 // 黙って小さい画像を返すより、要求した倍率で出せないことを告げる。
+// 書き出した図の線が白地でほとんど見えない (UI-041)。
+//
+// 画面は暗いテーマで描かれているので線は明るい。PNG は白で塗るため、
+// 明るい線が白地に乗って消える。実測 (白に対するコントラスト比、3.0未満は
+// 見分けにくい): architecture **1.00 (完全に見えない)** / xychart 1.13 /
+// flowchart・state・class・er・requirement・sequence・block 1.20 /
+// gitGraph 1.96 / gantt 2.09 / mindmap 2.94 の **12図種**。
+//
+// 直すのは**線だけ**でよい。ノードは暗い塗りなので、その上の文字は読める。
+// 背景を暗くする案は、設計書に貼ったときと印刷で扱いにくくなるので採らない。
+// 画面表示と座標には触れず、**書き出しの複製にだけ**色を差し替える。
+//
+// 色は捨てず、明るさだけ落とす。危険 (crit) の赤と通常の線を書き出しで
+// 見分けられなくなるのを避けるため。
+// 白地で線が見える濃さの目標。3.0 は WCAG が図形に求める下限だが、
+// 1〜2px の線では実測で**まだ薄く見えた** (書き出した PNG を目視)。
+// 通常の文字と同じ 4.5 まで落とす。
+var TARGET_CONTRAST = 4.5;
+
+function relLuminance(r, g, b) {
+  var f = function(c) {
+    c = c / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+}
+
+function parseRgb(s) {
+  var m = /^rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(String(s || ''));
+  if (!m) return null;
+  return [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)];
+}
+
+// 白に対するコントラスト比が 3.0 を切る色を、切らなくなるまで暗くする。
+// 色相を保つため3チャンネルを同じ率で下げる。
+function darkenForWhite(rgb) {
+  var r = rgb[0], g = rgb[1], b = rgb[2];
+  for (var i = 0; i < 24; i++) {
+    var L = relLuminance(r, g, b);
+    if ((1.05) / (L + 0.05) >= TARGET_CONTRAST) break;
+    r = Math.round(r * 0.85); g = Math.round(g * 0.85); b = Math.round(b * 0.85);
+    if (r + g + b === 0) break;
+  }
+  return 'rgb(' + r + ', ' + g + ', ' + b + ')';
+}
+
+// 複製した SVG の線を、白地で見える濃さに置き換える。
+//
+// 上書きは **style で行う (setAttribute では効かない)**。mermaid は
+// SVG の中に <style> を1つ持っており、CSS は presentation attribute に
+// 勝つ。実測: 属性で rgb(0,0,0) を入れても描画色は rgb(211,211,211) の
+// まま、style + !important なら rgb(0,0,0) になった。
+// **属性を書いて、書いた属性を読み返して「直った」と読むと必ず外す。**
+// 元の要素から**計算後の色**を読む — 複製は文書から外れているので
+// getComputedStyle が効かない (ここを取り違えると何も変わらない)。
+function darkenLinesForExport(srcSvg, cloneSvg) {
+  var src = srcSvg.querySelectorAll('*');
+  var dst = cloneSvg.querySelectorAll('*');
+  if (src.length !== dst.length) return 0; // 対応が取れないなら触らない
+  var changed = 0;
+  for (var i = 0; i < src.length; i++) {
+    var cs = window.getComputedStyle(src[i]);
+    var stroke = parseRgb(cs.stroke);
+    // 幅0の線は描かれていない。色を変えても見た目は変わらず、
+    // 「何本濃くしたか」の数だけが過大になる (実測: xychart の棒の輪郭が
+    // 幅0で3本数えられていた)。
+    var sw = parseFloat(cs.strokeWidth);
+    if (stroke && cs.stroke !== 'none' && isFinite(sw) && sw > 0) {
+      var Ls = relLuminance(stroke[0], stroke[1], stroke[2]);
+      if ((1.05) / (Ls + 0.05) < TARGET_CONTRAST) {
+        dst[i].style.setProperty('stroke', darkenForWhite(stroke), 'important');
+        changed++;
+      }
+    }
+    // 矢印の先端は線ではなく**塗り**で描かれる。marker の中だけ塗りも見る。
+    // ここを外すと、線は濃くなったのに先端だけ白地に消える。
+    if (src[i].closest && src[i].closest('marker')) {
+      var fill = parseRgb(cs.fill);
+      if (fill && cs.fill !== 'none') {
+        var Lf = relLuminance(fill[0], fill[1], fill[2]);
+        if ((1.05) / (Lf + 0.05) < TARGET_CONTRAST) {
+          dst[i].style.setProperty('fill', darkenForWhite(fill), 'important');
+          changed++;
+        }
+      }
+    }
+  }
+  return changed;
+}
+
 function svgToCanvas(transparent, callback, scale) {
   var svgEl = previewSvgEl.querySelector('svg');
   if (!svgEl) return;
   var clone = svgEl.cloneNode(true);
+  // 透過で書き出すときは、貼る先の地色が分からないので触らない。
+  //
+  // 色を差し替えたことは**言う**。画面と同じものが出ると思っている人に
+  // とって、色が変わるのは予期しない挙動で、線色を意図して設定した図では
+  // なぜ違うのか分からない。何本変えたかまで出す (0本なら黙る)。
+  var recolored = transparent ? 0 : darkenLinesForExport(svgEl, clone);
+  if (recolored > 0) {
+    showTransient('白地で見えるように線' + recolored + '本を濃くしました' +
+      ' — 画面の色のまま出すには透過で書き出してください', 5000);
+  }
   var svgData = new XMLSerializer().serializeToString(clone);
   var img = new Image();
   img.onload = function() {

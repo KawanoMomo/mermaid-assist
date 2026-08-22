@@ -143,14 +143,42 @@ describe('move が有効なのは flowchart のノードだけ', function() {
     return out;
   }
 
-  // 述語がブロック構造 (box / alt / subgraph / ブロック形式クラス / コンポジット
-  // 状態 / 継続行) を見ていないため、これらのモジュールでは move が図を無言で壊す。
-  ['er.js', 'class.js', 'state.js', 'timeline.js', 'sequence.js'].forEach(function(f) {
+  // 述語がブロック構造 (box / alt / subgraph / コンポジット状態 / 継続行) を
+  // 見ていないため、これらのモジュールでは move が図を無言で壊す。
+  //
+  // **class.js はこの一覧から外した (G1、2026-08-22)。**
+  // 止めていた理由は `_moveClassStep` の `_is*Line` がブロック形式のクラスを
+  // 他クラスの本体に飲み込ませることだったが、UI を契約経路
+  // (`operations.moveUp` → `moveElementLine`) に差し替えて解消した。
+  // 実測 (`class Animal {…} class Dog {…} class Cat {…}` で Dog を上へ):
+  //   古い経路 → **変化なし** (空振り) / 契約経路 → Dog,Animal,Cat にブロックごと移動
+  //
+  // er.js / state.js は**外していない**。要素の `line` が宣言行ではなく
+  // 関係行を指しており (実測: er は両方 line=2 の関係行、state は遷移行)、
+  // 動かしても並びが変わらない。
+  ['er.js', 'state.js', 'timeline.js', 'sequence.js'].forEach(function(f) {
     test(f + ' は move を一切出さない', function() {
       var flags = moveFlags(f);
       expect(flags.length).toBeGreaterThan(0);
       expect(flags.filter(function(v) { return v; }).length).toBe(0);
     });
+  });
+
+  test('class.js はクラスパネルでのみ move を出す', function() {
+    var flags = moveFlags('class.js');
+    // クラスパネルだけ true。関連パネルは false のまま
+    expect(flags.filter(function(v) { return v; }).length).toBe(1);
+  });
+
+  test('class.js の move は契約経路を呼ぶ', function() {
+    var fs2 = require('fs');
+    var p2 = require('path');
+    var text = fs2.readFileSync(p2.resolve(__dirname, '..', 'src', 'modules', 'class.js'), 'utf-8');
+    // 空振りした古い実装をパネルから呼んでいないこと
+    expect(/var newText = moveClassUp\(/.test(text)).toBe(false);
+    expect(/var newText = moveClassDown\(/.test(text)).toBe(false);
+    expect(/classDiagram\.operations\.moveUp\(/.test(text)).toBe(true);
+    expect(/classDiagram\.operations\.moveDown\(/.test(text)).toBe(true);
   });
 
   test('flowchart はノードパネルでのみ move を出す', function() {

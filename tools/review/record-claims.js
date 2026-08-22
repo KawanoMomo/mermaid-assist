@@ -24,25 +24,48 @@ const M = loadModules(ROOT);
 
 const findings = [];
 
-// ── G1: class / er / state の move が無効のまま ──────────────────────────
+// ── G1: move の可否は図種ごとに決めた (2026-08-22 決着) ────────────────
 //
-// 棚卸し G1 の主張:
-//   「`move: false` のままなので実害はないが、`move: true` に戻すだけで
-//     無言の図破壊が復活する状態が残る」
+// もとの主張は「class / er / state のどれも `move: false` のまま」だった。
+// **この検査が、その主張が古くなったことを実際に捕まえた** — class を
+// `move: true` に戻した直後に FAIL した。記録と実体がずれた瞬間に鳴る、
+// という設計どおりに動いた。
 //
-// `_is*Line` の述語が「宣言行か」で判定しており、コンポジット状態 (`state Active {`)
-// を宣言行と誤判定して他状態の子に吸い込む。mermaid の parse も render も通るので
-// 無言で壊れる。述語をブレース深度ベースに直すまで UI から出さない、という判断。
+// 新しい事実 (実測):
+//   class … 要素の `line` が**宣言行** (`class Dog {`) を指す。
+//           契約経路 `operations.moveUp` → `moveElementLine` がブロックごと
+//           入れ替える。実測: `Animal/Dog/Cat` で Dog を上へ →
+//           古い `moveClassUp` は**変化なし (空振り)**、契約経路は
+//           `Dog,Animal,Cat` に移動。よって **move: true**。
+//   er    … 要素の `line` が**関係行**を指す (実測: 両エンティティとも
+//           `line=2` の `CUSTOMER ||--o{ ORDER`)。動かしても並びが変わらない。
+//   state … 同じく**遷移行**を指す。「動いた」が並びは不変。
+//
+// なので守る主張は「一律に false」ではなく「**図種ごとの可否がこの通り**」。
 {
-  const files = ['class.js', 'er.js', 'state.js'];
-  files.forEach((f) => {
+  const EXPECT = {
+    'class.js': { move: true, why: '要素の line が宣言行を指し、契約経路がブロックごと入れ替える' },
+    'er.js': { move: false, why: '要素の line が関係行を指すので動かしても並びが変わらない' },
+    'state.js': { move: false, why: '要素の line が遷移行を指すので動かしても並びが変わらない' },
+  };
+  Object.keys(EXPECT).forEach((f) => {
     const src = fs.readFileSync(path.join(ROOT, 'src', 'modules', f), 'utf8');
-    if (/move:\s*true/.test(src)) {
+    const has = /move:\s*true/.test(src);
+    const want = EXPECT[f].move;
+    if (has !== want) {
       findings.push({ module: f, fn: 'G1 move',
-        what: '棚卸し G1 は「move: false のまま」と記録しているが `move: true` がある。' +
-              '述語をブレース深度ベースに直したなら G1 を更新し、直していないなら戻すこと' });
+        what: '棚卸し G1 は ' + f + ' を move: ' + want + ' と記録しているが実体は ' + has +
+              '。理由: ' + EXPECT[f].why + '。実体を戻すか、G1 の記録を更新すること' });
     }
   });
+  // class の move が**契約経路**を呼んでいること。空振りした古い実装に
+  // 戻ると、ボタンは出るのに何も起きない状態に戻る。
+  const clsSrc = fs.readFileSync(path.join(ROOT, 'src', 'modules', 'class.js'), 'utf8');
+  if (!/classDiagram\.operations\.moveUp\(/.test(clsSrc)) {
+    findings.push({ module: 'class.js', fn: 'G1 move の経路',
+      what: 'class の move が契約経路 (operations.moveUp) を呼んでいない。' +
+            '古い moveClassUp はブロック形式のクラスで空振りする (実測)' });
+  }
 }
 
 // ── E2: 重ね合わせを持たない図種は SVG の id が位置由来 ────────────────
