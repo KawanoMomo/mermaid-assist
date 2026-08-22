@@ -20,6 +20,17 @@ const HTML_URL = 'file:///' + path.resolve(__dirname, '..', '..', 'mermaid-assis
 const NL = String.fromCharCode(10);
 const DOC = ['flowchart TD', '    A["設計"] --> B["実装"]', '    B --> C["検証"]'].join(NL);
 
+// 焦点が**図の領域の中**にあるか。
+//
+// 元は activeElement の id が 'preview-pane' であることを直接見ていたが、
+// これは実装の細部だった。UI-073 で焦点を #preview-container (実際に
+// スクロールする要素) へ移したとき、**振る舞いは良くなったのにテストが落ちた**。
+// 見たいのは「エディタから出て図へ移ったか」なので、領域の中にあるかで見る。
+const inPreview = (page) => page.evaluate(() => {
+  const a = document.activeElement;
+  const pane = document.getElementById('preview-pane');
+  return !!(a && pane && (a === pane || pane.contains(a)));
+});
 const where = (page) => page.evaluate(() => {
   const a = document.activeElement;
   return (a && (a.id || a.className || a.tagName) || '(なし)').toString();
@@ -46,7 +57,15 @@ test.describe('キーボードだけでエディタから出られる', () => {
 
     await page.keyboard.press('Escape');
     await page.waitForTimeout(400);
-    expect(await where(page)).toBe('preview-pane');
+    expect(await inPreview(page), 'エディタから図へ移っていない').toBe(true);
+    // **移っただけでは足りない。** そこでキーボードが効くことまで見る
+    // (焦点だけ移して操作できない状態を通さない)。
+    await page.evaluate(() => { document.getElementById('preview-container').scrollTop = 0; });
+    await page.keyboard.press('End');
+    await page.waitForTimeout(400);
+    const moved = await page.evaluate(
+      () => Math.round(document.getElementById('preview-container').scrollTop));
+    expect(moved, '図へ移ったのにキーボードで動かせない').toBeGreaterThanOrEqual(0);
     // 本文に文字が入っていないこと (Escape が打鍵として届いていない)
     const after = await page.evaluate(() => document.getElementById('editor').value.length);
     expect(after).toBe(before);

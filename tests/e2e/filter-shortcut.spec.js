@@ -27,6 +27,17 @@ function doc(n) {
   return l.join(NL);
 }
 
+// 焦点が**図の領域の中**にあるか。
+//
+// 元は activeElement の id が 'preview-pane' であることを直接見ていたが、
+// これは実装の細部だった。UI-073 で焦点を #preview-container (実際に
+// スクロールする要素) へ移したとき、**振る舞いは良くなったのにテストが落ちた**。
+// 見たいのは「エディタから出て図へ移ったか」なので、領域の中にあるかで見る。
+const inPreview = (page) => page.evaluate(() => {
+  const a = document.activeElement;
+  const pane = document.getElementById('preview-pane');
+  return !!(a && pane && (a === pane || pane.contains(a)));
+});
 const where = (page) => page.evaluate(() => {
   const a = document.activeElement;
   return (a && (a.id || a.tagName) || '(なし)').toString();
@@ -77,7 +88,7 @@ test.describe('絞り込みへ / で飛べる', () => {
     await page.keyboard.press('/');
     await page.waitForTimeout(400);
     // 欄が無いので焦点は動かない
-    expect(await where(page)).toBe('preview-pane');
+    expect(await inPreview(page), '図へ移っていない').toBe(true);
     const msg = await page.locator('#status-info').textContent();
     expect(msg).toContain('絞り込み欄は出ていません');
     expect(msg).toContain('↑↓');
