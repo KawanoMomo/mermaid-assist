@@ -780,3 +780,36 @@ describe('境界内にリレーションがある場合の削除', function() {
     expect(out).toContain('System(z, "Z")');
   });
 });
+
+describe('kindOptionsFor: 境界⇄非境界の変換を出さない', function() {
+  // 変換には2行にまたがる波括弧の増減が要るため未対応。ミューテーション検査で
+  // フィルタを外しても全通過していた (SURVIVED) ので、候補の中身を固定する。
+  test('K1: 境界の候補に非境界の kind が混ざらない', function() {
+    var opts = c4.kindOptionsFor('System_Boundary', true).map(function(o) { return o.value; });
+    expect(opts).toContain('System_Boundary');
+    expect(opts).not.toContain('Person');
+    expect(opts).not.toContain('System');
+    expect(opts).not.toContain('Container');
+  });
+
+  test('K2: 非境界の候補に境界の kind が混ざらない', function() {
+    var opts = c4.kindOptionsFor('Person', false).map(function(o) { return o.value; });
+    expect(opts).toContain('Person');
+    expect(opts).not.toContain('System_Boundary');
+    expect(opts).not.toContain('Container_Boundary');
+    expect(opts).not.toContain('Enterprise_Boundary');
+  });
+
+  test('K3: 境界の候補には3種類すべての境界が並ぶ', function() {
+    var opts = c4.kindOptionsFor('System_Boundary', true).map(function(o) { return o.value; });
+    expect(opts).toContain('Container_Boundary');
+    expect(opts).toContain('Enterprise_Boundary');
+  });
+
+  test('K4: 候補に無い kind でも選択中のものは必ず含まれる', function() {
+    var opts = c4.kindOptionsFor('Deployment_Node', false);
+    var sel = opts.filter(function(o) { return o.selected; });
+    expect(sel.length).toBe(1);
+    expect(sel[0].value).toBe('Deployment_Node');
+  });
+});

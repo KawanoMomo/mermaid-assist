@@ -246,3 +246,45 @@ describe('listItemHtml: 削除ボタンの警告表示', function() {
     expect(html.split('data-line="3"').length - 1).toBe(2);
   });
 });
+
+// ── 削除ボタンの警告表示の配線 ─────────────────────────────────────────────
+// deletionImpact 自体は手厚くテストされているのに、その結果を UI に出す経路には
+// テストが無く、ミューテーション検査で delLabel / delTitle を無効化しても全通過
+// していた (SURVIVED)。カスケード削除の唯一の警告なので固定する。
+describe('listItemHtml: 削除の警告表示', function() {
+  test('W1: deleteLabel がボタンの表示になる', function() {
+    var html = P.listItemHtml({ label: 'foo', deleteClass: 'x-del', deleteLabel: '✕5' });
+    expect(html).toContain('>✕5</button>');
+  });
+
+  test('W2: deleteLabel を渡さなければ従来どおり ✕', function() {
+    var html = P.listItemHtml({ label: 'foo', deleteClass: 'x-del' });
+    expect(html).toContain('>✕</button>');
+  });
+
+  test('W3: deleteTitle が title に出る', function() {
+    var html = P.listItemHtml({ label: 'foo', deleteClass: 'x-del', deleteTitle: '3 要素が消えます' });
+    expect(html).toContain('title="3 要素が消えます"');
+  });
+
+  test('W4: 件数は aria-label にも入る (title は支援技術に届かない)', function() {
+    var html = P.listItemHtml({ label: 'foo', deleteClass: 'x-del', deleteLabel: '✕5', deleteTitle: '3 要素が消えます' });
+    var m = html.match(/aria-label="([^"]*)"[^>]*>✕5</);
+    expect(m).not.toBeNull();
+    expect(m[1]).toContain('3 要素が消えます');
+    expect(m[1]).toContain('foo');
+  });
+
+  test('W5: 編集ボタンも行ごとに違う名前を持つ', function() {
+    var a = P.listItemHtml({ label: '受注', selectClass: 'x-sel' });
+    var b = P.listItemHtml({ label: '在庫', selectClass: 'x-sel' });
+    expect(a).toContain('受注');
+    expect(b).toContain('在庫');
+    expect(a === b).toBe(false);
+  });
+
+  test('W6: ラベルと入力欄が for で結び付く', function() {
+    expect(P.fieldHtml('ラベル', 'x-label', '')).toContain('for="x-label"');
+    expect(P.selectFieldHtml('親境界', 'x-parent', [])).toContain('for="x-parent"');
+  });
+});
