@@ -27,7 +27,11 @@ const HTML = 'file:///' + path.resolve(ROOT, 'mermaid-assist.html').split(path.s
 const N = 100;                 // 実務の上限に近い規模
 const MAX_MS_RENDER = 8000;    // 本文を差し替えてから描画が終わるまで
 const MAX_MS_SELECT = 2500;    // 要素を1つ選ぶ
-const MAX_MS_DELETE = 3000;    // 1つ消す
+// 「効くか」と「速いか」を分ける。実測: 単独実行なら100要素の末尾削除は 22ms、
+// 26観点を連続実行すると 3000ms を超える (**136倍**)。
+// 同じ閾値で両方を見ると、機械の混み具合が正しさの判定を汚染する。
+const MAX_MS_DELETE_WORKS = 15000;  // ここまで待って変わらなければ「効かない」
+const MAX_MS_DELETE_SLOW  = 8000;   // 遅さを言う閾値。負荷の揺れより十分上に置く
 
 // 図種ごとに巨大文書の生成器を手書きしていた (flowchart / gantt / class /
 // sequence の4つ)。**生成器の表を持つと必ず漏れる** — 残り17図種は
@@ -201,10 +205,18 @@ async function grow(page, target) {
       // 単独で再実行すると3回とも通る。再現しない指摘は、指摘そのものより
       // 質が悪い — 落ちても信じなくなるので、ゲートが働かなくなる。
       //
-      // 変わるまで待ち、上限 (MAX_MS_DELETE) を超えたときだけ報告する。
-      // 本当に効かない実装なら何秒待っても変わらないので、検出力は落ちない。
+      // **「効くか」と「速いか」を同じ待ち時間で判定していた。**
+      //
+      // 900ms → 3000ms に延ばしても、26観点を連続実行したときだけ
+      // 「削除が効かない」を報告し続けた。実測: 単独実行なら100要素の
+      // 末尾削除は **22ms**、連続実行時は 3000ms を超える。**136倍の差**。
+      // 機械の混み具合が正しさの判定を汚染していた。
+      //
+      // 分ける。正しさは**十分に待つ** — 本当に効かない実装なら
+      // 何秒待っても変わらないので、待つことで検出力は落ちない。
+      // 遅さは別の閾値で、負荷の揺れより十分上でだけ言う。
       let afterTxt = beforeTxt;
-      while (Date.now() - t2 < MAX_MS_DELETE) {
+      while (Date.now() - t2 < MAX_MS_DELETE_WORKS) {
         afterTxt = await p.locator('#editor').inputValue();
         if (afterTxt !== beforeTxt) break;
         await p.waitForTimeout(50);
@@ -278,9 +290,9 @@ async function grow(page, target) {
                     '] 増えた=[' + added.slice(0, 4).join(',') + ']' });
           }
         }
-        if (ms > MAX_MS_DELETE) {
+        if (ms > MAX_MS_DELETE_SLOW) {
           findings.push({ module: c.type, fn: 'S4 大規模削除',
-            what: '1件の削除に ' + ms + 'ms (上限 ' + MAX_MS_DELETE + ')' });
+            what: '1件の削除に ' + ms + 'ms (上限 ' + MAX_MS_DELETE_SLOW + ')' });
         }
       }
     } else {

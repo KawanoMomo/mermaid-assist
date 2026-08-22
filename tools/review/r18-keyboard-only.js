@@ -58,11 +58,33 @@ const MAX_TAB = 30;   // これを超えて届かないなら実用上「到達�
     }
     await p.waitForTimeout(500);
 
-    // K1: 矢印キーで要素を選ぶ (プレビューにフォーカスを置くのもキーボードで)
-    await p.evaluate(() => {
-      var pane = document.getElementById('preview-pane');
-      if (pane) { pane.setAttribute('tabindex', '-1'); pane.focus(); }
+    // K0: 図に**製品が用意した経路で**入る。
+    //
+    // ここは長く `pane.setAttribute('tabindex','-1'); pane.focus();` と
+    // 書いていた。コメントは「フォーカスを置くのもキーボードで」だったが、
+    // 実際には**検査器が自分で入口を作っていた**。
+    //
+    // そのため「図にフォーカスがあるとき」の操作層 (A / E / 矢印 / Delete) に
+    // **キーボードでは入れない**という欠陥を、61ラウンド見逃した。
+    // 実測: `preview-pane` / `preview-container` / `preview-svg` /
+    // `overlay-layer` のどれにも `tabindex` が無く、body から Tab を20回
+    // 押しても toolbar → editor で止まる (UI-054 / A117)。
+    //
+    // **検査器が製品に無い能力を自分に与えると、その欠落は原理的に見えない。**
+    // 入口はキーだけで作る。入れなければ、そこが指摘。
+    await p.evaluate(() => { var e = document.getElementById('editor'); if (e) e.focus(); });
+    await p.keyboard.press('Escape');   // エディタ → 図 (A117 で足した経路)
+    await p.waitForTimeout(400);
+    const enteredDiagram = await p.evaluate(() => {
+      var a = document.activeElement;
+      return !!(a && a.id === 'preview-pane');
     });
+    if (!enteredDiagram) {
+      findings.push({ module: type, fn: 'K0 図に入る',
+        what: 'キーボードだけでは図にフォーカスを置けない (A/E/矢印/Delete が使えない)' });
+      await p.close();
+      continue;
+    }
     await p.keyboard.press('ArrowDown');
     await p.waitForTimeout(700);
     let sel = await p.evaluate(() => window.MA.selection.getSelected());
