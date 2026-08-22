@@ -696,12 +696,40 @@ window.MA.modules.flowchart = (function() {
     var rightRaw = rest.trim();
     if (rightRaw.endsWith(';')) rightRaw = rightRaw.slice(0, -1).trim();
 
-    if (field === 'from') leftRaw = value;
-    else if (field === 'to') rightRaw = value;
+    // 端点を差し替えると、**その端点がこの行で宣言していたラベルごと消えていた。**
+    //
+    // `B --> C["実装"]` の行き先を変えると `B --> レビュー` になり、C の宣言が
+    // 失われる。C は他の行 (`C --> D`) から参照され続けるので図には残るが、
+    // ラベルが無いので ID の "C" が描かれる。**触っていない要素の名前が、
+    // 何も言われずに消える。** from 側も同じ (A["要件定義"] --> B が Z --> B に)。
+    //
+    // 実測 (直す前): 要件定義/設計/実装/検証 → 要件定義/設計/R/**C**/検証
+    //
+    // deleteNode が同じ問題を既に解いている (removeNodeRefs が生き残る端点の
+    // 宣言を単独行として出し直す)。同じ道具を使う。
+    var displaced = null;
+    if (field === 'from') { displaced = leftRaw; leftRaw = value; }
+    else if (field === 'to') { displaced = rightRaw; rightRaw = value; }
     else if (field === 'arrow') edgeType = value;
     else if (field === 'label') curLabel = value;
 
     lines[idx] = indent + leftRaw + ' ' + edgeType + (curLabel ? ' |' + curLabel + '| ' : ' ') + rightRaw;
+
+    if (displaced) {
+      var lost = declaredOnLine(displaced);
+      if (lost.length) {
+        var entries = lines.map(function(l) { return { text: l }; });
+        for (var li = lost.length - 1; li >= 0; li--) {
+          entries.splice(idx + 1, 0, {
+            text: indent + lost[li].id + buildShape(lost[li].shape, lost[li].label),
+            synthesized: true,
+            id: lost[li].id,
+          });
+        }
+        // 他の行で宣言し直されていれば dropRedundantDecls が落とす。
+        return dropRedundantDecls(entries).join('\n');
+      }
+    }
     return lines.join('\n');
   }
 
