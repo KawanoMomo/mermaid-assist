@@ -255,29 +255,64 @@ window.MA.modules.c4 = (function() {
   // whenever the cheap analysis is conclusive. renderProps needs this for every row
   // and runs on each keystroke; measuring 105 elements the exact form cost 280ms
   // per render because it reparses the document twice per row.
+  // 削除で消える行を、実際に削除を走らせずに求める。tidyAfterDelete と同じ順序で
+  // 「消えた要素 → その要素を指すリレーション → 空になった境界」を不動点まで回す。
+  //
+  // 以前は「囲む境界の要素数が1以下なら正確版へ」という閾値を置いていたが、これは
+  // 不動点化する前の挙動に合わせた校正だった。境界の中身がリレーションだけになった
+  // 場合も畳まれるようになったため、閾値をすり抜けて件数を過少申告していた
+  // (実測: ✕2 と出るのに実際は3個消える)。境界は必ず正確版へ回す実装も併用して
+  // いたが、そちらは 200要素の図で 646ms かかり毎キーストロークの描画に耐えない。
+  // 数え方そのものを削除と同じ規則で書けば、両方が同時に解ける。
   function deletionImpactFrom(parsed, el, text) {
-    if (!el.isBoundary) {
-      var enclosing = null;
-      for (var bi = 0; bi < parsed.elements.length; bi++) {
-        var b = parsed.elements[bi];
-        if (!b.isBoundary || b.id === el.id) continue;
-        if (el.line > b.line && el.line < b.endLine) {
-          if (!enclosing || b.line > enclosing.line) enclosing = b;
+    var lines = String(text).split('\n');
+    var removed = {};
+    var i, j;
+
+    function markRange(from, to) {
+      for (var k = from; k <= to && k <= lines.length; k++) removed[k] = true;
+    }
+    markRange(el.line, el.isBoundary && el.endLine ? el.endLine : el.line);
+
+    for (var guard = 0; guard < 50; guard++) {
+      var changed = false;
+
+      // 消えた要素の id を集める。同じ id が範囲外にも残っていれば「消えていない」。
+      var goneIds = {}, aliveIds = {};
+      for (i = 0; i < parsed.elements.length; i++) {
+        var e = parsed.elements[i];
+        if (removed[e.line]) goneIds[e.id] = true; else aliveIds[e.id] = true;
+      }
+
+      // 端点が消えたリレーションは削除に巻き込まれる。元から壊れていたものは残す。
+      for (i = 0; i < parsed.relations.length; i++) {
+        var r = parsed.relations[i];
+        if (removed[r.line]) continue;
+        if ((goneIds[r.from] && !aliveIds[r.from]) || (goneIds[r.to] && !aliveIds[r.to])) {
+          removed[r.line] = true;
+          changed = true;
         }
       }
-      // A boundary left empty collapses, and that can cascade outwards — too
-      // fiddly to shortcut, so fall back to the exact computation. Rare: it needs
-      // this element to be the only thing inside its boundary.
-      if (enclosing && contentCount(parsed, enclosing) <= 1) return deletionImpact(text, el);
 
-      var relHits = 0;
-      for (var ri = 0; ri < parsed.relations.length; ri++) {
-        var r = parsed.relations[ri];
-        if (r.from === el.id || r.to === el.id) relHits++;
+      // 中身が空になった境界は畳まれる。空判定は削除本体と同じく
+      // 「コメントを除いた実体行が1つも残らないこと」。
+      for (i = 0; i < parsed.elements.length; i++) {
+        var b = parsed.elements[i];
+        if (!b.isBoundary || !b.endLine || removed[b.line]) continue;
+        var empty = true;
+        for (j = b.line + 1; j < b.endLine; j++) {
+          if (!removed[j] && stripComment(lines[j - 1] || '')) { empty = false; break; }
+        }
+        if (empty) { markRange(b.line, b.endLine); changed = true; }
       }
-      return { elements: 1, relations: relHits };
+
+      if (!changed) break;
     }
-    return deletionImpact(text, el); // boundaries are few; keep the exact answer
+
+    var elCount = 0, relCount = 0;
+    for (i = 0; i < parsed.elements.length; i++) if (removed[parsed.elements[i].line]) elCount++;
+    for (i = 0; i < parsed.relations.length; i++) if (removed[parsed.relations[i].line]) relCount++;
+    return { elements: elCount, relations: relCount };
   }
 
   function contentCount(parsed, boundary) {

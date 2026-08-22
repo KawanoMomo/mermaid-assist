@@ -696,6 +696,55 @@ describe('Q7: deletionImpactFrom は exact と一致する', function() {
     expect(fast.elements).toBe(2);
     expect(fast.relations).toBe(1);
   });
+
+  // 上のフィクスチャはリレーションが全部境界の外にある。境界の中に Rel がある形は
+  // 「要素を1つ消す → Rel も消える → 境界が空になって畳まれる」という連鎖になり、
+  // ここを通さないと不一致が素通りする (実際、閾値式の実装がこれで過少申告していた)。
+  var NESTED = [
+    'C4Context',
+    '    System(s0, "S0")',
+    '    System_Boundary(b1, "B1") {',
+    '        Person(s2, "S2")',
+    '        Container_Boundary(b7, "B7") {',
+    '            System_Ext(s8, "S8")',
+    '            Rel(s0, s8, "r9")',
+    '        }',
+    '    }',
+    ''
+  ].join('\n');
+
+  var INNER_REL = [
+    'C4Context',
+    '    System_Boundary(b, "社内") {',
+    '        System(a, "受注")',
+    '        Rel(a, z, "連携")',
+    '    }',
+    '    System(z, "外部")',
+    ''
+  ].join('\n');
+
+  [NESTED, INNER_REL].forEach(function(doc, di) {
+    test('Q7c-' + (di + 1) + ': 境界内に Rel がある図でも exact と一致する', function() {
+      var p = c4.parseC4(doc);
+      expect(p.elements.length).toBeGreaterThan(0);
+      for (var i = 0; i < p.elements.length; i++) {
+        var e = p.elements[i];
+        var exact = c4.deletionImpact(doc, e);
+        var fast = c4.deletionImpactFrom(p, e, doc);
+        expect(fast.elements).toBe(exact.elements);
+        expect(fast.relations).toBe(exact.relations);
+      }
+    });
+  });
+
+  test('Q7d: 入れ子境界の奥の要素は連鎖ぶんも数える', function() {
+    var p = c4.parseC4(NESTED);
+    var s8 = p.elements.filter(function(e) { return e.id === 's8'; })[0];
+    var fast = c4.deletionImpactFrom(p, s8, NESTED);
+    // s8 + 空になる b7 = 2 要素、Rel(s0, s8) = 1
+    expect(fast.elements).toBe(2);
+    expect(fast.relations).toBe(1);
+  });
 });
 
 describe('境界内にリレーションがある場合の削除', function() {

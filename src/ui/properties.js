@@ -121,8 +121,11 @@ window.MA.properties = (function() {
 
   // fieldHtml: standard text input field with label
   function fieldHtml(label, id, value, placeholder) {
+    // `for` を落とすと、この入力欄は支援技術から名前なしに見える。実測では
+    // placeholder が名前に流用され、Tech と Description がどちらも「省略可」という
+    // 同じ名前になっていた。ラベルは既に隣にあるので、結び付けるだけで直る。
     return '<div style="margin-bottom:8px;">' +
-      '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">' + escHtml(label) + '</label>' +
+      '<label for="' + escHtml(id) + '" style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">' + escHtml(label) + '</label>' +
       '<input id="' + id + '" type="text" value="' + escHtml(value || '') + '" placeholder="' + escHtml(placeholder || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
     '</div>';
   }
@@ -136,8 +139,10 @@ window.MA.properties = (function() {
       opts += '<option value="' + escHtml(options[i].value) + '"' + sel + '>' + escHtml(options[i].label) + '</option>';
     }
     var fontStyle = monoFont ? 'font-family:var(--font-mono);' : '';
+    // fieldHtml と同じ理由で `for` が要る。実測では From と To の2つが同じ選択肢を
+    // 持つ無名の combobox として並び、支援技術では見分けがつかなかった。
     return '<div style="margin-bottom:8px;">' +
-      '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">' + escHtml(label) + '</label>' +
+      '<label for="' + escHtml(id) + '" style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">' + escHtml(label) + '</label>' +
       '<select id="' + id + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;' + fontStyle + '">' + opts + '</select>' +
     '</div>';
   }
@@ -166,8 +171,11 @@ window.MA.properties = (function() {
     if (opts.dataElementId !== undefined) dataAttrs += ' data-element-id="' + escHtml(opts.dataElementId) + '"';
     if (opts.dataLine !== undefined) dataAttrs += ' data-line="' + opts.dataLine + '"';
     if (opts.dataEndLine !== undefined) dataAttrs += ' data-end-line="' + opts.dataEndLine + '"';
+    // 「編集」も「✕」も、どの行のものかがボタン名から分からない。支援技術の
+    // ボタン一覧では同名が並ぶだけで選べないので、行のラベルを名前に入れる。
+    var selAria = ' aria-label="' + escHtml('「' + String(opts.label) + '」を編集') + '"';
     var selectBtn = opts.selectClass ?
-      '<button class="' + opts.selectClass + '"' + dataAttrs + ' style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' : '';
+      '<button class="' + opts.selectClass + '"' + dataAttrs + selAria + ' style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;min-height:24px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' : '';
     // deleteLabel / deleteTitle let a module warn about a cascading delete on the
     // button itself. The row's text is ellipsised at the panel width, so a warning
     // placed in the label is frequently invisible.
@@ -177,8 +185,13 @@ window.MA.properties = (function() {
     // 両方でここが唯一の手がかりになる。
     var delTitleText = opts.deleteTitle || ('「' + String(opts.label) + '」を削除');
     var delTitle = ' title="' + escHtml(delTitleText) + '"';
+    // title は支援技術に届かない。button は中身のテキスト (`✕5` 等) が名前になり、
+    // title はその後方互換のフォールバックでしかないため、`✕5` がある限り読み上げ
+    // には現れない。カスケード削除の件数はここでしか警告していないので、
+    // aria-label で名前そのものに入れる。
+    var delAria = ' aria-label="' + escHtml('「' + String(opts.label) + '」' + delTitleText) + '"';
     var deleteBtn = opts.deleteClass ?
-      '<button class="' + opts.deleteClass + '"' + dataAttrs + delTitle + ' style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">' + delLabel + '</button>' : '';
+      '<button class="' + opts.deleteClass + '"' + dataAttrs + delTitle + delAria + ' style="background:var(--accent-red);color:#fff;border:none;padding:4px 8px;min-width:24px;min-height:24px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">' + delLabel + '</button>' : '';
     // 行に印を付ける。一覧の絞り込みはこの印を見て行を選ぶので、
     // 各モジュールは何もしなくてよい (41か所がこの関数を通る)。
     return '<div class="ma-list-row" style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
@@ -194,7 +207,9 @@ window.MA.properties = (function() {
 
   // primaryButtonHtml: full-width accent button
   function primaryButtonHtml(id, label) {
-    return '<button id="' + id + '" style="width:100%;background:var(--accent);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;">' + escHtml(label) + '</button>';
+    // 白文字だと accent (#7c8cf8) に対して 3.02:1 で AA に届かない。地の色は
+    // そのままに文字を暗くすると 6.28:1 になる。
+    return '<button id="' + id + '" style="width:100%;background:var(--accent);color:#0d1117;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">' + escHtml(label) + '</button>';
   }
 
   // dangerButtonHtml: full-width red button (for delete actions)

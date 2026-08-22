@@ -16,7 +16,10 @@
   --text-secondary: #8b949e;
   --accent:       #7c8cf8;
   --accent-green: #7ee787;
-  --accent-red:   #f74a4a;
+  /* 白文字とのコントラストが 3.48:1 しかなく、WCAG AA (4.5:1) に届いていなかった。
+     一番押してはいけないボタンが一番読みにくい状態だったので暗くする (4.98:1)。
+     危険色としても暗い赤の方が自然に読める。 */
+  --accent-red:   #d32f2f;
   --accent-orange: #ffa657;
   --font-mono: 'IBM Plex Mono', 'Consolas', monospace;
   --font-sans: 'Noto Sans JP', 'Segoe UI', sans-serif;

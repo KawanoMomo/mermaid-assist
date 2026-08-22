@@ -129,17 +129,40 @@ window.MA.modules.blockBeta = (function() {
   function isGroupStart(trimmed, id) {
     var m = trimmed.match(GROUP_START_RE);
     if (!m) return false;
-    // 無名グループの id (`__anon_N`) はテキストに現れない。呼び出し側は必ず行番号も
-    // 渡すので、ここは「この行が無名グループを開いているか」を見れば足りる。
-    if (m[1] === undefined) return /^__anon_/.test(String(id));
+    // 無名グループの id (`__anon_N`) はテキストに現れないので、行だけでは
+    // 「どの無名グループか」を決められない。ここでは名前付きだけを answer し、
+    // 無名は行番号で引く groupLineOf() 側に任せる。
+    if (m[1] === undefined) return false;
     return m[1] === id;
+  }
+
+  // id からその group の開始行 index を引く。無名グループは parse が振った
+  // `__anon_N` でしか指せず、その対応は行の並び順にしか無いので parse を通す。
+  function groupLineOf(text, id) {
+    var lines = text.split('\n');
+    if (/^__anon_/.test(String(id))) {
+      var parsed = parseBlock(text);
+      for (var k = 0; k < parsed.elements.length; k++) {
+        var e = parsed.elements[k];
+        if (e.kind === 'group' && e.id === id) return e.line - 1;
+      }
+      return -1;
+    }
+    for (var i = 0; i < lines.length; i++) {
+      if (isGroupStart(lines[i].trim(), id)) return i;
+    }
+    return -1;
   }
 
   function addNestedBlock(text, parentId, id, label) {
     var token = label && label !== id ? id + '["' + encodeLabel(label) + '"]' : id;
     var lines = text.split('\n');
-    for (var i = 0; i < lines.length; i++) {
-      if (isGroupStart(lines[i].trim(), parentId)) {
+    // 先頭から isGroupStart で走査していたため、無名グループを指定すると常に最初の
+    // 無名グループへ入っていた (`__anon_1` を渡しても `__anon_0` に入る)。id から
+    // 行を引く経路に一本化する。
+    var i = groupLineOf(text, parentId);
+    if (i >= 0) {
+      {
         var endIdx = findMatchingEnd(lines, i);
         if (endIdx === -1) return text;
         // Indent one step past the parent rather than a fixed four spaces. The text
@@ -211,7 +234,11 @@ window.MA.modules.blockBeta = (function() {
     var idsBefore = collectIds(text);
 
     // Group block:ID ... end
-    if (isGroupStart(trimmed, blockId)) {
+    // 無名グループは id が行に無いので isGroupStart では答えられない。ここは
+    // 行番号で対象が決まっているため、「この行が group を開いているか」で足りる。
+    var opensGroup = isGroupStart(trimmed, blockId) ||
+      (/^__anon_/.test(String(blockId)) && GROUP_START_RE.test(trimmed));
+    if (opensGroup) {
       var endIdx = findMatchingEnd(lines, idx);
       // An unclosed group (the user deleted its `end` mid-edit) must not swallow
       // the rest of the file; drop the header line alone and leave the body.
