@@ -533,6 +533,11 @@ html, body {
 #status-info  { color: var(--text-secondary); margin-left: auto; }
 /* 版はステータス行の右端に小さく置く。縦には増やさない。 */
 /* 未保存の印。版の隣に置く。目に入る必要があるので薄くしない。 */
+/* 保存先のファイル名。**タイトルバーにしか出しておらず**、タブを何枚も
+   開くと省略されて見えなかった。未保存の印 (UI-065) と同じ型の欠落。 */
+#status-file { color: var(--text-secondary); font-size: 11px; margin-left: 12px;
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: inline-block; vertical-align: bottom; }
 #status-dirty { color: var(--accent-red); font-size: 11px; margin-left: 12px;
                 white-space: nowrap; }
 #status-version { color: var(--text-secondary); opacity: .7; font-size: 11px;
@@ -767,6 +772,7 @@ html, body {
     <!-- 未保存の印。タイトルバーは**タブが多いと見えない** (UI-065)。
          保存が黙って失敗する経路があったので、押したのに印が残っていることが
          気付く唯一の手がかりになる。 -->
+    <span id="status-file"></span>
     <span id="status-dirty" hidden>● 未保存</span>
     <span id="status-version" title="MermaidAssist の版。不具合を報告するときはこの番号を添えてください">v1.3.0</span>
     <button id="status-help" title="キーボードショートカットを開く (F1 / 図・パネルでは ?)">F1 ショートカット</button>
