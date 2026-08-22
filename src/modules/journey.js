@@ -213,7 +213,7 @@ window.MA.modules.journey = (function() {
         var txt = document.getElementById('jr-add-t-text').value.trim();
         var sc = document.getElementById('jr-add-t-score').value.trim();
         var act = document.getElementById('jr-add-t-actors').value.trim();
-        if (!sec || !txt || !sc || !act) { alert('全項目が必要です'); return; }
+        if (!sec || !txt || !sc || !act) { alert('全項目 は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addTask(ctx.getMmdText(), sec, txt, sc, act));
         ctx.onUpdate();

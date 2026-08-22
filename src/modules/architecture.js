@@ -300,7 +300,7 @@ window.MA.modules.architectureBeta = (function() {
         var icon = document.getElementById('arch-add-g-icon').value;
         var label = document.getElementById('arch-add-g-label').value.trim();
         var parent = document.getElementById('arch-add-g-parent').value;
-        if (!id || !label) { alert('ID と Label 必須'); return; }
+        if (!id || !label) { alert('ID と Label は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addGroup(ctx.getMmdText(), id, icon, label, parent));
         ctx.onUpdate();
@@ -310,7 +310,7 @@ window.MA.modules.architectureBeta = (function() {
         var icon = document.getElementById('arch-add-s-icon').value;
         var label = document.getElementById('arch-add-s-label').value.trim();
         var parent = document.getElementById('arch-add-s-parent').value;
-        if (!id || !label) { alert('ID と Label 必須'); return; }
+        if (!id || !label) { alert('ID と Label は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addService(ctx.getMmdText(), id, icon, label, parent));
         ctx.onUpdate();
@@ -320,7 +320,7 @@ window.MA.modules.architectureBeta = (function() {
         var fside = document.getElementById('arch-add-e-fside').value;
         var tside = document.getElementById('arch-add-e-tside').value;
         var to = document.getElementById('arch-add-e-to').value;
-        if (!from || !to) { alert('From/To 必須'); return; }
+        if (!from || !to) { alert('From / To は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addEdge(ctx.getMmdText(), from, fside, tside, to));
         ctx.onUpdate();

@@ -974,7 +974,7 @@ window.MA.modules.flowchart = (function() {
         var id = document.getElementById('fc-add-node-id').value.trim();
         var label = document.getElementById('fc-add-node-label').value.trim();
         var shape = document.getElementById('fc-add-node-shape').value;
-        if (!id) { alert('IDは必須です'); return; }
+        if (!id) { alert('ID は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addNode(ctx.getMmdText(), id, label || id, shape));
         ctx.onUpdate();
@@ -992,7 +992,7 @@ window.MA.modules.flowchart = (function() {
       window.MA.properties.bindEvent('fc-add-sg-btn', 'click', function() {
         var id = document.getElementById('fc-add-sg-id').value.trim();
         var label = document.getElementById('fc-add-sg-label').value.trim();
-        if (!id) { alert('IDは必須です'); return; }
+        if (!id) { alert('ID は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addSubgraph(ctx.getMmdText(), id, label));
         ctx.onUpdate();

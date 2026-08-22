@@ -401,7 +401,7 @@ window.MA.modules.erDiagram = (function() {
 
       P.bindEvent('er-add-ent-btn', 'click', function() {
         var id = document.getElementById('er-add-ent-id').value.trim();
-        if (!id) { alert('IDは必須です'); return; }
+        if (!id) { alert('ID は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addEntity(ctx.getMmdText(), id));
         ctx.onUpdate();
@@ -412,7 +412,7 @@ window.MA.modules.erDiagram = (function() {
         var name = document.getElementById('er-add-attr-name').value.trim();
         var key = document.getElementById('er-add-attr-key').value;
         var comment = document.getElementById('er-add-attr-comment').value.trim();
-        if (!entId || !type || !name) { alert('エンティティ、型、名前は必須です'); return; }
+        if (!entId || !type || !name) { alert('エンティティ と 型 と 名前 は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addAttribute(ctx.getMmdText(), entId, type, name, key, comment));
         ctx.onUpdate();

@@ -578,7 +578,7 @@ window.MA.modules.blockBeta = (function() {
           var from = document.getElementById('block-add-link-from').value;
           var to = document.getElementById('block-add-link-to').value;
           var label = document.getElementById('block-add-link-label').value.trim();
-          if (!from || !to) { alert('From / To を選択してください'); return; }
+          if (!from || !to) { alert('From / To は必須です'); return; }
           window.MA.history.pushHistory();
           ctx.setMmdText(addLink(ctx.getMmdText(), from, to, label));
           ctx.onUpdate();
