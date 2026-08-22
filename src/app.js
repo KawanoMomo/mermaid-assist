@@ -942,15 +942,44 @@ function showSelectedLine() {
   if (!propsEl) return;
   var old = document.getElementById('ma-goto-line');
   if (old && old.parentNode) old.parentNode.removeChild(old);
-  if (!parsed || !parsed.elements || !currentModule) return;
+  if (!parsed || !currentModule) return;
   var sel = window.MA.selection.getSelected();
   if (!sel || sel.length !== 1) return;
+
+  // 選んだものがどこにあるかは図種で違う。**3か所とも見る。**
+  //
+  //   elements   ほとんどの図種
+  //   relations  sankey の流れ / architecture のエッジ (要素ではない)
+  //   groups     architecture のグループ (parse が第3の入れ物に返す)
+  //
+  // さらに gitGraph は選択の id が**行番号そのもの** ("2")。
+  //
+  // 最初 elements だけを見ていて、**21図種中4図種で出なかった**
+  // (gantt / gitGraph / sankey / architecture)。flowchart で1回確かめて
+  // 全体に効くと思い込んだ形。図種ごとに id の持ち方が違うことは
+  // 何度も踏んでいるのに、また踏んだ。
   var idf = currentModule.identityField || 'id';
+  var pools = [parsed.elements, parsed.relations, parsed.groups];
   var line = null;
-  for (var i = 0; i < parsed.elements.length; i++) {
-    var e = parsed.elements[i];
-    var key = e[idf] !== undefined ? e[idf] : e.id;
-    if (String(key) === String(sel[0].id) && typeof e.line === 'number') { line = e.line; break; }
+  for (var pi = 0; pi < pools.length && line === null; pi++) {
+    var pool = pools[pi];
+    if (!pool || !pool.length) continue;
+    for (var i = 0; i < pool.length; i++) {
+      var e = pool[i];
+      if (typeof e.line !== 'number') continue;
+      var keys = [e[idf], e.id, e.name, e.label];
+      for (var k = 0; k < keys.length; k++) {
+        if (keys[k] !== undefined && keys[k] !== null && String(keys[k]) === String(sel[0].id)) {
+          line = e.line; break;
+        }
+      }
+      if (line !== null) break;
+    }
+  }
+  // どこにも無く、id が数字なら行番号そのもの (gitGraph)
+  if (line === null && /^\d+$/.test(String(sel[0].id))) {
+    var n = Number(sel[0].id);
+    if (n >= 1 && n <= mmdText.split(String.fromCharCode(10)).length) line = n;
   }
   if (line === null) return;
   var wrap = document.createElement('div');

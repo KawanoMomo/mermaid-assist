@@ -88,4 +88,31 @@ test.describe('UI-042: 選んだ要素の行へ飛べる', () => {
     const after = await page.evaluate(() => document.getElementById('editor').scrollTop);
     expect(after).toBe(before);
   });
+  // 図種ごとに id の持ち方が違う。**flowchart で1回確かめただけでは足りなかった** —
+  // 最初の実装は elements しか見ておらず、21図種中4図種で出なかった:
+  //   gitGraph   選択の id が**行番号そのもの** ("2")
+  //   sankey     選んだのは流れ = relations にある (elements ではない)
+  //   architecture 選んだのはグループ = parse が第3の入れ物 groups に返す
+  //   gantt      セクション行の ↑ を押していただけで、そもそも選択が起きない
+  //              (= 検査の誤り。タスクを選べば出る)
+  test('選択できる図種すべてで行番号が出る', async ({ page }) => {
+    test.setTimeout(240000);
+    await page.goto(HTML_URL);
+    await page.waitForSelector('#preview-svg svg', { timeout: 20000 });
+    await page.waitForTimeout(500);
+    const types = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('#diagram-type option')).map(o => o.value));
+    const missing = [];
+    for (const t of types) {
+      await page.locator('#diagram-type').selectOption(t);
+      await page.waitForTimeout(1600);
+      const btn = page.locator('#props-content .ma-list-row button')
+        .filter({ hasNotText: /^[↑↓✕×]/ }).first();
+      if (!(await btn.count())) continue;
+      await btn.click();
+      await page.waitForTimeout(700);
+      if ((await page.locator('#ma-goto-line-btn').count()) === 0) missing.push(t);
+    }
+    expect(missing).toEqual([]);
+  });
 });
