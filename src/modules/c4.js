@@ -443,13 +443,30 @@ window.MA.modules.c4 = (function() {
     return lines;
   }
 
+  // The two clean-ups feed each other: pruning a relation can empty the boundary
+  // that held it, and collapsing a boundary can strand relations that pointed into
+  // it. Running them once in either order leaves work behind — collapse-then-prune
+  // left `Kind(...) { }` whenever the boundary's last non-element line was a
+  // relation, and mermaid will not render an empty boundary. Repeat to a fixed
+  // point instead, with a guard so a malformed document still terminates.
+  function tidyAfterDelete(before, afterText) {
+    var prev = afterText;
+    for (var guard = 0; guard < 50; guard++) {
+      var pruned = pruneDanglingRels(before, prev);
+      var collapsed = collapseEmptyBoundaries(pruned.split('\n')).join('\n');
+      if (collapsed === prev) return collapsed;
+      prev = collapsed;
+    }
+    return prev;
+  }
+
   // Delete one element line, then tidy up what that leaves behind.
   function deleteElementLine(text, lineNum) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     lines.splice(idx, 1);
-    return pruneDanglingRels(text, collapseEmptyBoundaries(lines).join('\n'));
+    return tidyAfterDelete(text, lines.join('\n'));
   }
 
   function deleteBoundary(text, startLine, endLine) {
@@ -459,7 +476,7 @@ window.MA.modules.c4 = (function() {
     if (from < 0 || from >= lines.length) return text;
     if (to < from || to >= lines.length) to = from;
     lines.splice(from, to - from + 1);
-    return pruneDanglingRels(text, collapseEmptyBoundaries(lines).join('\n'));
+    return tidyAfterDelete(text, lines.join('\n'));
   }
 
   function updateElement(text, lineNum, field, value) {

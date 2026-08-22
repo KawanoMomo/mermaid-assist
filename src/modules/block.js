@@ -19,7 +19,10 @@ window.MA.modules.blockBeta = (function() {
   // 記号は形状やリンクの記法に使うので識別子から外す。
   // `-` を先頭に許すと `-->` の一部を id と読むので、先頭だけ別に書く。
   var ID = '[^\\s\\[\\](){}"<>:,\\-][^\\s\\[\\](){}"<>:,]*';
-  var GROUP_START_RE = new RegExp('^block:(' + ID + ')(?::\\d+)?\\s*(?:columns\\s+\\d+)?\\s*$');
+  // 無名グループ (`block` だけの行) も group 開始として数える。mermaid はこれを
+  // 受理し `end` で閉じるので、ここから漏らすと深度カウントが開きを1つ数え落とし、
+  // 内側の `end` を外側 group のものと誤認して範囲がずれる。
+  var GROUP_START_RE = new RegExp('^block(?::(' + ID + ')(?::\\d+)?)?\\s*(?:columns\\s+\\d+)?\\s*$');
   // 形状付きトークン。菱形 `{"..."}` と六角 `{{"..."}}` を知らないと、
   // `c{"Actuator"}` が `c` と `Actuator` の2ブロックに割れて幽霊が出る。
   var BLOCK_TOKEN_RE = new RegExp('(' + ID + ')' +
@@ -35,6 +38,7 @@ window.MA.modules.blockBeta = (function() {
     if (!text || !text.trim()) return result;
     var lines = text.split('\n');
     var relCounter = 0;
+    var anonCounter = 0;
     var groupStack = [];
     for (var i = 0; i < lines.length; i++) {
       var lineNum = i + 1;
@@ -58,8 +62,15 @@ window.MA.modules.blockBeta = (function() {
       var gm = trimmed.match(GROUP_START_RE);
       if (gm) {
         var parent = groupStack.length ? groupStack[groupStack.length - 1] : null;
-        result.elements.push({ kind: 'group', id: gm[1], label: gm[1], parentId: parent, line: lineNum });
-        groupStack.push(gm[1]);
+        // 無名グループには指し示す id が無い。合成しないと一覧に undefined が並び、
+        // 中の要素の parentId も undefined になる。リンクが __rel_N を振るのと同じ。
+        var anonymous = gm[1] === undefined;
+        var gid = anonymous ? '__anon_' + (anonCounter++) : gm[1];
+        result.elements.push({
+          kind: 'group', id: gid, label: anonymous ? '(無名グループ)' : gm[1],
+          parentId: parent, line: lineNum, anonymous: anonymous,
+        });
+        groupStack.push(gid);
         continue;
       }
 
@@ -117,7 +128,11 @@ window.MA.modules.blockBeta = (function() {
   // adding a block to g1 lands inside g10 whenever g10 appears first.
   function isGroupStart(trimmed, id) {
     var m = trimmed.match(GROUP_START_RE);
-    return !!m && m[1] === id;
+    if (!m) return false;
+    // 無名グループの id (`__anon_N`) はテキストに現れない。呼び出し側は必ず行番号も
+    // 渡すので、ここは「この行が無名グループを開いているか」を見れば足りる。
+    if (m[1] === undefined) return /^__anon_/.test(String(id));
+    return m[1] === id;
   }
 
   function addNestedBlock(text, parentId, id, label) {

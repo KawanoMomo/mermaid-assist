@@ -697,3 +697,37 @@ describe('Q7: deletionImpactFrom は exact と一致する', function() {
     expect(fast.relations).toBe(1);
   });
 });
+
+describe('境界内にリレーションがある場合の削除', function() {
+  // collapse を先に走らせると、その時点で境界は Rel 行を含むので「空でない」と
+  // 判定され、あとから prune が Rel を落として空の境界が残る。mermaid は空境界を
+  // 受理しないため、削除しただけで図が描画不能になる。
+  test('E1: 境界内の唯一の要素を消すと、境界内の Rel ごと境界が畳まれる', function() {
+    var t = 'C4Context\n    title T\n    System_Boundary(b, "社内") {\n        System(a, "受注")\n        Rel(a, z, "連携")\n    }\n    System(z, "外部")\n';
+    var p = c4.parseC4(t);
+    var a = p.elements.filter(function(e) { return e.id === 'a'; })[0];
+    var out = c4.deleteElementLine(t, a.line);
+    expect(out).not.toContain('System_Boundary');
+    expect(out.split('\n').filter(function(l) { return l.trim() === '}'; }).length).toBe(0);
+    expect(out).toContain('System(z, "外部")');
+  });
+
+  test('E2: 境界内に Rel と他要素が残るなら境界は保持される', function() {
+    var t = 'C4Context\n    System_Boundary(b, "社内") {\n        System(a, "受注")\n        System(c2, "在庫")\n        Rel(a, c2, "参照")\n    }\n';
+    var p = c4.parseC4(t);
+    var a = p.elements.filter(function(e) { return e.id === 'a'; })[0];
+    var out = c4.deleteElementLine(t, a.line);
+    expect(out).toContain('System_Boundary(b, "社内") {');
+    expect(out).toContain('System(c2, "在庫")');
+    expect(out).not.toContain('Rel(a, c2');
+  });
+
+  test('E3: 入れ子境界でも Rel 経由の連鎖が最後まで畳まれる', function() {
+    var t = 'C4Context\n    System_Boundary(o, "外") {\n        System_Boundary(i, "内") {\n            System(a, "A")\n            Rel(a, z, "x")\n        }\n    }\n    System(z, "Z")\n';
+    var p = c4.parseC4(t);
+    var a = p.elements.filter(function(e) { return e.id === 'a'; })[0];
+    var out = c4.deleteElementLine(t, a.line);
+    expect(out).not.toContain('System_Boundary');
+    expect(out).toContain('System(z, "Z")');
+  });
+});
