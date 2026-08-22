@@ -175,7 +175,7 @@ window.MA.modules.radarBeta = (function() {
       });
       P.bindEvent('rd-set-axes', 'click', function() {
         var raw = document.getElementById('rd-axes').value.trim();
-        if (!raw) { alert('軸 必須'); return; }
+        if (!raw) { alert('軸 は必須です'); return; }
         var axes = raw.split(',').map(function(p) {
           var parts = p.split(':').map(function(x) { return x.trim(); });
           return { id: parts[0], label: parts[1] || parts[0] };
@@ -188,7 +188,7 @@ window.MA.modules.radarBeta = (function() {
         var id = document.getElementById('rd-add-id').value.trim();
         var label = document.getElementById('rd-add-label').value.trim();
         var vals = document.getElementById('rd-add-values').value.trim();
-        if (!id || !label || !vals) { alert('全項目必須'); return; }
+        if (!id || !label || !vals) { alert('全項目 は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addCurve(ctx.getMmdText(), id, label, vals));
         ctx.onUpdate();

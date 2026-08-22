@@ -112,4 +112,41 @@ console.log('  (欄名の言語: 日本語 ' + jp.length + ' 種 / 英語 ' + en
   ' — 英語の分は UI-030 として未処理)');
 console.log('  (欄名 ' + total + ' 箇所 / 異なり ' + Object.keys(counts).length + ' 種 / ' +
   'そのうち名前を指すもの ' + nameish.length + ' 種: ' + nameish.join(',') + ')');
+// T4 入力が足りないときの文言が揃っているか。
+//
+// **この検査は alert を見ていなかった。** 欄名の一貫性は数えていたのに、
+// **利用者が実際に読む文言**は範囲外だった。実測すると「必須」を告げる
+// alert が **25通りの言い回し**で書かれていた:
+//   'IDは必須です' / 'ID は必須です' (空白の有無)
+//   'From/To 必須' / 'From/To は必須' / 'From / To を選択してください' (3通り)
+//   'Name は必須です' / 'Name 必須'
+//   '全項目必須' / '全項目が必要です'
+// 毎日100回この文言を読む人にとって、同じ条件が違う言い方をするのは
+// 「別のことが起きた」と読める。**最頻の形 `X は必須です` に統一した。**
+// 頻度で決めており、好みで選んでいない。
+//
+// 「〜を先に追加してください」(前提が足りない) は別の意味なので対象外。
+const fs2 = require('fs');
+const path2 = require('path');
+const modDir = path.join(ROOT, 'src', 'modules');
+const REQUIRED_RE = /alert\('([^']*(?:必須|が必要です)[^']*)'\)/g;
+const CANON = /^.+ は必須です$/;
+const badPhrases = {};
+fs2.readdirSync(modDir).filter((f) => f.endsWith('.js')).forEach((f) => {
+  const src = fs2.readFileSync(path2.join(modDir, f), 'utf8');
+  let m;
+  while ((m = REQUIRED_RE.exec(src)) !== null) {
+    if (!CANON.test(m[1])) {
+      badPhrases[m[1]] = (badPhrases[m[1]] || []).concat(f.replace(/\.js$/, ''));
+    }
+  }
+});
+Object.keys(badPhrases).forEach((ph) => {
+  findings.push({ module: badPhrases[ph].join(','), fn: 'T4 入力不足の文言',
+    what: '「X は必須です」の形になっていない: ' + JSON.stringify(ph) });
+});
+console.log('  (入力不足の文言: ' +
+  (Object.keys(badPhrases).length ? '**' + Object.keys(badPhrases).length + ' 種が形から外れている**'
+    : 'すべて「X は必須です」の形') + ')');
+
 report('terms', findings, { total: 21, examined: 21 });

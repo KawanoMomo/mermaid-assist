@@ -16,6 +16,13 @@
 // correct axis-aligned box.
 window.MA = window.MA || {};
 window.MA.overlayGeom = (function() {
+  // 選択の印の色。scrollSelectedIntoView が同じ値で印を探すので、
+  // リテラルを2か所に書かない (片方だけ変えると探せなくなる)。
+  var SELECTED_STROKE = '#7ee787';
+  // 接続モードの起点の印。**選択とは別の色**にする。
+  // 同じ色だと「選ばれている」のか「ここから線を引こうとしている」のかが
+  // 区別できない。橙は選択の緑と紛れない。
+  var CONNECT_SOURCE_STROKE = '#f0883e';
 
   function boxInSvgSpace(svgEl, el) {
     if (!svgEl || !el || !el.getBBox || !el.getScreenCTM || !svgEl.getScreenCTM) return null;
@@ -84,7 +91,24 @@ window.MA.overlayGeom = (function() {
     rect.setAttribute('width', Math.max(0, box.width + pad * 2));
     rect.setAttribute('height', Math.max(0, box.height + pad * 2));
     rect.setAttribute('fill', 'transparent');
-    rect.setAttribute('stroke', opts.selected ? '#7ee787' : 'none');
+    // **接続モードの起点は、選択の印より優先して出す。**
+    //
+    // 実測 (直す前): 要素を選ぶと図で光る (stroke が1個) が、
+    // 「ここから線を引く」を押すと**0個になる**。ステータス行は
+    // 「接続モード: C から線を引きます」と言うが、視線は図にある。
+    // 起点を確かめるにはステータス行へ視線を移す1手が要った。
+    // **接続元の判定はここでする。** hitRect を直接呼ぶモジュールが
+    // 4つある (flowchart / block / c4 / kanban)。呼び出し側に渡させると
+    // 21図種のうち一部だけ光る不揃いを作る — このコードベースが繰り返し
+    // 踏んできた型 (UI 経路だけ直して契約経路を忘れる) そのもの。
+    var isConnectSrc = (function() {
+      if (opts.connectSource) return true;
+      var s = window.MA.connectionMode && window.MA.connectionMode.getSource();
+      return !!(s && s.id === opts.id);
+    })();
+    rect.setAttribute('stroke',
+      isConnectSrc ? CONNECT_SOURCE_STROKE :
+      (opts.selected ? SELECTED_STROKE : 'none'));
     rect.setAttribute('stroke-width', '2');
     rect.setAttribute('stroke-dasharray', '4');
     rect.setAttribute('cursor', 'pointer');
@@ -149,11 +173,57 @@ window.MA.overlayGeom = (function() {
     }
   }
 
+  // 選んだ要素まで図を動かす。
+  //
+  // 選ぶと図は光る (hitRect が stroke を #7ee787 にする) が、**画面の外だと
+  // 光っても見えない**。実測: 40要素の図で選んだ要素は枠の上端から 3974px、
+  // 枠の高さは 681px、scrollTop は 0 のままだった。
+  // 一覧で選んだ人は、そこからホイールで探すことになる。
+  //
+  // **どこから呼ぶかが全て。**
+  //
+  // 1) buildNodeOverlay から呼んではいけない。この関数を使うのは 21図種のうち
+  //    5つ (architecture / class / er / requirement / state) だけで、flowchart は
+  //    自前で hitRect を並べている。最初ここから呼んで flowchart で効かなかった。
+  //
+  // 2) 描画経路 (app.js:413 が buildOverlay を直接呼ぶ) からも呼んではいけない。
+  //    オーバレイは打鍵のたびに作り直されるので、そこから呼ぶと手で合わせた
+  //    スクロール位置を毎回奪う。
+  //
+  // 呼ぶのは **app.js の rebuildOverlay() だけ**。これは選択が変わったときの
+  // onChange からしか呼ばれない (app.js:1933)。全図種が通り、かつ打鍵では通らない。
+  //
+  // 最初「同じ選択なら動かさない」ガードを入れたが、**変異を入れても挙動が
+  // 変わらず、死んだコードだと分かった** — 打鍵経路がそもそもここを通らない。
+  // 効かないガードを「位置を守っている」と書き残すのは嘘になるので外した。
+  // 打鍵で位置が動かないことは e2e が直接押さえている。
+  function scrollSelectedIntoView(overlayEl) {
+    if (!overlayEl) return;
+    var box = document.getElementById('preview-container');
+    if (!box) return;
+    var sel = window.MA.selection.getSelected();
+    if (!sel.length) return;
+    var mark = null;
+    var kids = overlayEl.children;
+    for (var i = 0; i < kids.length; i++) {
+      if (kids[i].getAttribute('stroke') === SELECTED_STROKE) { mark = kids[i]; break; }
+    }
+    if (!mark) return;
+    var mb = mark.getBoundingClientRect();
+    var bb = box.getBoundingClientRect();
+    if (mb.top >= bb.top && mb.bottom <= bb.bottom &&
+        mb.left >= bb.left && mb.right <= bb.right) return;   // もう見えている
+    // 枠の中央に置く。端に寄せると前後の文脈が見えない。
+    box.scrollTop += (mb.top - bb.top) - (bb.height - mb.height) / 2;
+    box.scrollLeft += (mb.left - bb.left) - (bb.width - mb.width) / 2;
+  }
+
   return {
     boxInSvgSpace: boxInSvgSpace,
     idFromSvgNodeId: idFromSvgNodeId,
     syncViewport: syncViewport,
     hitRect: hitRect,
     buildNodeOverlay: buildNodeOverlay,
+    scrollSelectedIntoView: scrollSelectedIntoView,
   };
 })();

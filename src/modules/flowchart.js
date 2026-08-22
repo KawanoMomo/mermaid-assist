@@ -696,12 +696,40 @@ window.MA.modules.flowchart = (function() {
     var rightRaw = rest.trim();
     if (rightRaw.endsWith(';')) rightRaw = rightRaw.slice(0, -1).trim();
 
-    if (field === 'from') leftRaw = value;
-    else if (field === 'to') rightRaw = value;
+    // 端点を差し替えると、**その端点がこの行で宣言していたラベルごと消えていた。**
+    //
+    // `B --> C["実装"]` の行き先を変えると `B --> レビュー` になり、C の宣言が
+    // 失われる。C は他の行 (`C --> D`) から参照され続けるので図には残るが、
+    // ラベルが無いので ID の "C" が描かれる。**触っていない要素の名前が、
+    // 何も言われずに消える。** from 側も同じ (A["要件定義"] --> B が Z --> B に)。
+    //
+    // 実測 (直す前): 要件定義/設計/実装/検証 → 要件定義/設計/R/**C**/検証
+    //
+    // deleteNode が同じ問題を既に解いている (removeNodeRefs が生き残る端点の
+    // 宣言を単独行として出し直す)。同じ道具を使う。
+    var displaced = null;
+    if (field === 'from') { displaced = leftRaw; leftRaw = value; }
+    else if (field === 'to') { displaced = rightRaw; rightRaw = value; }
     else if (field === 'arrow') edgeType = value;
     else if (field === 'label') curLabel = value;
 
     lines[idx] = indent + leftRaw + ' ' + edgeType + (curLabel ? ' |' + curLabel + '| ' : ' ') + rightRaw;
+
+    if (displaced) {
+      var lost = declaredOnLine(displaced);
+      if (lost.length) {
+        var entries = lines.map(function(l) { return { text: l }; });
+        for (var li = lost.length - 1; li >= 0; li--) {
+          entries.splice(idx + 1, 0, {
+            text: indent + lost[li].id + buildShape(lost[li].shape, lost[li].label),
+            synthesized: true,
+            id: lost[li].id,
+          });
+        }
+        // 他の行で宣言し直されていれば dropRedundantDecls が落とす。
+        return dropRedundantDecls(entries).join('\n');
+      }
+    }
     return lines.join('\n');
   }
 
@@ -946,7 +974,7 @@ window.MA.modules.flowchart = (function() {
         var id = document.getElementById('fc-add-node-id').value.trim();
         var label = document.getElementById('fc-add-node-label').value.trim();
         var shape = document.getElementById('fc-add-node-shape').value;
-        if (!id) { alert('IDは必須です'); return; }
+        if (!id) { alert('ID は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addNode(ctx.getMmdText(), id, label || id, shape));
         ctx.onUpdate();
@@ -964,7 +992,7 @@ window.MA.modules.flowchart = (function() {
       window.MA.properties.bindEvent('fc-add-sg-btn', 'click', function() {
         var id = document.getElementById('fc-add-sg-id').value.trim();
         var label = document.getElementById('fc-add-sg-label').value.trim();
-        if (!id) { alert('IDは必須です'); return; }
+        if (!id) { alert('ID は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addSubgraph(ctx.getMmdText(), id, label));
         ctx.onUpdate();
@@ -1002,6 +1030,14 @@ window.MA.modules.flowchart = (function() {
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">形状</label><select id="sel-node-shape" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + shapeOpts + '</select></div>' +
         window.MA.properties.connectButtonHtml('sel-node-connect') +
         window.MA.properties.actionBarHtml('sel-node', {
+        // ノードの前後挿入は出さない。**フローチャートはノードの並び順に
+        // 意味を持たない** — 構造を決めるのはエッジで、テキスト上の順序は
+        // 読みやすさの問題でしかない。「この前に挿入」を出すと、押した人は
+        // 流れに割り込めたと思うのに、実際は行が1つ増えるだけで線は繋がらない。
+        // 流れに割り込む操作は「エッジの行き先を変える + 新しい線を引く」で、
+        // 実測 3クリック + 4打鍵 + 線を引く操作1回 (R66)。
+        // 並び順に意味がある図種 (sequence / timeline / state / class / er) は
+        // insertBefore/After を出している。
           insertBefore: false, insertAfter: false,
           move: true, delete: true,
           labels: { delete: 'ノード削除' },
@@ -1080,6 +1116,14 @@ window.MA.modules.flowchart = (function() {
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">To</label><select id="sel-edge-to" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + toOpts + '</select></div>' +
         fieldHtml('ラベル', 'sel-edge-label', edge.label) +
         window.MA.properties.actionBarHtml('sel-edge', {
+        // ノードの前後挿入は出さない。**フローチャートはノードの並び順に
+        // 意味を持たない** — 構造を決めるのはエッジで、テキスト上の順序は
+        // 読みやすさの問題でしかない。「この前に挿入」を出すと、押した人は
+        // 流れに割り込めたと思うのに、実際は行が1つ増えるだけで線は繋がらない。
+        // 流れに割り込む操作は「エッジの行き先を変える + 新しい線を引く」で、
+        // 実測 3クリック + 4打鍵 + 線を引く操作1回 (R66)。
+        // 並び順に意味がある図種 (sequence / timeline / state / class / er) は
+        // insertBefore/After を出している。
           insertBefore: false, insertAfter: false,
           move: false, delete: true,
           labels: { delete: 'エッジ削除' },

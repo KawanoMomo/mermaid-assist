@@ -205,7 +205,7 @@ window.MA.modules.kanban = (function() {
 
       P.bindEvent('kb-add-col-btn', 'click', function() {
         var n = document.getElementById('kb-add-col-name').value.trim();
-        if (!n) { alert('Name 必須'); return; }
+        if (!n) { alert('Name は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addColumn(ctx.getMmdText(), n));
         ctx.onUpdate();
@@ -214,7 +214,7 @@ window.MA.modules.kanban = (function() {
         var col = document.getElementById('kb-add-c-col').value;
         var t = document.getElementById('kb-add-c-text').value.trim();
         var m = document.getElementById('kb-add-c-meta').value.trim();
-        if (!col || !t) { alert('Column と Text 必須'); return; }
+        if (!col || !t) { alert('Column と Text は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addCard(ctx.getMmdText(), '', t, m, parseInt(col, 10)));
         ctx.onUpdate();

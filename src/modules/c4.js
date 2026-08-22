@@ -721,7 +721,7 @@ window.MA.modules.c4 = (function() {
         var tech = document.getElementById('c4-add-tech').value.trim();
         var descr = document.getElementById('c4-add-descr').value.trim();
         var parent = document.getElementById('c4-add-parent').value;
-        if (!id || !label) { alert('ID と Label は必須'); return; }
+        if (!id || !label) { alert('ID と Label は必須です'); return; }
         var before = ctx.getMmdText();
         var finalId = uniqueId(before, id);
         // A duplicate alias is renamed rather than rejected, because mermaid accepts
@@ -740,7 +740,7 @@ window.MA.modules.c4 = (function() {
         var to = document.getElementById('c4-add-rel-to').value;
         var label = document.getElementById('c4-add-rel-label').value.trim();
         var tech = document.getElementById('c4-add-rel-tech').value.trim();
-        if (!from || !to) { alert('From/To は必須'); return; }
+        if (!from || !to) { alert('From / To は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addRel(ctx.getMmdText(), kind, from, to, label, tech));
         ctx.onUpdate();

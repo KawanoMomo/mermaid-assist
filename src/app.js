@@ -38,6 +38,12 @@ function rebuildOverlay() {
   if (svgEl) {
     // 図種による場合分けは不要になった。gantt も他の20図種と同じ 3引数契約。
     currentModule.buildOverlay(svgEl, parsed, overlayEl);
+    // 選んだ要素が画面の外なら、そこまで図を動かす。**ここから呼ぶ理由**:
+    // overlayGeom.buildNodeOverlay を使うのは21図種のうち5つだけで、
+    // flowchart は自前でオーバレイを作る。全図種が通るのはこの関数だけ。
+    if (window.MA.overlayGeom && window.MA.overlayGeom.scrollSelectedIntoView) {
+      window.MA.overlayGeom.scrollSelectedIntoView(overlayEl);
+    }
   }
 }
 
@@ -691,7 +697,17 @@ function focusEditor() {
 }
 
 function focusPreview() {
-  var pane = document.getElementById('preview-pane') || previewSvgEl;
+  // **スクロールするのは #preview-container (内側) で、#preview-pane (外枠) では
+  // ない。** 外枠に焦点を当てていたので、Escape で図へ移った後に
+  // PageDown / ArrowDown / End / Space が**どれも効かなかった** (実測)。
+  // キーボードだけで作業する人は、40要素の図の下の方を見るのに
+  // マウスへ持ち替えるしかなかった。A117 で通したキーボード経路が
+  // ここで切れていた。
+  //
+  // 焦点はスクロールする要素そのものに当てる。#preview-pane が無い環境
+  // (テストの一部) では従来どおり外枠に落とす。
+  var box = document.getElementById('preview-container');
+  var pane = box || document.getElementById('preview-pane') || previewSvgEl;
   if (pane && pane.focus) { pane.setAttribute('tabindex', '-1'); pane.focus(); }
 }
 
@@ -837,6 +853,19 @@ function updateDocumentTitle() {
   if (mark) {
     mark.hidden = !dirty;
     mark.title = dirty ? (name + '.mmd は未保存です — Ctrl+S で保存') : '';
+  }
+
+  // 保存先そのものも**画面の中に**出す。
+  //
+  // UI-065 で未保存の印は画面へ出したが、**どのファイルへ書くのかは
+  // タイトルバーにしか無いままだった** (実測: ステータス欄にも本文にも
+  // 出ない)。タブが多いとタイトルが省略され、Ctrl+S を押す前に
+  // 保存先を確かめる手段が「タブをホバーする」しか無かった。
+  // 同じ欠落を、同じ場所に、同じ理由で埋める。
+  var fileLabel = document.getElementById('status-file');
+  if (fileLabel) {
+    fileLabel.textContent = name + '.mmd';
+    fileLabel.title = 'Ctrl+S でこの名前で保存します';
   }
 }
 
@@ -1789,7 +1818,13 @@ function exportPNG(transparent, scale) {
     canvas.toBlob(function(blob) {
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = currentBaseName() + (scale && scale !== 1 ? '@' + scale + 'x' : '') + '.png';
+      // 倍率は '@2x' で区別していたのに、**透過だけ規則から漏れていた**。
+      // 実測: 通常版も透過版も flowchart-20260823.png で出る。両方書き出すと
+      // 保存先に同名 + ' (1)' が並び、**開くまでどちらが透過か分からない**。
+      // 中身は確かに違う (左上の画素が [255,255,255,255] と [0,0,0,0])。
+      a.download = currentBaseName() +
+        (scale && scale !== 1 ? '@' + scale + 'x' : '') +
+        (transparent ? '-transparent' : '') + '.png';
       a.click();
       URL.revokeObjectURL(a.href);
     });
@@ -1914,6 +1949,15 @@ function init() {
   window.MA.selection.init(function() {
     sel = window.MA.selection.getSelected();
     renderProps();
+    rebuildOverlay();
+  });
+
+  // 接続モードの起点が変わったらオーバレイを描き直す (UI-077)。
+  //
+  // cancelConnectionMode の呼び出しはこのファイルに3か所ある。
+  // そこへ個別に再描画を足すと**1つ忘れて「中止したのに印が残る」**
+  // 状態を作る (実測でそうなった)。状態を持つ側から1回だけ知らせる。
+  window.MA.connectionMode.init(function() {
     rebuildOverlay();
   });
 

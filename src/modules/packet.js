@@ -181,7 +181,7 @@ window.MA.modules.packetBeta = (function() {
         var s = document.getElementById('pk-add-start').value.trim();
         var e = document.getElementById('pk-add-end').value.trim();
         var l = document.getElementById('pk-add-label').value.trim();
-        if (s === '' || e === '' || !l) { alert('全項目必須'); return; }
+        if (s === '' || e === '' || !l) { alert('全項目 は必須です'); return; }
         var si = parseInt(s, 10), ei = parseInt(e, 10);
         if (isNaN(si) || isNaN(ei)) { alert('bit は整数'); return; }
         if (ei < si) { alert('終了 >= 開始 でお願いします'); return; }

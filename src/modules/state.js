@@ -502,7 +502,7 @@ window.MA.modules.state = (function() {
         var id = document.getElementById('st-add-state-id').value.trim();
         var label = document.getElementById('st-add-state-label').value.trim();
         var type = document.getElementById('st-add-state-type').value;
-        if (!id) { alert('IDは必須です'); return; }
+        if (!id) { alert('ID は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addState(ctx.getMmdText(), id, label || id, type));
         ctx.onUpdate();
@@ -519,7 +519,7 @@ window.MA.modules.state = (function() {
       bindEvent('st-add-comp-btn', 'click', function() {
         var id = document.getElementById('st-add-comp-id').value.trim();
         var label = document.getElementById('st-add-comp-label').value.trim();
-        if (!id) { alert('IDは必須です'); return; }
+        if (!id) { alert('ID は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addComposite(ctx.getMmdText(), id, label));
         ctx.onUpdate();

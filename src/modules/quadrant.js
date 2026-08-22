@@ -173,7 +173,7 @@ window.MA.modules.quadrantChart = (function() {
       P.bindEvent('qd-set-xaxis', 'click', function() {
         var l = document.getElementById('qd-xleft').value.trim();
         var r = document.getElementById('qd-xright').value.trim();
-        if (!l || !r) { alert('左右ラベル必須'); return; }
+        if (!l || !r) { alert('左右ラベル は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(setXAxis(ctx.getMmdText(), l, r));
         ctx.onUpdate();
@@ -181,7 +181,7 @@ window.MA.modules.quadrantChart = (function() {
       P.bindEvent('qd-set-yaxis', 'click', function() {
         var b = document.getElementById('qd-ybottom').value.trim();
         var t = document.getElementById('qd-ytop').value.trim();
-        if (!b || !t) { alert('上下ラベル必須'); return; }
+        if (!b || !t) { alert('上下ラベル は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(setYAxis(ctx.getMmdText(), b, t));
         ctx.onUpdate();
@@ -200,7 +200,7 @@ window.MA.modules.quadrantChart = (function() {
         var label = document.getElementById('qd-add-label').value.trim();
         var x = document.getElementById('qd-add-x').value.trim();
         var y = document.getElementById('qd-add-y').value.trim();
-        if (!label || !x || !y) { alert('全項目必須'); return; }
+        if (!label || !x || !y) { alert('全項目 は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addPoint(ctx.getMmdText(), label, x, y));
         ctx.onUpdate();
