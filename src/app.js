@@ -804,6 +804,23 @@ var LIST_FILTER_MIN_ROWS = 12;
 //
 // R15 (状態の持ち越し) は追加フォームの入力欄しか見ていなかったので
 // この状態は網に掛かっていなかった。文書が入れ替わったら捨てる。
+// 文書が入れ替わったら、**すべての**モジュールが覚えている一時状態を捨てる。
+//
+// もとは「今のモジュールだけ」を掃除していた。図種の切替 (ドロップダウン) は
+// **切替先**のモジュールを掃除するので、切替**元**は汚れたまま残る。
+// 実測: block で G1 に追加 → ドロップダウンで flowchart → block のファイルを開く、
+// で block の親グループ選択が G1 のまま残り、押すとその中に入った。
+// どのモジュールが汚れているかを追うより、全部捨てる方が数え間違えない。
+function resetAllTransientState() {
+  var reg = window.MA.modules || {};
+  Object.keys(reg).forEach(function (k) {
+    var m = reg[k];
+    if (m && typeof m.resetTransientState === 'function') {
+      try { m.resetTransientState(); } catch (e) { /* 1つ失敗しても残りは掃除する */ }
+    }
+  });
+}
+
 function clearListFilter() {
   listFilterText = '';
   var box = document.getElementById('ma-list-filter');
@@ -1754,7 +1771,7 @@ function init() {
         .replace(new RegExp(String.fromCharCode(10) + '$'), '');
       loadedFileName = openedName;
       // ファイルを開いたときも文書は入れ替わる。
-      if (currentModule && currentModule.resetTransientState) currentModule.resetTransientState();
+      resetAllTransientState();
       clearListFilter();
       // 別のファイルを開いたら、前の保存先への参照は捨てる。
       // 残しておくと、開いたつもりの無いファイルを上書きする。
@@ -2795,7 +2812,7 @@ function init() {
       loadedFileName = '';
       // 文書が入れ替わったので、モジュールが持っている一時状態を捨てさせる。
       // 実装していないモジュールは何もしなくてよい (フォームを毎回作り直すため)。
-      if (mod.resetTransientState) mod.resetTransientState();
+      resetAllTransientState();
       clearListFilter();
       markSaved();
       suppressSync = true;

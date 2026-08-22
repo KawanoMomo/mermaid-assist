@@ -359,6 +359,17 @@ window.MA.modules.blockBeta = (function() {
   }
 
   return {
+    // 文書が入れ替わったら、モジュールが覚えている状態を捨てる。
+    //
+    // `lastAddParent` は「最後に足した親グループ」を覚えていて、
+    // 同じ文書の中では便利だが、**別の文書を開いても残っていた**。
+    // 実測: G1 を持つ文書で G1 に足したあと、**同じ名前の G1 を持つ
+    // 別のファイルを開くと G1 が選ばれたまま**で、押すとその中に入る。
+    // 実務では図をまたいで命名が揃うので普通に起きる。
+    //
+    // 「文書が入れ替わったら捨てる」は r15 (状態の持ち越し) で決めた規約。
+    // gantt は resetTransientState を持っていたが、block は持っていなかった。
+    resetTransientState: function() { lastAddParent = ''; },
     type: 'block-beta',
     displayName: 'Block',
     detect: function(text) { return window.MA.parserUtils.detectDiagramType(text) === 'block-beta'; },
