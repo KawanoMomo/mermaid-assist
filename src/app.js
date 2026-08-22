@@ -1106,6 +1106,8 @@ function zoomToFit() {
 // Base name of the file the user opened, so saving writes back to the same name
 // instead of a fresh download. Cleared when the diagram is replaced wholesale.
 var loadedFileName = '';
+// 開いたファイルの改行コード。新規の文書は LF。
+var loadedEol = String.fromCharCode(10);
 
 // Text as of the last save/open. The diagram only lives in this tab — there is no
 // autosave and no server — so closing it threw the work away without a word.
@@ -1201,7 +1203,11 @@ var saveHandle = null;
 // 「既に改行で終わっていれば足さない」にすると、2つ目のケースで利用者が
 // 打った末尾の改行が往復のたびに消える (実際そうなっていた)。
 function fileBody() {
-  return mmdText + '\n';
+  var body = mmdText + String.fromCharCode(10);
+  // 開いたファイルが CRLF なら CRLF で書き戻す (loadedEol は開く経路で決まる)。
+  var crlf = String.fromCharCode(13) + String.fromCharCode(10);
+  if (loadedEol === crlf) return body.split(String.fromCharCode(10)).join(crlf);
+  return body;
 }
 
 function downloadAsFile() {
@@ -1611,7 +1617,18 @@ function init() {
       setZoom(1.0);
       // 書き出し側で付けた末尾改行を1つだけ落とす (fileBody と対称)。
       // 落とさないと、保存 → 開き直しのたびに末尾の空行が1つ増えていく。
-      mmdText = String(ev.target.result || '').replace(/\n$/, '');
+      // 開いたファイルの改行コードを覚えて、保存でそのまま書き戻す。
+      //
+      // `<textarea>` の値は**ブラウザが LF に正規化する** (HTML の仕様)。
+      // そのため CRLF の .mmd を開くと、こちらが何もしなくても LF になり、
+      // 保存すると**ファイル全体が書き換わる**。実測: 4行の CRLF 文書を
+      // 開いて保存すると CRLF 0 / LF 5。Windows で作った図を1つ触るたびに
+      // git の差分がファイル全体になり、レビューで中身が読めなくなる。
+      var _raw = String(ev.target.result || '');
+      var _crlf = String.fromCharCode(13) + String.fromCharCode(10);
+      loadedEol = (_raw.indexOf(_crlf) >= 0) ? _crlf : String.fromCharCode(10);
+      mmdText = _raw.split(_crlf).join(String.fromCharCode(10))
+        .replace(new RegExp(String.fromCharCode(10) + '$'), '');
       loadedFileName = openedName;
       // ファイルを開いたときも文書は入れ替わる。
       if (currentModule && currentModule.resetTransientState) currentModule.resetTransientState();
