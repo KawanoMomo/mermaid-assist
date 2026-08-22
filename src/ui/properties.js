@@ -182,7 +182,12 @@ window.MA.properties = (function() {
     // 行に印を付ける。一覧の絞り込みはこの印を見て行を選ぶので、
     // 各モジュールは何もしなくてよい (41か所がこの関数を通る)。
     return '<div class="ma-list-row" style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
-      '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + fontStyle + '">' + escHtml(opts.label) + sub + '</div>' +
+      // 名前欄は 123px しかなく、長い名前は ellipsis で切れる。実測では
+      // "ComM_ChannelStateManager_MainFunction" が "ComM_ChannelStat" までしか
+      // 読めず、**先頭が共通で末尾だけ違う名前を見分けられない** (組込みの
+      // BSW 名は先頭共通が普通)。gantt.js は自前の行に title を付けていたが、
+      // 41か所が通るこの共有関数には無かった。切れたときの唯一の手がかりを足す。
+      '<div title="' + escHtml(String(opts.label)) + '" style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + fontStyle + '">' + escHtml(opts.label) + sub + '</div>' +
       selectBtn + deleteBtn +
     '</div>';
   }

@@ -658,6 +658,32 @@ function focusAddForm() {
   if (el.select) el.select();
 }
 
+// 一覧の絞り込み欄へ飛ぶ (UI-063)。
+//
+// 目的の要素に届くコストが、経路で桁違いに違っていた。実測 (flowchart):
+//
+//   要素数 |  ↓ で辿る | 絞り込み
+//   -------|-----------|---------
+//       20 |     18 手 |    6 手
+//       60 |     50 手 |    6 手
+//      120 |   **98 手** |  **6 手**
+//
+// 絞り込みは「欄へ行く + 打つ + Enter」なので**要素数によらず一定**。
+// ところが図へ移ったときの案内は `↑↓` しか名指ししておらず、
+// **線形に伸びる方だけが目に入っていた**。1日100回なら 9200 手の差になる。
+//
+// 欄は一覧が 12 行を超えたときだけ出る (LIST_FILTER_MIN_ROWS)。
+// 出ていないときは「まだ要らない」ので、そう言って終わる。
+function focusListFilter() {
+  var el = document.getElementById('ma-list-filter');
+  if (!el) {
+    showTransient('一覧が短いので絞り込み欄は出ていません — ↑↓ で選べます', 2500);
+    return;
+  }
+  el.focus();
+  if (el.select) el.select();
+}
+
 // エディタへ戻る。
 // プレビューへ戻す focusPreview の逆向きが無く、本文を直すたびにマウスへ持ち替えていた。
 function focusEditor() {
@@ -798,6 +824,20 @@ function updateDocumentTitle() {
   var dirty = hasUnsavedWork(mmdText, savedText,
     currentModule && currentModule.template ? currentModule.template() : null);
   document.title = (dirty ? '● ' : '') + name + '.mmd — MermaidAssist';
+
+  // 未保存の印を**画面の中にも**出す (UI-065)。
+  //
+  // これまでタイトルバーにしか出しておらず、**タブを何枚も開く使い方では
+  // タイトルが省略されて `●` が見えなかった**。数十〜数百枚を扱う人ほど
+  // タブが多い。保存できていないことに気付く手がかりが、画面から消えていた。
+  //
+  // 保存が黙って失敗する経路もあったので (saveFile の try/catch)、
+  // 「押したのに印が残っている」ことが気付く唯一の手がかりになる。
+  var mark = document.getElementById('status-dirty');
+  if (mark) {
+    mark.hidden = !dirty;
+    mark.title = dirty ? (name + '.mmd は未保存です — Ctrl+S で保存') : '';
+  }
 }
 
 function renderStatus() {
@@ -1309,8 +1349,26 @@ function zoomToFit() {
   var previewContainer = document.getElementById('preview-container');
   if (!svgEl || !previewContainer) return;
   var naturalW = parseFloat(svgEl.getAttribute('width')) || 800;
+  var naturalH = parseFloat(svgEl.getAttribute('height')) || 600;
   var containerW = previewContainer.clientWidth - 32;
+  var containerH = previewContainer.clientHeight - 32;
   var fitZoom = containerW / naturalW;
+  // 幅だけに合わせると、**縦長の図では拡大され、見える範囲がかえって減る**。
+  // 実測 (60要素の縦フローチャート, 1366x768): Fit を押すと 239% まで拡大し、
+  // 図の見えている割合が 8% → 3% に減った。"Fit" と書かれたボタンを押して
+  // 見える範囲が減るのは、どの読み方をしても擁護できない。
+  //
+  // かといって縦横の両方に収めると倍率が 0.09 まで落ちて文字が読めなくなる。
+  // どちらが良いかは好みの問題なので決めない。**害だけを取り除く**:
+  //   **拡大した結果、縦がはみ出すなら、はみ出さない倍率まで抑える。**
+  //   ただし 100% を下回ってまでは縮めない (文字が読めなくなるため)。
+  //
+  // 最初の実装は `heightFit < 1` だけを見ていて、**拡大した後の高さを見て
+  // いなかった**。そのため4要素の小さい図で Fit を押すと 3倍に拡大されて
+  // 縦にはみ出し、見える割合が 100% → 58% に減った (実測)。
+  // 「Fit 前に収まっていた図が Fit 後に収まらない」のは同じ欠陥の別の顔。
+  var heightFit = containerH / naturalH;
+  fitZoom = Math.min(fitZoom, Math.max(heightFit, 1));
   setZoom(Math.round(fitZoom * 100) / 100);
 }
 
@@ -1444,7 +1502,25 @@ function downloadAsFile() {
 // 上書き先を一度指定したときだけ、以後の Save がそこへの上書きになる。
 function saveFile() {
   if (saveHandle) { overwriteSaved(); return; }
-  downloadAsFile();
+  // 失敗したら**言う**。
+  //
+  // ここには例外処理が無く、`downloadAsFile()` が投げると `markSaved()` にも
+  // 表示にも到達せず**黙って終わっていた**。上書き経路 (overwriteSaved) は
+  // try/catch を持っているのに、ダウンロード経路だけが無防備だった。
+  //
+  // 実測 (直す前): 保存を失敗させると表示は「要素: 3 | 関連: 2」のままで、
+  // 失敗を告げるものが何も出なかった。未保存の印 (●) はタイトルに残るが、
+  // **画面内に印は無く (UI-065)、タブが多いとタイトルは見えない**。
+  // 押した本人は「保存した」と思い込み、そのまま閉じて全部失う (UI-064)。
+  //
+  // 保存は「押した」ことしか分からない操作なので、黙るのが一番高くつく。
+  try {
+    downloadAsFile();
+  } catch (e) {
+    showTransient('保存できませんでした — ' + String(e && e.message ? e.message : e) +
+      ' (本文はそのまま残っています)', 6000);
+    return;   // markSaved() を呼ばない。保存できていないので印は残す
+  }
   markSaved();
   showTransient(savedMessage(new Date()) + ' — ダウンロードしました');
 }
@@ -2827,6 +2903,11 @@ function init() {
       // 修飾なし1打鍵。Delete / ? と同じ条件 (入力欄とエディタの外にいるとき) で受ける。
       e.preventDefault();
       focusAddForm();
+    } else if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey && !inInput && !inEditor) {
+      // 一覧の絞り込みへ (UI-063)。`A` / `E` と同じ条件 (入力欄とエディタの外) で受ける。
+      // `/` は多くのツールで検索の入口なので、覚え直しが要らない。
+      e.preventDefault();
+      focusListFilter();
     } else if ((e.key === 'e' || e.key === 'E') && !e.ctrlKey && !e.metaKey && !e.altKey && !inInput && !inEditor) {
       e.preventDefault();
       focusEditor();
@@ -2867,7 +2948,9 @@ function init() {
       // エディタでの Escape は今まで何もしていなかったので、奪う操作は無い。
       e.preventDefault();
       focusPreview();
-      showTransient('図に移りました — E でエディタへ / A で追加フォームへ / ↑↓ で要素を選ぶ', 3500);
+      // 案内には**定数コストの経路も**書く。`↑↓` だけを名指ししていたので、
+      // 120要素で 98手かかる方だけが目に入っていた (UI-063)。
+      showTransient('図に移りました — / で絞り込み / ↑↓ で要素を選ぶ / E でエディタへ / A で追加フォームへ', 3500);
     } else if (e.key === 'Escape') {
       // Escape has to get out of connection mode too. Without it the only way
       // to leave was to complete the edge — clicking anywhere else on the canvas

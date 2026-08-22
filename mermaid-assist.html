@@ -162,6 +162,12 @@ html, body {
   border-radius: 4px;
   cursor: pointer;
   margin-left: auto;
+  /* UI-071 で日本語を添えたら幅が 286px になり、**800x600 で画面外に出た**
+     (実測: 変更前 121px/右端792 → 変更後 286px)。ツールバーは右詰めなので
+     幅が増えた分そのまま画面外へ出る。一覧を開けば全文が読めるので、
+     閉じている間は画面幅に応じて抑える。
+     実測: 800px → 120px (元と同じ), 1024px → 153px, 1366px 以上 → 190px。 */
+  max-width: min(190px, 15vw);
 }
 #diagram-type:focus { outline: none; border-color: var(--accent); }
 
@@ -526,6 +532,9 @@ html, body {
 #status-parse.error { color: var(--accent-red); }
 #status-info  { color: var(--text-secondary); margin-left: auto; }
 /* 版はステータス行の右端に小さく置く。縦には増やさない。 */
+/* 未保存の印。版の隣に置く。目に入る必要があるので薄くしない。 */
+#status-dirty { color: var(--accent-red); font-size: 11px; margin-left: 12px;
+                white-space: nowrap; }
 #status-version { color: var(--text-secondary); opacity: .7; font-size: 11px;
                   margin-left: 12px; white-space: nowrap; }
 
@@ -646,28 +655,32 @@ html, body {
       </div>
     </div>
 
-    <select id="diagram-type" title="図の種類">
-      <option value="gantt">Gantt</option>
-      <option value="sequenceDiagram">Sequence</option>
-      <option value="flowchart">Flowchart</option>
-      <option value="stateDiagram">State</option>
-      <option value="classDiagram">Class</option>
-      <option value="erDiagram">ER</option>
-      <option value="requirementDiagram">Requirement</option>
-      <option value="block-beta">Block</option>
-      <option value="timeline">Timeline</option>
-      <option value="mindmap">Mindmap</option>
-      <option value="gitGraph">Gitgraph</option>
-      <option value="pie">Pie</option>
-      <option value="journey">Journey</option>
-      <option value="quadrantChart">Quadrant</option>
-      <option value="xychart-beta">XY Chart</option>
-      <option value="sankey-beta">Sankey</option>
-      <option value="C4Context">C4</option>
-      <option value="packet-beta">Packet</option>
-      <option value="architecture-beta">Architecture</option>
-      <option value="kanban">Kanban</option>
-      <option value="radar-beta">Radar</option>
+    <!-- UI-071: UI 全体は日本語なのに図種だけ mermaid の英語識別子だった。
+         実測 (R65): 「状態遷移」「構成」「タイミング」等ペルソナが使う語から
+         **21件中1件も引けなかった**。英語名は mermaid の記法と1対1で対応する
+         ので残し、目的の語を添える。 -->
+    <select id="diagram-type" title="図の種類 — 目的の語(状態遷移・構成・時系列など)でも探せます">
+      <option value="gantt">Gantt — ガント / 工程・日程</option>
+      <option value="sequenceDiagram">Sequence — シーケンス / やりとりの順序</option>
+      <option value="flowchart">Flowchart — フローチャート / 処理の流れ</option>
+      <option value="stateDiagram">State — 状態遷移</option>
+      <option value="classDiagram">Class — クラス / 構造</option>
+      <option value="erDiagram">ER — ER / 実体関連</option>
+      <option value="requirementDiagram">Requirement — 要求</option>
+      <option value="block-beta">Block — ブロック / 構成図</option>
+      <option value="timeline">Timeline — タイムライン / 時系列</option>
+      <option value="mindmap">Mindmap — マインドマップ / 階層</option>
+      <option value="gitGraph">Gitgraph — Git ブランチ</option>
+      <option value="pie">Pie — 円グラフ</option>
+      <option value="journey">Journey — ユーザ行動</option>
+      <option value="quadrantChart">Quadrant — 四象限</option>
+      <option value="xychart-beta">XY Chart — XY グラフ</option>
+      <option value="sankey-beta">Sankey — サンキー / 流量</option>
+      <option value="C4Context">C4 — C4 / システム構成</option>
+      <option value="packet-beta">Packet — パケット / ビット配置</option>
+      <option value="architecture-beta">Architecture — アーキテクチャ / 構成</option>
+      <option value="kanban">Kanban — かんばん</option>
+      <option value="radar-beta">Radar — レーダー</option>
     </select>
   </div>
 
@@ -724,11 +737,13 @@ html, body {
         <tr><td>Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z</td><td>元に戻す / やり直す</td></tr>
         <tr><td>↑ ↓ ← →</td><td>要素を順に選ぶ (図にフォーカスがあるとき)</td></tr>
         <tr><td>Delete</td><td>選んでいる要素を削除</td></tr>
+        <tr><td>Shift + クリック</td><td>選択に足す (複数まとめて選ぶ) <span class="sc-scope">選んだあと Delete でまとめて削除できる</span></td></tr>
         <tr><td>Ctrl+A</td><td>すべて選択 <span class="sc-scope">Gantt のみ</span></td></tr>
         <tr><td>Ctrl+C / Ctrl+V</td><td>選んでいる要素を複写 / 貼り付け <span class="sc-scope">Gantt のみ</span></td></tr>
         <tr><td>Ctrl+Shift+C</td><td>図をクリップボードへ</td></tr>
         <tr><td>Ctrl+0 / Ctrl+9</td><td>等倍 / 幅に合わせる</td></tr>
         <tr><td>Ctrl++ / Ctrl+-</td><td>拡大 / 縮小</td></tr>
+        <tr><td>/</td><td>一覧の絞り込み欄へ移動 <span class="sc-scope">図にフォーカスがあるとき / 一覧が12行を超えると出る</span></td></tr>
         <tr><td>A</td><td>追加フォームの先頭欄へ移動 (図にフォーカスがあるとき)</td></tr>
         <tr><td>E</td><td>エディタへ移動 (図にフォーカスがあるとき)</td></tr>
         <tr><td>Escape</td><td>図へ移動 <span class="sc-scope">エディタにフォーカスがあるとき</span> / 選択解除 / 接続モードを中止</td></tr>
@@ -749,7 +764,11 @@ html, body {
          1つも見つからなかった)、どの版かの特定に調査の大半を費やした。
          単一HTMLでビルド工程が無いので値は直書きし、VERSION との一致は
          テストで固定する (人が2箇所を揃え続けるのは必ず失敗する)。 -->
-    <span id="status-version" title="MermaidAssist の版。不具合を報告するときはこの番号を添えてください">v1.2.0</span>
+    <!-- 未保存の印。タイトルバーは**タブが多いと見えない** (UI-065)。
+         保存が黙って失敗する経路があったので、押したのに印が残っていることが
+         気付く唯一の手がかりになる。 -->
+    <span id="status-dirty" hidden>● 未保存</span>
+    <span id="status-version" title="MermaidAssist の版。不具合を報告するときはこの番号を添えてください">v1.3.0</span>
     <button id="status-help" title="キーボードショートカットを開く (F1 / 図・パネルでは ?)">F1 ショートカット</button>
   </div>
 
