@@ -144,6 +144,30 @@ window.MA.modules.blockBeta = (function() {
     };
   }
 
+  // Same answer as deletionImpact, but derived from a parse the caller already has
+  // whenever the cheap analysis is conclusive. renderProps needs this for every row
+  // and runs on each keystroke; the exact form reparses the document per row, which
+  // measured 605ms at 500 blocks. Groups fall back to the exact answer — they are
+  // few, and their cascade (contents plus every link into them) is not worth
+  // reimplementing here, where a second predicate could drift from the delete.
+  function deletionImpactFrom(parsed, el, text) {
+    if (el.kind === 'group') return deletionImpact(text, el);
+
+    // A plain block shares its line with siblings (`a b c`), so deleting it only
+    // removes the whole line when it is alone there.
+    var sameLine = parsed.elements.filter(function(e) { return e.line === el.line; });
+    if (sameLine.length !== 1) return deletionImpact(text, el);
+
+    // The id survives if another element still carries it after this one goes.
+    var survives = parsed.elements.some(function(e) {
+      return e !== el && e.id === el.id;
+    });
+    var rels = survives ? 0 : parsed.relations.filter(function(r) {
+      return r.from === el.id || r.to === el.id;
+    }).length;
+    return { elements: 1, relations: rels };
+  }
+
   function collectIds(text) {
     var ids = [];
     var parsed = parseBlock(text);
@@ -312,7 +336,7 @@ window.MA.modules.blockBeta = (function() {
         var blocksList = '';
         for (var i = 0; i < blocks.length; i++) {
           var b = blocks[i];
-          var bImpact = deletionImpact(ctx.getMmdText(), b);
+          var bImpact = deletionImpactFrom(parsedData, b, ctx.getMmdText());
           var bExtra = bImpact.elements + bImpact.relations;
           blocksList += P.listItemHtml({
             label: b.label !== b.id ? b.id + ' ("' + b.label + '")' : b.id,
@@ -332,7 +356,7 @@ window.MA.modules.blockBeta = (function() {
           var g = groups[gi];
           // 1クリックで group 配下がまとめて消えるので、実際に消える数をボタンに出す。
           // 行のラベルはパネル幅で切れるため、警告はボタン側に置く。
-          var gImpact = deletionImpact(ctx.getMmdText(), g);
+          var gImpact = deletionImpactFrom(parsedData, g, ctx.getMmdText());
           var gExtra = gImpact.elements + gImpact.relations;
           groupsList += P.listItemHtml({
             label: 'block:' + g.id,
@@ -573,6 +597,7 @@ window.MA.modules.blockBeta = (function() {
     },
     addBlock: addBlock, addNestedBlock: addNestedBlock, addLink: addLink,
     deleteBlock: deleteBlock, deleteLink: deleteLink, deletionImpact: deletionImpact,
+    deletionImpactFrom: deletionImpactFrom,
     updateBlockLabel: updateBlockLabel, updateLink: updateLink, setColumns: setColumns,
   };
 })();

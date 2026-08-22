@@ -495,3 +495,30 @@ describe('B1d: インデント文字の追随', function() {
     expect(x.match(/^(\s*)/)[1]).toBe('    ');
   });
 });
+
+describe('deletionImpactFrom は deletionImpact と一致する', function() {
+  // 高速版は既存の parse から導出するため、正確版と食い違うと「述語の非対称」に
+  // なる。代表的な形をすべて突き合わせて固定する。
+  var CASES = [
+    'block-beta\n  a["A"]\n  b["B"]\n',
+    'block-beta\n  block:g1\n    a["A"]\n  end\n  b["B"]\n  a --> b\n',
+    'block-beta\n  block:outer\n    block:inner\n      a["A"]\n    end\n    b["B"]\n  end\n  c["C"]\n  a --> c\n',
+    'block-beta\n  columns 3\n  block:grp:3\n    d["D"]\n  end\n  e["E"]\n  d --> e\n',
+    'block-beta\n  a["A"] b["B"] c["C"]\n  a --> b\n  b --> c\n',
+    'block-beta\n  block:g1\n    x["X"]\n  end\n  x2["X2"]\n  x --> x2\n  x2 --> x2\n'
+  ];
+
+  CASES.forEach(function(t, ci) {
+    test('ケース' + (ci + 1) + ': 全要素で一致', function() {
+      var p = block.parseBlock(t);
+      expect(p.elements.length).toBeGreaterThan(0);
+      for (var i = 0; i < p.elements.length; i++) {
+        var el = p.elements[i];
+        var exact = block.deletionImpact(t, el);
+        var fast = block.deletionImpactFrom(p, el, t);
+        expect(fast.elements).toBe(exact.elements);
+        expect(fast.relations).toBe(exact.relations);
+      }
+    });
+  });
+});
