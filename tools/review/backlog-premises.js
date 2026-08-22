@@ -50,7 +50,7 @@ const read = (rel) => {
 // 期限を過ぎていたら FAIL する。予告したのに実行しない、が起きなくなる。
 const SINCE = {
   G1: { since: 33, deadline: null },
-  G9: { since: 50, deadline: null },
+  G9: { since: 50, deadline: 59 },
 };
 
 // review-log の最後の「# ラウンドNN」を今のラウンドとみなす。
