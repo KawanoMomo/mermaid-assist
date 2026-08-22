@@ -107,6 +107,17 @@ const PREMISES = {
                          : '<select> のまま・先頭一致の効きは実機で未測定' };
     },
   },
+  G9: {
+    what: '書き出しは白で塗り、線は暗いテーマの明るい色のまま',
+    human: true,
+    check: () => {
+      const s4 = read('src/app.js');
+      const white = s4.indexOf("ctx.fillStyle = '#ffffff'") >= 0;
+      return { ok: true,
+        detail: white ? '白で塗るまま・見た目の方針は人の判断待ち'
+                      : '**塗りが変わった → G9 を見直す**' };
+    },
+  },
 };
 
 const md = read('docs/backlog.md');
