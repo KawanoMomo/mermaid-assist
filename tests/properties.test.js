@@ -231,7 +231,12 @@ describe('listItemHtml: 削除ボタンの警告表示', function() {
   test('deleteClass が無ければ削除ボタンごと出ない', function() {
     var html = P.listItemHtml({ label: 'a', deleteLabel: '✕ 3', deleteTitle: 'x' });
     expect(html).not.toContain('✕ 3');
-    expect(html).not.toContain('title=');
+    // 元は `not.toContain('title=')` だったが、**行のどこにも title が無いこと**を
+    // 見ていた。UI-069 で名前欄に title を足した (切れた名前をホバーで読むため)
+    // ので、この書き方では意図しない所に反応する。
+    // 見たいのは「**削除ボタンの** title が漏れないこと」なので、値で見る。
+    expect(html).not.toContain('title="x"');
+    expect(html).not.toContain('<button');
   });
 
   test('data 属性は編集ボタンと削除ボタンの両方に付く', function() {
