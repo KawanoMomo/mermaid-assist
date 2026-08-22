@@ -926,6 +926,60 @@ function restoreAddForm(snap) {
   });
 }
 
+// 選んでいる要素が**本文の何行目か**を出し、押すとその行へ飛ぶ。
+//
+// 実測 (1366x768、150ノードの図で「ノード120」= 122行目 を選んだあと):
+//   エディタが見せている行  1〜34行目
+//   カーソルの位置          151行目 (末尾)
+//   パネルの行番号          **無し**
+// → **選んだ要素の行に辿り着く手段が無い。** DSL を直接編集する使い方では
+//   「選ぶ → その行を直す」が流れなので、毎回自分で探すことになる。
+//
+// 自動でスクロールはしない。追加や削除のあとにも選択は起きるので、
+// **打っている最中に画面が飛ぶ**のは以前 gantt で問題になった形
+// (連続入力が潰れる)。押したときだけ飛ぶ。
+function showSelectedLine() {
+  if (!propsEl) return;
+  var old = document.getElementById('ma-goto-line');
+  if (old && old.parentNode) old.parentNode.removeChild(old);
+  if (!parsed || !parsed.elements || !currentModule) return;
+  var sel = window.MA.selection.getSelected();
+  if (!sel || sel.length !== 1) return;
+  var idf = currentModule.identityField || 'id';
+  var line = null;
+  for (var i = 0; i < parsed.elements.length; i++) {
+    var e = parsed.elements[i];
+    var key = e[idf] !== undefined ? e[idf] : e.id;
+    if (String(key) === String(sel[0].id) && typeof e.line === 'number') { line = e.line; break; }
+  }
+  if (line === null) return;
+  var wrap = document.createElement('div');
+  wrap.id = 'ma-goto-line';
+  wrap.style.cssText = 'margin-bottom:8px;';
+  wrap.innerHTML = '<button id="ma-goto-line-btn" title="本文のこの行へ移動" ' +
+    'style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);' +
+    'padding:2px 8px;border-radius:3px;cursor:pointer;font-size:11px;">' + line + ' 行目へ</button>';
+  propsEl.insertBefore(wrap, propsEl.firstChild);
+  var btn = document.getElementById('ma-goto-line-btn');
+  if (!btn) return;
+  btn.addEventListener('click', function() { gotoEditorLine(line); });
+}
+
+// エディタの指定行へカーソルを移し、その行が見えるところまでスクロールする。
+function gotoEditorLine(line) {
+  if (!editorEl) return;
+  var lines = editorEl.value.split(String.fromCharCode(10));
+  if (line < 1 || line > lines.length) return;
+  var pos = 0;
+  for (var i = 0; i < line - 1; i++) pos += lines[i].length + 1;
+  editorEl.focus();
+  try { editorEl.setSelectionRange(pos, pos + lines[line - 1].length); } catch (e) { /* 型による */ }
+  var lh = parseFloat(getComputedStyle(editorEl).lineHeight) || 18;
+  // 画面の中ほどに置く (先頭に寄せると前後が見えない)
+  editorEl.scrollTop = Math.max(0, (line - 1) * lh - editorEl.clientHeight / 2);
+  syncLineNumbers();
+}
+
 function renderProps() {
   var snap = (refreshCause === 'editor') ? snapshotAddForm() : null;
   withFocusKept(function() {
@@ -933,6 +987,7 @@ function renderProps() {
     applyListFilter();
   });
   if (snap) restoreAddForm(snap);
+  showSelectedLine();
   // パネルの中身が入れ替わると高さも変わる。帯の出し入れはここで見る。
   updatePropsOverflowHint();
 }
