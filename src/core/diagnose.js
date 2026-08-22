@@ -62,13 +62,21 @@
     return null;
   }
 
-  // requirement 図の要求名・要素名は識別子なので半角しか通らない (v11.13 実測)。
-  // 表示名を日本語にしたい場合は本文の text: に書く。
+  // requirement 図の要求名・要素名は、**引用符で囲えば日本語が使える**。
+  //
+  // 以前は「識別子なので半角しか通らない。表示名は text: に書く」と記録し、
+  // そう告げていた。実測すると `requirement "受信要求" { … }` は通り、
+  // 「<<Requirement>>受信要求」を描く (v11.13)。
+  // architecture (A83) と同じで、直せる問題を制限として扱っていた。
+  //
+  // ここに残すのは「引用符が付いていないのに全角が入っている」場合だけ。
   function firstBadReqName(text) {
     var lines = text.split('\n');
     for (var i = 0; i < lines.length; i++) {
       var m = lines[i].trim().match(/^(?:requirement|functionalRequirement|interfaceRequirement|performanceRequirement|physicalRequirement|designConstraint|element)\s+([^\s{]+)/);
-      if (m && /[^\x00-\x7F]/.test(m[1])) return m[1];
+      if (!m) continue;
+      if (/^".*"$/.test(m[1])) continue;   // 引用済みなら通る
+      if (/[^\x00-\x7F]/.test(m[1])) return m[1];
     }
     return null;
   }
@@ -221,8 +229,8 @@
     if (/^requirementDiagram/.test(head)) {
       var rname = firstBadReqName(text);
       if (rname !== null) {
-        return 'requirement 図の要求名・要素名には全角文字が使えません' +
-          '(mermaid 側の制限)。表示する文字は text: に書いてください。「' + rname + '」が該当します。';
+        return 'requirement 図の要求名・要素名に全角文字を入れるときは ' +
+          '引用符で囲ってください (例: requirement "受信要求")。「' + rname + '」が該当します。';
       }
     }
 

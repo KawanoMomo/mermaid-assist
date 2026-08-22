@@ -254,26 +254,26 @@ window.MA.modules.timeline = (function() {
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">Timeline</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">Title 設定</label>' +
-          P.fieldHtml('Title', 'tl-title', currentTitle) +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">タイトル設定</label>' +
+          P.fieldHtml('タイトル', 'tl-title', currentTitle) +
           P.primaryButtonHtml('tl-set-title-btn', 'Title 適用') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">セクションを追加</label>' +
-          P.fieldHtml('Name', 'tl-add-sec-name', '') +
+          P.fieldHtml('ラベル', 'tl-add-sec-name', '') +
           P.primaryButtonHtml('tl-add-sec-btn', '+ セクション追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">ピリオドを追加</label>' +
           P.selectFieldHtml('Section', 'tl-add-p-section', secOpts) +
           P.fieldHtml('Period', 'tl-add-p-period', '', '例: 2026-04-01') +
-          P.fieldHtml('Event', 'tl-add-p-event', '', '初期イベント') +
+          P.fieldHtml('イベント', 'tl-add-p-event', '', '初期イベント') +
           P.primaryButtonHtml('tl-add-p-btn', '+ ピリオド追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">イベントを既存ピリオドに追加</label>' +
           P.selectFieldHtml('Period', 'tl-add-ev-period', periodOpts) +
-          P.fieldHtml('Event', 'tl-add-ev-text', '') +
+          P.fieldHtml('イベント', 'tl-add-ev-text', '') +
           P.primaryButtonHtml('tl-add-ev-btn', '+ イベント追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
@@ -332,7 +332,7 @@ window.MA.modules.timeline = (function() {
 
         propsEl.innerHTML =
           P.panelHeaderHtml(sec.label) +
-          P.fieldHtml('Name', 'tl-edit-sec-name', sec.label) +
+          P.fieldHtml('ラベル', 'tl-edit-sec-name', sec.label) +
           P.actionBarHtml('tl-edit-sec', {
             insertBefore: false, insertAfter: false,
             move: false, delete: true,
@@ -365,7 +365,7 @@ window.MA.modules.timeline = (function() {
         for (var ei = 0; ei < per.events.length; ei++) {
           eventsHtml += '<div style="display:flex;gap:4px;margin-bottom:4px;">' +
             '<input id="tl-edit-ev-' + ei + '" type="text" value="' + escHtml(per.events[ei]) + '" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' +
-            '<button class="tl-edit-ev-delete" data-event-index="' + ei + '" style="background:var(--danger);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">×</button>' +
+            '<button class="tl-edit-ev-delete" title="このイベントを削除" data-event-index="' + ei + '" style="background:var(--danger);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">×</button>' +
             '</div>';
         }
 
@@ -494,14 +494,15 @@ window.MA.modules.timeline = (function() {
         if (field === 'title') return setTitle(text, value);
         return text;
       },
+      // 素の行入れ替えは**図の宣言行と入れ替わって図を壊す**。
+      // 同じ種類の要素が乗っている行としか入れ替えない。
       moveUp: function(text, lineNum) {
-        if (lineNum <= 1) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum - 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, -1, (parseTimeline(text).elements || []));
       },
       moveDown: function(text, lineNum) {
-        var total = text.split('\n').length;
-        if (lineNum >= total) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum + 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, 1, (parseTimeline(text).elements || []));
       },
       connect: function(text) { return text; },
     },

@@ -34,6 +34,12 @@ Git 履歴から抽出した変更通知ログ。各 ECN は「何を・なぜ�
 | [026](ECN-026_tier3-phase13-architecture.md) | Tier3 Phase 13 — Architecture Diagram 対応 | 機能追加 | v1.15.0 | 2026-04-17 |
 | [027](ECN-027_tier3-phase14-kanban.md) | Tier3 Phase 14 — Kanban Board 対応 | 機能追加 | v1.16.0 | 2026-04-17 |
 | [028](ECN-028_tier3-phase15-radar.md) | Tier3 Phase 15 — Radar Chart 対応 (Tier3 完備) | 機能追加 | v1.17.0 | 2026-04-17 |
+| [029](ECN-029_parallel-review-harness.md) | 並行レビュー機構と自動合否判定の導入 (観点 4 → 22) | プロセス改善 | (未リリース) | 2026-08-21 |
+| [030](ECN-030_contract-path-defects.md) | 契約経路の欠陥 — UI だけ直して契約を忘れる形 (12例) | 不具合修正 | (未リリース) | 2026-08-21 |
+| [031](ECN-031_heavy-user-friction.md) | ヘビーユーザ視点の摩擦解消 (UI-001〜UI-020) | 改善 | (未リリース) | 2026-08-21 |
+| [032](ECN-032_contract-path-blockers.md) | 契約経路の Blocker 3件と日本語識別子の扱い (A90〜A106) | 不具合修正 | (未リリース / PR #16) | 2026-08-22 |
+| [033](ECN-033_review-net-coverage.md) | 実描画の網を「追加」「並べ替え」に広げ、網羅率を底上げ (C44〜C58) | 検証機構 | (未リリース / PR #16) | 2026-08-22 |
+| [034](ECN-034_backlog-governance.md) | 棚卸しを機械が検査する層と、滞留への期限 (C59〜C62) | プロセス | (未リリース / PR #16) | 2026-08-22 |
 
 ## 種別の凡例
 

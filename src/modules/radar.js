@@ -136,7 +136,7 @@ window.MA.modules.radarBeta = (function() {
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">Radar</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">設定</label>' +
-          P.fieldHtml('Title', 'rd-title', m.title) +
+          P.fieldHtml('タイトル', 'rd-title', m.title) +
           P.primaryButtonHtml('rd-set-title', 'Title 適用') +
           '<div style="height:6px;"></div>' +
           P.fieldHtml('Min', 'rd-min', String(m.min)) +
@@ -150,7 +150,7 @@ window.MA.modules.radarBeta = (function() {
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">カーブを追加</label>' +
           P.fieldHtml('ID', 'rd-add-id', '', '例: alice') +
           P.fieldHtml('ラベル', 'rd-add-label', '', '例: Alice') +
-          P.fieldHtml('Values (カンマ区切り)', 'rd-add-values', '', '軸の数に合わせる') +
+          P.fieldHtml('値 (カンマ区切り)', 'rd-add-values', '', '軸の数に合わせる') +
           P.primaryButtonHtml('rd-add-btn', '+ カーブ追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
@@ -207,7 +207,7 @@ window.MA.modules.radarBeta = (function() {
         P.panelHeaderHtml(c.label) +
         P.fieldHtml('ID', 'rd-edit-id', c.id) +
         P.fieldHtml('ラベル', 'rd-edit-label', c.label) +
-        P.fieldHtml('Values (カンマ区切り)', 'rd-edit-values', c.values.join(', ')) +
+        P.fieldHtml('値 (カンマ区切り)', 'rd-edit-values', c.values.join(', ')) +
         P.dangerButtonHtml('rd-edit-delete', 'カーブ削除');
       var ln = c.line;
       ['id', 'label', 'values'].forEach(function(f) {
@@ -265,14 +265,15 @@ window.MA.modules.radarBeta = (function() {
       },
       delete: function(text, lineNum) { return deleteCurve(text, lineNum); },
       update: function(text, lineNum, field, value) { return updateCurve(text, lineNum, field, value); },
+      // 素の行入れ替えは**図の宣言行と入れ替わって図を壊す**。
+      // 同じ種類の要素が乗っている行としか入れ替えない。
       moveUp: function(text, lineNum) {
-        if (lineNum <= 1) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum - 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, -1, (parseRadar(text).elements || []));
       },
       moveDown: function(text, lineNum) {
-        var total = text.split('\n').length;
-        if (lineNum >= total) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum + 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, 1, (parseRadar(text).elements || []));
       },
       connect: function(text) { return text; },
     },

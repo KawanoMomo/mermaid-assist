@@ -163,9 +163,9 @@ window.MA.modules.sankeyBeta = (function() {
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">Sankey</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">フローを追加</label>' +
-          P.fieldHtml('Source (新規 or 既存)', 'sk-add-src', '', '例: A') +
-          P.fieldHtml('Target (新規 or 既存)', 'sk-add-tgt', '', '例: B') +
-          P.fieldHtml('Value', 'sk-add-val', '', '数値') +
+          P.fieldHtml('From (新規 or 既存)', 'sk-add-src', '', '例: A') +
+          P.fieldHtml('To (新規 or 既存)', 'sk-add-tgt', '', '例: B') +
+          P.fieldHtml('値', 'sk-add-val', '', '数値') +
           P.primaryButtonHtml('sk-add-btn', '+ フロー追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
@@ -199,9 +199,9 @@ window.MA.modules.sankeyBeta = (function() {
       if (!fl) { propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">フローが見つかりません</p>'; return; }
       propsEl.innerHTML =
         P.panelHeaderHtml(fl.from + ' → ' + fl.to) +
-        P.fieldHtml('Source', 'sk-edit-from', fl.from) +
-        P.fieldHtml('Target', 'sk-edit-to', fl.to) +
-        P.fieldHtml('Value', 'sk-edit-val', String(fl.value)) +
+        P.fieldHtml('From', 'sk-edit-from', fl.from) +
+        P.fieldHtml('To', 'sk-edit-to', fl.to) +
+        P.fieldHtml('値', 'sk-edit-val', String(fl.value)) +
         P.dangerButtonHtml('sk-edit-delete', 'フロー削除');
       var ln = fl.line;
       document.getElementById('sk-edit-from').addEventListener('change', function() {
@@ -263,6 +263,16 @@ window.MA.modules.sankeyBeta = (function() {
     operations: {
       add: function(text, kind, props) {
         if (kind === 'flow') return addFlow(text, props.from, props.to, props.value);
+        // `parse` が返す kind は 'node' なのに、ここは 'flow' しか受けていなかった。
+        // sankey のノードは流れの端点としてしか存在しないので、'node' で
+        // 足すときは**既存のノードからの流れを1本足す** (G4)。
+        if (kind === 'node' || kind === undefined) {
+          var els = parseSankey(text).elements || [];
+          var from = props.from || (els.length ? (els[0].label || els[0].id) : null);
+          var to = props.name || props.label || props.text;
+          if (!from || !to || from === to) return text;
+          return addFlow(text, from, to, props.value == null ? 1 : props.value);
+        }
         return text;
       },
       // 契約経由では kind を見て分ける。ノードは流れごと落とす。
@@ -274,14 +284,15 @@ window.MA.modules.sankeyBeta = (function() {
         return deleteFlow(text, lineNum);
       },
       update: function(text, lineNum, field, value) { return updateFlow(text, lineNum, field, value); },
+      // 素の行入れ替えは**図の宣言行と入れ替わって図を壊す**。
+      // 同じ種類の要素が乗っている行としか入れ替えない。
       moveUp: function(text, lineNum) {
-        if (lineNum <= 1) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum - 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, -1, (parseSankey(text).elements || []));
       },
       moveDown: function(text, lineNum) {
-        var total = text.split('\n').length;
-        if (lineNum >= total) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum + 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, 1, (parseSankey(text).elements || []));
       },
       connect: function(text, fromName, toName, props) {
         props = props || {};

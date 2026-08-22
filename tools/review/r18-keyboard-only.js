@@ -41,6 +41,7 @@ const MAX_TAB = 30;   // これを超えて届かないなら実用上「到達�
   const findings = [];
   const examined = new Set();
   const skipped = [];
+  const routes = [];   // どの経路で要素にたどり着いたか
   const b = await chromium.launch();
 
   for (const type of TYPES) {
@@ -64,39 +65,89 @@ const MAX_TAB = 30;   // これを超えて届かないなら実用上「到達�
     });
     await p.keyboard.press('ArrowDown');
     await p.waitForTimeout(700);
-    const sel = await p.evaluate(() => window.MA.selection.getSelected());
+    let sel = await p.evaluate(() => window.MA.selection.getSelected());
+    let route = '矢印キー';
     if (!sel.length) {
       // 重ね合わせを持たない図種がある (mermaid が DSL の id を SVG に出さず、
       // 順序依存の照合は間違った要素を選ぶので入れないと決めている)。
-      // その図種で「選べない」と言うのは既知の制限の再掲にすぎない。
-      // 欠陥としては出さず、**検査から外れたこと**を記録する。
-      // (選べていた図種が選べなくなった場合は、網羅率の下限で FAIL になる)
+      //
+      // **だからといって「キーボードで編集できない」わけではない。**
+      // 一覧の「編集」ボタンへ Tab で到達すれば同じことができる。
+      // 以前はここで打ち切っていたので、10図種が丸ごと未検査だった
+      // (11/21)。K1 が使えないことと、K2〜K5 が使えないことは別の話。
       const hasOverlay = await p.evaluate(() =>
         document.querySelectorAll('#overlay-layer [data-element-id], #overlay-layer .overlay-bar').length);
       if (hasOverlay) {
         findings.push({ module: type, fn: 'K1 選択',
           what: '重ね合わせはあるのに矢印キーで選べない (マウスが必要)' });
-      } else {
-        skipped.push(type + ': 重ね合わせが無い (既知の制限)');
+        await p.close();
+        continue;
       }
-      await p.close();
-      continue;
+      // 一覧の「編集」へ Tab だけで届くか
+      let reachedRow = false;
+      await p.evaluate(() => {
+        var ed = document.getElementById('editor');
+        if (ed) { ed.focus(); ed.blur(); }
+        document.body.focus();
+      });
+      for (let i = 0; i < MAX_TAB * 2; i++) {
+        await p.keyboard.press('Tab');
+        await p.waitForTimeout(40);
+        const inRow = await p.evaluate(() => {
+          const a = document.activeElement;
+          if (!a) return false;
+          return !!(a.closest && a.closest('.ma-list-row') && a.tagName === 'BUTTON' &&
+                    !/✕|×/.test(a.textContent || ''));
+        });
+        if (inRow) { reachedRow = true; break; }
+      }
+      if (!reachedRow) {
+        findings.push({ module: type, fn: 'K1 選択',
+          what: '矢印キーでも Tab でも要素を選べない (一覧の編集ボタンに届かない)' });
+        await p.close();
+        continue;
+      }
+      await p.keyboard.press('Enter');
+      await p.waitForTimeout(800);
+      sel = await p.evaluate(() => window.MA.selection.getSelected());
+      route = '一覧を Tab';
+      if (!sel.length) {
+        // 選択状態にならない図種もある (一覧から詳細パネルを開くだけ)。
+        // 欄に届いて打鍵できるなら実用上は同じなので、続ける。
+        route = '一覧を Tab (選択状態にはならない)';
+      }
     }
+    routes.push(type + ': ' + route);
     examined.add(type);
 
-    // K2: Tab でラベル欄まで到達できるか
+    // K2: Tab で「その要素を編集できる欄」まで到達できるか
+    //
+    // 以前は id の接尾辞 (`-label` / `-name` / `-id`) で見分けていた。
+    // **接尾辞の表を持つと必ず漏れる** — mindmap は `mm-edit-text`、
+    // sankey は `sk-edit-from`、xychart は `xy-edit-values` で、
+    // どれも表に無かったので「届かない」と誤報していた (検査の誤り17件目)。
+    // r11 で同じことを学んだのに、この検査には規約が付いてこなかった。
+    //
+    // 名前ではなく**振る舞い**で見る。パネルの中の文字入力欄に届き、
+    // そこへ打鍵して本文が変われば、その欄は編集できる欄。
     let tabs = 0, reachedField = null;
     for (; tabs < MAX_TAB; tabs++) {
       await p.keyboard.press('Tab');
       await p.waitForTimeout(70);
-      const id = await p.evaluate(() => document.activeElement && document.activeElement.id);
-      // 「その要素を名付ける欄」なら何でもよい。図種によって label / name / id と
-      // 名前が違うので、`-label` 決め打ちだと直したあとも検出し続ける。
-      if (id && /-(label|name|id)$/.test(id)) { reachedField = id; tabs++; break; }
+      const info = await p.evaluate(() => {
+        const a = document.activeElement;
+        if (!a || a.tagName !== 'INPUT') return null;
+        if (a.type && a.type !== 'text' && a.type !== 'search') return null;
+        const panel = document.getElementById('props-content');
+        if (!panel || !panel.contains(a)) return null;
+        if (a.id === 'ma-list-filter') return null;          // 絞り込みは編集欄ではない
+        return { id: a.id || '(id なし)', value: a.value };
+      });
+      if (info) { reachedField = info.id; tabs++; break; }
     }
     if (!reachedField) {
-      findings.push({ module: type, fn: 'K2 \u7de8\u96c6\u6b04\u3078\u306e\u5230\u9054',
-        what: 'Tab ' + MAX_TAB + '\u56de\u3067\u3082\u30e9\u30d9\u30eb\u6b04\u306b\u5c4a\u304b\u306a\u3044' });
+      findings.push({ module: type, fn: 'K2 編集欄への到達',
+        what: 'Tab ' + MAX_TAB + '回でもパネルの入力欄に届かない' });
     } else {
       // K3: 打鍵して確定できるか
       const before = await p.locator('#editor').inputValue();
@@ -106,8 +157,8 @@ const MAX_TAB = 30;   // これを超えて届かないなら実用上「到達�
       await p.waitForTimeout(1100);
       const after = await p.locator('#editor').inputValue();
       if (after === before) {
-        findings.push({ module: type, fn: 'K3 \u78ba\u5b9a',
-          what: reachedField + ' \u306b\u6253\u9375\u3057\u3066\u3082\u672c\u6587\u304c\u5909\u308f\u3089\u306a\u3044' });
+        findings.push({ module: type, fn: 'K3 確定',
+          what: reachedField + ' に打鍵しても本文が変わらない' });
       }
     }
 
@@ -131,5 +182,9 @@ const MAX_TAB = 30;   // これを超えて届かないなら実用上「到達�
   if (skipped.length) {
     console.log('  (検査から外れた: ' + skipped.length + ' 図種) ' + skipped.slice(0, 6).join(' / '));
   }
+  const viaList = routes.filter(r => r.indexOf('一覧を Tab') >= 0);
+  console.log('  (要素への到達: 矢印キー ' + (routes.length - viaList.length) + ' 図種 / ' +
+    '一覧を Tab ' + viaList.length + ' 図種' +
+    (viaList.length ? ': ' + viaList.map(r => r.split(':')[0]).join(',') : '') + ')');
   report('r18-keyboard-only', findings, { examined: examined.size, total: 21 });
 })();

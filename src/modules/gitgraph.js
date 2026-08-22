@@ -5,6 +5,30 @@ window.MA.modules = window.MA.modules || {};
 window.MA.modules.gitGraph = (function() {
   var COMMIT_TYPES = ['NORMAL', 'REVERSE', 'HIGHLIGHT'];
 
+  // ブランチ名に日本語を入れるには引用符が要る。実測 (mermaid v11.13):
+  //
+  //   branch 機能A     → Lexer error
+  //   branch "機能A"   → OK (図に「機能A」が出る)
+  //
+  // 裸のまま書いていたので、**日本語のブランチ名を作ると図が壊れていた**。
+  // architecture (A83) / requirement と同じ形で、これが5例目。
+  // 読む側も `\S+` のままだと `"機能A"` を引用符ごと名前として扱ってしまい、
+  // checkout / merge の照合が外れる。読む側と書く側を同時に合わせる。
+  var BRANCH = '(?:"[^"]*"|\\S+)';
+
+  function stripQuotes(v) {
+    var s = String(v == null ? '' : v);
+    return /^"[\s\S]*"$/.test(s) ? s.slice(1, -1) : s;
+  }
+
+  // git のブランチ名として裸で書ける文字だけなら、そのまま出す。
+  function quoteBranch(v) {
+    var s = String(v == null ? '' : v);
+    if (/^"[\s\S]*"$/.test(s)) return s;
+    if (/^[A-Za-z0-9_./-]+$/.test(s)) return s;
+    return '"' + s.replace(/"/g, '') + '"';
+  }
+
   function parseArgsToken(str) {
     // Parse space-separated `key: value` pairs where value may be "quoted" or bare
     var result = {};
@@ -45,37 +69,37 @@ window.MA.modules.gitGraph = (function() {
       }
 
       // branch
-      var bm = trimmed.match(/^branch\s+(\S+)/);
+      var bm = trimmed.match(new RegExp('^branch[ \\t]+(' + BRANCH + ')'));
       if (bm) {
         result.elements.push({
           kind: 'branch',
-          name: bm[1],
+          name: stripQuotes(bm[1]),
           fromBranch: currentBranch,
           line: lineNum,
         });
-        currentBranch = bm[1];
+        currentBranch = stripQuotes(bm[1]);
         continue;
       }
 
       // checkout
-      var cm = trimmed.match(/^checkout\s+(\S+)/);
+      var cm = trimmed.match(new RegExp('^checkout[ \\t]+(' + BRANCH + ')'));
       if (cm) {
         result.elements.push({
           kind: 'checkout',
-          target: cm[1],
+          target: stripQuotes(cm[1]),
           line: lineNum,
         });
-        currentBranch = cm[1];
+        currentBranch = stripQuotes(cm[1]);
         continue;
       }
 
       // merge
-      var mm = trimmed.match(/^merge\s+(\S+)(.*)/);
+      var mm = trimmed.match(new RegExp('^merge[ \\t]+(' + BRANCH + ')(.*)'));
       if (mm) {
         var margs = parseArgsToken(mm[2]);
         result.elements.push({
           kind: 'merge',
-          target: mm[1],
+          target: stripQuotes(mm[1]),
           tag: margs.tag || '',
           mergeType: margs.type || 'NORMAL',
           line: lineNum,
@@ -117,7 +141,7 @@ window.MA.modules.gitGraph = (function() {
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
-    lines.splice(insertAt, 0, '    branch ' + name);
+    lines.splice(insertAt, 0, '    branch ' + quoteBranch(name));
     return lines.join('\n');
   }
 
@@ -125,7 +149,7 @@ window.MA.modules.gitGraph = (function() {
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
-    lines.splice(insertAt, 0, '    checkout ' + target);
+    lines.splice(insertAt, 0, '    checkout ' + quoteBranch(target));
     return lines.join('\n');
   }
 
@@ -133,7 +157,7 @@ window.MA.modules.gitGraph = (function() {
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
-    var line = '    merge ' + target + (tag ? ' tag: "' + tag + '"' : '');
+    var line = '    merge ' + quoteBranch(target) + (tag ? ' tag: "' + tag + '"' : '');
     lines.splice(insertAt, 0, line);
     return lines.join('\n');
   }
@@ -175,9 +199,9 @@ window.MA.modules.gitGraph = (function() {
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var indent = lines[idx].match(/^(\s*)/)[1];
-    var bm = lines[idx].trim().match(/^branch\s+(\S+)/);
-    var oldName = bm ? bm[1] : null;
-    lines[idx] = indent + 'branch ' + newName;
+    var bm = lines[idx].trim().match(new RegExp('^branch[ \\t]+(' + BRANCH + ')'));
+    var oldName = bm ? stripQuotes(bm[1]) : null;
+    lines[idx] = indent + 'branch ' + quoteBranch(newName);
     if (oldName && oldName !== newName) renameBranchRefs(lines, oldName, newName, idx);
     return lines.join('\n');
   }
@@ -194,8 +218,10 @@ window.MA.modules.gitGraph = (function() {
       if (j === skipIdx) continue;
       var indent = lines[j].match(/^(\s*)/)[1];
       var trimmed = lines[j].trim();
-      var m = trimmed.match(/^(checkout|merge)\s+(\S+)(.*)$/);
-      if (m && m[2] === oldName) lines[j] = indent + m[1] + ' ' + newName + m[3];
+      var m = trimmed.match(new RegExp('^(checkout|merge)[ \\t]+(' + BRANCH + ')(.*)$'));
+      if (m && stripQuotes(m[2]) === oldName) {
+        lines[j] = indent + m[1] + ' ' + quoteBranch(newName) + m[3];
+      }
     }
   }
 
@@ -204,7 +230,7 @@ window.MA.modules.gitGraph = (function() {
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var indent = lines[idx].match(/^(\s*)/)[1];
-    lines[idx] = indent + 'checkout ' + newTarget;
+    lines[idx] = indent + 'checkout ' + quoteBranch(newTarget);
     return lines.join('\n');
   }
 
@@ -213,14 +239,14 @@ window.MA.modules.gitGraph = (function() {
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     var trimmed = lines[idx].trim();
-    var m = trimmed.match(/^merge\s+(\S+)(.*)/);
+    var m = trimmed.match(new RegExp('^merge[ \\t]+(' + BRANCH + ')(.*)'));
     if (!m) return text;
-    var target = m[1];
+    var target = stripQuotes(m[1]);
     var args = parseArgsToken(m[2]);
     if (field === 'target') target = value;
     else if (field === 'tag') args.tag = value;
     else if (field === 'type') args.type = value;
-    var parts = ['merge', target];
+    var parts = ['merge', quoteBranch(target)];
     if (args.type && args.type !== 'NORMAL') parts.push('type: ' + args.type);
     if (args.tag) parts.push('tag: "' + args.tag + '"');
     var indent = lines[idx].match(/^(\s*)/)[1];
@@ -275,32 +301,32 @@ window.MA.modules.gitGraph = (function() {
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">Gitgraph</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">Commit を追加</label>' +
-          P.fieldHtml('id (任意)', 'gg-add-commit-id', '') +
-          P.selectFieldHtml('type', 'gg-add-commit-type', typeOpts) +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">コミットを追加</label>' +
+          P.fieldHtml('ID (任意)', 'gg-add-commit-id', '') +
+          P.selectFieldHtml('Type', 'gg-add-commit-type', typeOpts) +
           P.fieldHtml('tag (任意)', 'gg-add-commit-tag', '') +
-          P.primaryButtonHtml('gg-add-commit-btn', '+ Commit 追加') +
+          P.primaryButtonHtml('gg-add-commit-btn', '+ コミット追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">Branch を追加</label>' +
-          P.fieldHtml('Branch name', 'gg-add-branch-name', '') +
-          P.primaryButtonHtml('gg-add-branch-btn', '+ Branch 追加') +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">ブランチを追加</label>' +
+          P.fieldHtml('ID', 'gg-add-branch-name', '') +
+          P.primaryButtonHtml('gg-add-branch-btn', '+ ブランチ追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">Checkout を追加</label>' +
-          P.selectFieldHtml('Target branch', 'gg-add-checkout-target', branchOpts) +
-          P.primaryButtonHtml('gg-add-checkout-btn', '+ Checkout 追加') +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">チェックアウトを追加</label>' +
+          P.selectFieldHtml('Target', 'gg-add-checkout-target', branchOpts) +
+          P.primaryButtonHtml('gg-add-checkout-btn', '+ チェックアウト追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">Merge を追加</label>' +
-          P.selectFieldHtml('Target branch', 'gg-add-merge-target', branchOpts) +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">マージを追加</label>' +
+          P.selectFieldHtml('Target', 'gg-add-merge-target', branchOpts) +
           P.fieldHtml('tag (任意)', 'gg-add-merge-tag', '') +
-          P.primaryButtonHtml('gg-add-merge-btn', '+ Merge 追加') +
+          P.primaryButtonHtml('gg-add-merge-btn', '+ マージ追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">Cherry-pick を追加</label>' +
-          P.selectFieldHtml('Commit id', 'gg-add-cp-id', commitIdOpts) +
-          P.primaryButtonHtml('gg-add-cp-btn', '+ Cherry-pick 追加') +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">チェリーピックを追加</label>' +
+          P.selectFieldHtml('Target', 'gg-add-cp-id', commitIdOpts) +
+          P.primaryButtonHtml('gg-add-cp-btn', '+ チェリーピック追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">アイテム一覧</label>' +
@@ -361,18 +387,18 @@ window.MA.modules.gitGraph = (function() {
 
       if (found.kind === 'commit') {
         var typeOpts2 = COMMIT_TYPES.map(function(t) { return { value: t, label: t, selected: t === found.commitType }; });
-        html += P.fieldHtml('id', 'gg-edit-id', found.id);
-        html += P.selectFieldHtml('type', 'gg-edit-type', typeOpts2);
+        html += P.fieldHtml('ID', 'gg-edit-id', found.id);
+        html += P.selectFieldHtml('Type', 'gg-edit-type', typeOpts2);
         html += P.fieldHtml('tag', 'gg-edit-tag', found.tag);
       } else if (found.kind === 'branch') {
-        html += P.fieldHtml('name', 'gg-edit-branch-name', found.name);
+        html += P.fieldHtml('ID', 'gg-edit-branch-name', found.name);
       } else if (found.kind === 'checkout') {
-        html += P.fieldHtml('target', 'gg-edit-checkout-target', found.target);
+        html += P.fieldHtml('Target', 'gg-edit-checkout-target', found.target);
       } else if (found.kind === 'merge') {
-        html += P.fieldHtml('target', 'gg-edit-merge-target', found.target);
+        html += P.fieldHtml('Target', 'gg-edit-merge-target', found.target);
         html += P.fieldHtml('tag', 'gg-edit-merge-tag', found.tag);
       } else if (found.kind === 'cherry-pick') {
-        html += P.fieldHtml('id', 'gg-edit-cp-id', found.id);
+        html += P.fieldHtml('ID', 'gg-edit-cp-id', found.id);
       }
       html += P.dangerButtonHtml('gg-edit-delete', '削除');
       propsEl.innerHTML = html;
@@ -489,14 +515,15 @@ window.MA.modules.gitGraph = (function() {
         if (opts.kind === 'cherry-pick') return updateCherryPick(text, lineNum, value);
         return text;
       },
+      // 素の行入れ替えは**図の宣言行と入れ替わって図を壊す**。
+      // 同じ種類の要素が乗っている行としか入れ替えない。
       moveUp: function(text, lineNum) {
-        if (lineNum <= 1) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum - 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, -1, (parseGitgraph(text).elements || []));
       },
       moveDown: function(text, lineNum) {
-        var total = text.split('\n').length;
-        if (lineNum >= total) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum + 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, 1, (parseGitgraph(text).elements || []));
       },
       connect: function(text) { return text; },
     },

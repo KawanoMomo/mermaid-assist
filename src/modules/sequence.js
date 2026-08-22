@@ -1091,7 +1091,7 @@ window.MA.modules.sequence = (function() {
               '<option value="par">par</option>' +
             '</select>' +
             '<input id="seq-add-block-label" type="text" placeholder="label" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' +
-            '<button id="seq-add-block-btn" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">+</button>' +
+            '<button id="seq-add-block-btn" title="ブロック (alt / loop など) を追加" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">+</button>' +
           '</div>' +
         '</div>' +
 

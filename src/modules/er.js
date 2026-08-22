@@ -367,7 +367,7 @@ window.MA.modules.erDiagram = (function() {
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">エンティティを追加</label>' +
           '<div style="display:flex;gap:4px;">' +
             '<input id="er-add-ent-id" type="text" placeholder="ENTITY" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' +
-            '<button id="er-add-ent-btn" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">+</button>' +
+            '<button id="er-add-ent-btn" title="エンティティを追加" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">+</button>' +
           '</div>' +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
@@ -457,7 +457,7 @@ window.MA.modules.erDiagram = (function() {
       propsEl.innerHTML =
         P.panelHeaderHtml(ent.label) +
         // 名前を変えられるようにする (R18 で発覚した取り残し)。
-        P.fieldHtml('エンティティ名', 'sel-ent-name', ent.id) +
+        P.fieldHtml('ID', 'sel-ent-name', ent.id) +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">属性一覧</label>' +
           '<div>' + attrsList + '</div>' +
@@ -626,14 +626,15 @@ window.MA.modules.erDiagram = (function() {
         }
         return updateRelationship(text, lineNum, field, value);
       },
+      // 素の行入れ替えは**図の宣言行と入れ替わって図を壊す**。
+      // 同じ種類の要素が乗っている行としか入れ替えない。
       moveUp: function(text, lineNum) {
-        if (lineNum <= 1) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum - 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, -1, (parseER(text).elements || []));
       },
       moveDown: function(text, lineNum) {
-        var total = text.split('\n').length;
-        if (lineNum >= total) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum + 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, 1, (parseER(text).elements || []));
       },
       connect: function(text, fromId, toId, props) {
         props = props || {};

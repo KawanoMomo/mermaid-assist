@@ -123,8 +123,8 @@ window.MA.modules.pie = (function() {
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">Pie Chart</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">Title 設定</label>' +
-          P.fieldHtml('Title', 'pie-title', currentTitle) +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">タイトル設定</label>' +
+          P.fieldHtml('タイトル', 'pie-title', currentTitle) +
           P.primaryButtonHtml('pie-set-title-btn', 'Title 適用') +
         '</div>' +
         '<div style="margin-bottom:8px;">' +
@@ -136,7 +136,7 @@ window.MA.modules.pie = (function() {
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">スライスを追加</label>' +
           P.fieldHtml('ラベル', 'pie-add-label', '', '例: Dogs') +
-          P.fieldHtml('Value', 'pie-add-value', '', '数値') +
+          P.fieldHtml('値', 'pie-add-value', '', '数値') +
           P.primaryButtonHtml('pie-add-btn', '+ スライス追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
@@ -178,7 +178,7 @@ window.MA.modules.pie = (function() {
       propsEl.innerHTML =
         P.panelHeaderHtml(sl.label) +
         P.fieldHtml('ラベル', 'pie-edit-label', sl.label) +
-        P.fieldHtml('Value', 'pie-edit-value', String(sl.value)) +
+        P.fieldHtml('値', 'pie-edit-value', String(sl.value)) +
         P.dangerButtonHtml('pie-edit-delete', 'スライス削除');
 
       var sliceLine = sl.line;
@@ -240,14 +240,15 @@ window.MA.modules.pie = (function() {
         if (field === 'showData') return setShowData(text, value);
         return updateSlice(text, lineNum, field, value);
       },
+      // 素の行入れ替えは**図の宣言行と入れ替わって図を壊す**。
+      // 同じ種類の要素が乗っている行としか入れ替えない。
       moveUp: function(text, lineNum) {
-        if (lineNum <= 1) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum - 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, -1, (parsePie(text).elements || []));
       },
       moveDown: function(text, lineNum) {
-        var total = text.split('\n').length;
-        if (lineNum >= total) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum + 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, 1, (parsePie(text).elements || []));
       },
       connect: function(text) { return text; },
     },

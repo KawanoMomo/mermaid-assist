@@ -184,13 +184,13 @@ window.MA.modules.kanban = (function() {
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">Kanban</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">カラムを追加</label>' +
-          P.fieldHtml('Name (1単語)', 'kb-add-col-name', '', '例: Todo') +
+          P.fieldHtml('ラベル (1単語)', 'kb-add-col-name', '', '例: Todo') +
           P.primaryButtonHtml('kb-add-col-btn', '+ カラム追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">カードを追加</label>' +
           P.selectFieldHtml('Column', 'kb-add-c-col', colOpts) +
-          P.fieldHtml('Text', 'kb-add-c-text', '', '例: Design spec') +
+          P.fieldHtml('ラベル', 'kb-add-c-text', '', '例: Design spec') +
           P.fieldHtml('Meta (任意)', 'kb-add-c-meta', '', "例: @{ assigned: 'alice' }") +
           P.primaryButtonHtml('kb-add-c-btn', '+ カード追加') +
         '</div>' +
@@ -235,7 +235,7 @@ window.MA.modules.kanban = (function() {
         if (!c) { propsEl.innerHTML = '<p>カラムが見つかりません</p>'; return; }
         propsEl.innerHTML =
           P.panelHeaderHtml(c.label) +
-          P.fieldHtml('Name', 'kb-edit-col-name', c.label) +
+          P.fieldHtml('ラベル', 'kb-edit-col-name', c.label) +
           P.dangerButtonHtml('kb-edit-col-delete', 'カラム削除');
         var ln = c.line;
         document.getElementById('kb-edit-col-name').addEventListener('change', function() {
@@ -258,7 +258,7 @@ window.MA.modules.kanban = (function() {
         propsEl.innerHTML =
           P.panelHeaderHtml(card.text) +
           '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">Column: ' + escHtml(card.parentId || '?') + '</div>' +
-          P.fieldHtml('Text', 'kb-edit-c-text', card.text) +
+          P.fieldHtml('ラベル', 'kb-edit-c-text', card.text) +
           P.fieldHtml('Meta', 'kb-edit-c-meta', card.meta || '') +
           P.dangerButtonHtml('kb-edit-c-delete', 'カード削除');
         var ln = card.line;
@@ -376,14 +376,15 @@ window.MA.modules.kanban = (function() {
         }
         return updateCard(text, lineNum, field, value);
       },
+      // 素の行入れ替えは**図の宣言行と入れ替わって図を壊す**。
+      // 同じ種類の要素が乗っている行としか入れ替えない。
       moveUp: function(text, lineNum) {
-        if (lineNum <= 1) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum - 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, -1, (parseKanban(text).elements || []));
       },
       moveDown: function(text, lineNum) {
-        var total = text.split('\n').length;
-        if (lineNum >= total) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum + 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, 1, (parseKanban(text).elements || []));
       },
       connect: function(text) { return text; },
     },

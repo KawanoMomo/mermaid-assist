@@ -170,19 +170,19 @@ window.MA.modules.journey = (function() {
       propsEl.innerHTML =
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">Journey</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
-          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">Title 設定</label>' +
-          P.fieldHtml('Title', 'jr-title', parsedData.meta.title || '') +
+          '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">タイトル設定</label>' +
+          P.fieldHtml('タイトル', 'jr-title', parsedData.meta.title || '') +
           P.primaryButtonHtml('jr-set-title-btn', 'Title 適用') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">セクションを追加</label>' +
-          P.fieldHtml('Name', 'jr-add-sec-name', '') +
+          P.fieldHtml('ラベル', 'jr-add-sec-name', '') +
           P.primaryButtonHtml('jr-add-sec-btn', '+ セクション追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">タスクを追加</label>' +
           P.selectFieldHtml('Section', 'jr-add-t-section', secOpts) +
-          P.fieldHtml('Text', 'jr-add-t-text', '', '例: Check email') +
+          P.fieldHtml('ラベル', 'jr-add-t-text', '', '例: Check email') +
           P.fieldHtml('Score (-5〜5)', 'jr-add-t-score', '3') +
           P.fieldHtml('Actors (カンマ区切り)', 'jr-add-t-actors', '', '例: Me, Pet') +
           P.primaryButtonHtml('jr-add-t-btn', '+ タスク追加') +
@@ -234,7 +234,7 @@ window.MA.modules.journey = (function() {
         if (!sec) { propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">セクションが見つかりません</p>'; return; }
         propsEl.innerHTML =
           P.panelHeaderHtml(sec.label) +
-          P.fieldHtml('Name', 'jr-edit-sec-name', sec.label) +
+          P.fieldHtml('ラベル', 'jr-edit-sec-name', sec.label) +
           P.dangerButtonHtml('jr-edit-sec-delete', 'セクション削除');
         var secLine = sec.line;
         document.getElementById('jr-edit-sec-name').addEventListener('change', function() {
@@ -257,7 +257,7 @@ window.MA.modules.journey = (function() {
         propsEl.innerHTML =
           P.panelHeaderHtml(t.text) +
           '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">セクション: ' + escHtml(t.parentId || '?') + '</div>' +
-          P.fieldHtml('Text', 'jr-edit-t-text', t.text) +
+          P.fieldHtml('ラベル', 'jr-edit-t-text', t.text) +
           P.fieldHtml('Score', 'jr-edit-t-score', String(t.score)) +
           P.fieldHtml('Actors (カンマ区切り)', 'jr-edit-t-actors', t.actors.join(', ')) +
           P.dangerButtonHtml('jr-edit-t-delete', 'タスク削除');
@@ -338,14 +338,15 @@ window.MA.modules.journey = (function() {
         }
         return updateTask(text, lineNum, field, value);
       },
+      // 素の行入れ替えは**図の宣言行と入れ替わって図を壊す**。
+      // 同じ種類の要素が乗っている行としか入れ替えない。
       moveUp: function(text, lineNum) {
-        if (lineNum <= 1) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum - 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, -1, (parseJourney(text).elements || []));
       },
       moveDown: function(text, lineNum) {
-        var total = text.split('\n').length;
-        if (lineNum >= total) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum + 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, 1, (parseJourney(text).elements || []));
       },
       connect: function(text) { return text; },
     },

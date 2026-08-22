@@ -7,7 +7,9 @@ describe('addRequirement', function() {
     var t = 'requirementDiagram\n';
     var out = req.addRequirement(t, 'functionalRequirement', 'fr1');
     expect(out).toContain('functionalRequirement fr1 {');
-    expect(out).toContain('id: ""');
+    // 空の `id: ""` を期待していたが、**mermaid はそれを拒否する** (実測)。
+    // このテストは壊れた出力の方を固定していた。行を出さないのが正しい。
+    expect(out).not.toContain('id: ""');
     expect(out).toContain('risk: medium');
     expect(out).toContain('verifymethod: analysis');
   });
@@ -24,8 +26,9 @@ describe('addElement', function() {
   test('adds element block', function() {
     var out = req.addElement('requirementDiagram\n', 'ecu');
     expect(out).toContain('element ecu {');
-    expect(out).toContain('type: ""');
-    expect(out).toContain('docref: ""');
+    // 同上。`type: ""` は Parse error になる。
+    expect(out).not.toContain('type: ""');
+    expect(out).not.toContain('docref: ""');
   });
 });
 
@@ -163,18 +166,35 @@ describe('updateName', function() {
 });
 
 describe('operations.moveUp / moveDown / connect', function() {
-  test('moveUp swaps with previous line', function() {
-    var t = 'A\nB\nC\n';
-    var out = req.operations.moveUp(t, 2);
-    expect(out.split('\n')[0]).toBe('B');
-    expect(out.split('\n')[1]).toBe('A');
+  // 以前はここで 3行だけの文字列 (requirement 図ですらないもの) を渡し、
+  // 素の行入れ替えが起きることを期待していた。**その振る舞いが欠陥**で、
+  // 先頭の要素を上へ動かすと図の宣言行と入れ替わって図が消える。
+  test('moveUp は同じ種類の要素としか入れ替えない', function() {
+    var t = req.template();
+    var reqs = req.parse(t).elements.filter(function(e) { return e.kind === 'requirement'; });
+    var out = req.operations.moveUp(t, reqs[0].line);
+    // 先頭の要件より上には同じ種類が無いので動かない。宣言行は必ず残る
+    expect(out.split(String.fromCharCode(10))[0]).toBe('requirementDiagram');
+    expect(out).toBe(t);
   });
 
-  test('moveDown swaps with next line', function() {
-    var t = 'A\nB\nC\n';
-    var out = req.operations.moveDown(t, 1);
-    expect(out.split('\n')[0]).toBe('B');
-    expect(out.split('\n')[1]).toBe('A');
+  test('moveDown も宣言行を巻き込まない', function() {
+    var t = req.template();
+    var els = req.parse(t).elements;
+    var out = req.operations.moveDown(t, els[els.length - 1].line);
+    expect(out.split(String.fromCharCode(10))[0]).toBe('requirementDiagram');
+  });
+
+  test('同じ種類が2つあれば入れ替わる', function() {
+    var t = req.operations.add(req.template(), 'requirement',
+      { reqType: 'requirement', name: 'second_req' });
+    var reqs = req.parse(t).elements.filter(function(e) { return e.kind === 'requirement'; });
+    expect(reqs.length).toBe(2);
+    var out = req.operations.moveUp(t, reqs[1].line);
+    var after = req.parse(out).elements.filter(function(e) { return e.kind === 'requirement'; });
+    expect(after.map(function(e) { return e.name; })).toEqual(
+      [reqs[1].name, reqs[0].name]);
+    expect(out.split(String.fromCharCode(10))[0]).toBe('requirementDiagram');
   });
 
   test('connect creates a satisfies relation by default', function() {

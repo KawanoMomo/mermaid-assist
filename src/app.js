@@ -202,9 +202,53 @@ function detectModule(text) {
 }
 
 // ── Refresh Pipeline ───────────────────────────────────────────────────────
+// 描き直しを1フレームに合流させるだけでは足りない。
+//
+// requestAnimationFrame は**同じフレームの中**しかまとめない。人が打つ速さ
+// (毎秒5文字 = 200ms 間隔) だと1打鍵ごとに1回描き直す。実測 (1366x768):
+//
+//   要素   10文字打つ間に固まった合計   1打鍵あたり
+//     10                        0ms          0ms
+//     50                      797ms         80ms
+//    200                     4988ms        500ms
+//    400                    14718ms       1470ms
+//
+// 400要素の図に10文字打つと、**合計 14.7秒 画面が固まる**。
+//
+// 一定時間を待つ形にする。待ち時間は**前回の描き直しに実際かかった時間**から
+// 決める。小さい図は今までどおり即座に (1フレーム)、重い図は打ち終わるまで
+// 待つ。固定値にすると、軽い図で無駄に遅くなるか、重い図で効かないかの
+// どちらかになる (150ms 固定では 200ms 間隔の打鍵に対して1回も合流しない)。
+var lastRenderMs = 0;
+var debounceTimeout = null;
+
+function refreshDelay() {
+  if (lastRenderMs <= 150) return 0;              // 軽い図はそのまま
+  return Math.min(Math.round(lastRenderMs), 800); // 重い図は前回かかった分だけ待つ
+}
+
 function scheduleRefresh() {
   cancelAnimationFrame(debounceTimer);
-  debounceTimer = requestAnimationFrame(function() { refresh(); });
+  if (debounceTimeout) { clearTimeout(debounceTimeout); debounceTimeout = null; }
+  var wait = refreshDelay();
+  if (wait === 0) {
+    debounceTimer = requestAnimationFrame(function() { refresh(); });
+    return;
+  }
+  // 待っている間に「読み取りと状態表示だけ先に」追いつかせることも試したが、
+  // **それ自体が重かった**。実測 (400要素、200ms 間隔で10文字):
+  //
+  //   描き直しだけ待つ            固まった合計 14718ms → 1460ms
+  //   + 軽い側を毎回先に走らせる                    → 22194ms (悪化)
+  //
+  // 軽いはずの `refresh(true)` は一覧を作り直す。400要素だと 799行の DOM を
+  // 毎回組み直すので **1打鍵あたり約850ms** かかっていた。
+  // 一覧に仮想化が無いという UI-022 と同じ根で、そちらが片付くまでは
+  // まとめて待つ方が速い。状態表示が最大 800ms 遅れるのは承知の上。
+  debounceTimeout = setTimeout(function() {
+    debounceTimeout = null;
+    debounceTimer = requestAnimationFrame(function() { refresh(); });
+  }, wait);
 }
 
 async function refresh(skipRender) {
@@ -245,10 +289,37 @@ async function refresh(skipRender) {
   // place that calls it.
   applyMermaidConfig(parsed);
 
+  // 大きい図は mermaid の描画がメインスレッドを塞ぐ。
+  //
+  // 実測 (1366x768, flowchart): 200要素で 2.1秒、500要素で 3.8秒、600要素で 3.2秒。
+  // **その間 100ms 間隔のポーリングが1度もサンプルを取れない** = 画面が一切
+  // 更新されない。ステータスは前の値のまま、進行を示すものは何も出ていなかった。
+  // 押した操作が効いているのか固まったのかが区別できない。
+  //
+  // 描画を始める前に「描画中…」を出し、**ブラウザに実際に描かせてから**
+  // 重い処理へ入る。await だけではマイクロタスクしか回らず塗り替えは起きないので、
+  // requestAnimationFrame の後にもう一度キューへ戻す。
+  //
+  // 小さい図で毎打鍵ちらつくと逆に邪魔なので、実測で1秒を超え始める大きさ
+  // (300行) からにする。
+  var heavy = mmdText.length > 6000 || mmdText.split('\n').length > 300;
+  if (heavy && statusParseEl) {
+    statusParseEl.textContent = '描画中…';
+    statusParseEl.classList.remove('error');
+    if (previewSvgEl) previewSvgEl.setAttribute('aria-busy', 'true');
+    await new Promise(function(res) {
+      requestAnimationFrame(function() { setTimeout(res, 0); });
+    });
+    if (thisRender !== renderCounter) return;   // 追い越されたら捨てる
+  }
+
   // Render via mermaid.js
   var svgId = 'mermaid-svg-' + thisRender;
+  var renderStartedAt = (window.performance && performance.now) ? performance.now() : Date.now();
   try {
     var renderResult = await mermaid.render(svgId, mmdText);
+    lastRenderMs = ((window.performance && performance.now) ? performance.now() : Date.now()) - renderStartedAt;
+    if (previewSvgEl) previewSvgEl.removeAttribute('aria-busy');
     // Guard: if a newer render was started, discard this result
     if (thisRender !== renderCounter) return;
 
@@ -370,6 +441,7 @@ async function refresh(skipRender) {
     //
     // 図が既に出ているなら、そのままにしてステータスと小さな帯だけでエラーを伝える。
     previewStale = true;
+    if (previewSvgEl) previewSvgEl.removeAttribute('aria-busy');
     var hadDiagram = !!previewSvgEl.querySelector('svg');
     if (hadDiagram) {
       statusParseEl.textContent = 'Error';
@@ -457,6 +529,13 @@ var previewStale = false;
 var transientMsg = '';
 var transientUntil = 0;
 var transientTimer = null;
+// 「あと何回戻せるか」を数字で出す。工具列のボタンは目に入らない位置にある。
+function showUndoDepth(head) {
+  var h = window.MA.history;
+  if (!h || typeof h.undoDepth !== 'function') return;
+  showTransient(head + ' — 戻せる: ' + h.undoDepth() + ' / やり直せる: ' + h.redoDepth(), 2500);
+}
+
 function showTransient(msg, ms) {
   transientMsg = msg;
   transientUntil = Date.now() + (ms || 4000);
@@ -716,6 +795,65 @@ function withFocusKept(fn) {
 var listFilterText = '';
 var LIST_FILTER_MIN_ROWS = 12;
 
+// 一覧の絞り込みも文書に紐づく状態。
+//
+// 前の文書で「ノード1」と絞り込んだまま別の文書を開くと、当てはまる行が
+// 1つも無いので **一覧が完全に空に見える** (実測: 20行あって表示0行)。
+// 絞り込み欄は残っているが、パネルの一番上にあり、ノートPC では
+// スクロールしないと見えない (UI-011)。素直に読むと「要素が無い図」に見える。
+//
+// R15 (状態の持ち越し) は追加フォームの入力欄しか見ていなかったので
+// この状態は網に掛かっていなかった。文書が入れ替わったら捨てる。
+// 文書が入れ替わったら、**すべての**モジュールが覚えている一時状態を捨てる。
+//
+// もとは「今のモジュールだけ」を掃除していた。図種の切替 (ドロップダウン) は
+// **切替先**のモジュールを掃除するので、切替**元**は汚れたまま残る。
+// 実測: block で G1 に追加 → ドロップダウンで flowchart → block のファイルを開く、
+// で block の親グループ選択が G1 のまま残り、押すとその中に入った。
+// どのモジュールが汚れているかを追うより、全部捨てる方が数え間違えない。
+function resetAllTransientState() {
+  var reg = window.MA.modules || {};
+  Object.keys(reg).forEach(function (k) {
+    var m = reg[k];
+    if (m && typeof m.resetTransientState === 'function') {
+      try { m.resetTransientState(); } catch (e) { /* 1つ失敗しても残りは掃除する */ }
+    }
+  });
+}
+
+function clearListFilter() {
+  listFilterText = '';
+  var box = document.getElementById('ma-list-filter');
+  if (box) box.value = '';
+}
+// 絞り込みで残った最初の行へ焦点を移す。
+//
+// **その場で捕まえた要素を使ってはいけない。** キーを押した瞬間と
+// 焦点を当てる瞬間の間にパネルが作り直されることがあり、捕まえた要素は
+// 文書から外れている (gitGraph で実測: `attached=false`)。
+// flowchart では作り直しが起きず、**1図種で確かめて全体に効くと思い込んだ**。
+//
+// 取り直して当てる。まだ作り直し中なら少しだけ待って繰り返す。
+function focusFirstVisibleRow(tries) {
+  if (!propsEl || tries <= 0) return;
+  setTimeout(function() {
+    var rows = propsEl.querySelectorAll('.ma-list-row');
+    for (var k = 0; k < rows.length; k++) {
+      if (rows[k].style.display === 'none') continue;
+      var btn = rows[k].querySelector('button');
+      var target = btn || rows[k];
+      if (!btn) target.setAttribute('tabindex', '-1');
+      target.focus();
+      if (document.activeElement === target) {
+        target.scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      break;   // 当たらなかった = 作り直しの最中。もう一度試す
+    }
+    focusFirstVisibleRow(tries - 1);
+  }, 60);
+}
+
 function applyListFilter() {
   if (!propsEl) return;
   var rows = propsEl.querySelectorAll('.ma-list-row');
@@ -727,13 +865,25 @@ function applyListFilter() {
     wrap.style.cssText = 'margin-bottom:6px;';
     wrap.innerHTML = '<input id="ma-list-filter" type="text" placeholder="一覧を絞り込む (' +
       rows.length + '件)" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);' +
-      'color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">';
+      'color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+      '<div id="ma-list-filter-count" hidden style="font-size:10px;margin-top:2px;"></div>';
     propsEl.insertBefore(wrap, propsEl.firstChild);
     box = document.getElementById('ma-list-filter');
     box.value = listFilterText;
     box.addEventListener('input', function() {
       listFilterText = box.value;
       filterRows();
+    });
+    // 絞り込んだあと、その行へ行くのに**追加フォーム全体を通過する**。
+    // 実測 (1366x768、40ノードを1行に絞ったあと): **Tab 14回**。
+    // 「探す → 直す」は1日に何度も踏む流れなので、そのたびに14打鍵増える。
+    //
+    // 配置は変えずに、Enter で残った最初の行へ飛ばす
+    // (絞り込み欄で Enter を押したら結果へ、は一般的な作法)。
+    box.addEventListener('keydown', function(e) {
+      if (e.key !== 'Enter' || e.isComposing) return;
+      e.preventDefault();
+      focusFirstVisibleRow(6);
     });
   }
   filterRows();
@@ -756,9 +906,21 @@ function filterRows() {
     if (show) hit++;
   }
   var box = document.getElementById('ma-list-filter');
-  if (box) {
-    // 絞った結果0件を無言で見せると「一覧が消えた」と読めるので、件数を常に出す。
-    box.placeholder = q ? ('絞り込み中: ' + hit + '件') : ('一覧を絞り込む (' + rows.length + '件)');
+  if (box) box.placeholder = '一覧を絞り込む (' + rows.length + '件)';
+  // 件数は欄の外に出す。
+  //
+  // 以前は placeholder に書いていたが、**placeholder は値が入ると隠れる**。
+  // つまり絞り込んでいるときだけ件数が見えなかった。0件のときに
+  // 「一覧が空」と「絞り込みで0件」を見分ける手掛かりが、必要な場面でだけ消えていた。
+  var cnt = document.getElementById('ma-list-filter-count');
+  if (cnt) {
+    if (!q) { cnt.hidden = true; }
+    else {
+      cnt.hidden = false;
+      cnt.textContent = rows.length + '件中 ' + hit + '件が一致' +
+        (hit === 0 ? ' — 絞り込みを消すと全部出ます' : '');
+      cnt.style.color = hit === 0 ? 'var(--accent-orange)' : 'var(--text-secondary)';
+    }
   }
 }
 
@@ -799,6 +961,89 @@ function restoreAddForm(snap) {
   });
 }
 
+// 選んでいる要素が**本文の何行目か**を出し、押すとその行へ飛ぶ。
+//
+// 実測 (1366x768、150ノードの図で「ノード120」= 122行目 を選んだあと):
+//   エディタが見せている行  1〜34行目
+//   カーソルの位置          151行目 (末尾)
+//   パネルの行番号          **無し**
+// → **選んだ要素の行に辿り着く手段が無い。** DSL を直接編集する使い方では
+//   「選ぶ → その行を直す」が流れなので、毎回自分で探すことになる。
+//
+// 自動でスクロールはしない。追加や削除のあとにも選択は起きるので、
+// **打っている最中に画面が飛ぶ**のは以前 gantt で問題になった形
+// (連続入力が潰れる)。押したときだけ飛ぶ。
+function showSelectedLine() {
+  if (!propsEl) return;
+  var old = document.getElementById('ma-goto-line');
+  if (old && old.parentNode) old.parentNode.removeChild(old);
+  if (!parsed || !currentModule) return;
+  var sel = window.MA.selection.getSelected();
+  if (!sel || sel.length !== 1) return;
+
+  // 選んだものがどこにあるかは図種で違う。**3か所とも見る。**
+  //
+  //   elements   ほとんどの図種
+  //   relations  sankey の流れ / architecture のエッジ (要素ではない)
+  //   groups     architecture のグループ (parse が第3の入れ物に返す)
+  //
+  // さらに gitGraph は選択の id が**行番号そのもの** ("2")。
+  //
+  // 最初 elements だけを見ていて、**21図種中4図種で出なかった**
+  // (gantt / gitGraph / sankey / architecture)。flowchart で1回確かめて
+  // 全体に効くと思い込んだ形。図種ごとに id の持ち方が違うことは
+  // 何度も踏んでいるのに、また踏んだ。
+  var idf = currentModule.identityField || 'id';
+  var pools = [parsed.elements, parsed.relations, parsed.groups];
+  var line = null;
+  for (var pi = 0; pi < pools.length && line === null; pi++) {
+    var pool = pools[pi];
+    if (!pool || !pool.length) continue;
+    for (var i = 0; i < pool.length; i++) {
+      var e = pool[i];
+      if (typeof e.line !== 'number') continue;
+      var keys = [e[idf], e.id, e.name, e.label];
+      for (var k = 0; k < keys.length; k++) {
+        if (keys[k] !== undefined && keys[k] !== null && String(keys[k]) === String(sel[0].id)) {
+          line = e.line; break;
+        }
+      }
+      if (line !== null) break;
+    }
+  }
+  // どこにも無く、id が数字なら行番号そのもの (gitGraph)
+  if (line === null && /^\d+$/.test(String(sel[0].id))) {
+    var n = Number(sel[0].id);
+    if (n >= 1 && n <= mmdText.split(String.fromCharCode(10)).length) line = n;
+  }
+  if (line === null) return;
+  var wrap = document.createElement('div');
+  wrap.id = 'ma-goto-line';
+  wrap.style.cssText = 'margin-bottom:8px;';
+  wrap.innerHTML = '<button id="ma-goto-line-btn" title="本文のこの行へ移動" ' +
+    'style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-secondary);' +
+    'padding:2px 8px;border-radius:3px;cursor:pointer;font-size:11px;">' + line + ' 行目へ</button>';
+  propsEl.insertBefore(wrap, propsEl.firstChild);
+  var btn = document.getElementById('ma-goto-line-btn');
+  if (!btn) return;
+  btn.addEventListener('click', function() { gotoEditorLine(line); });
+}
+
+// エディタの指定行へカーソルを移し、その行が見えるところまでスクロールする。
+function gotoEditorLine(line) {
+  if (!editorEl) return;
+  var lines = editorEl.value.split(String.fromCharCode(10));
+  if (line < 1 || line > lines.length) return;
+  var pos = 0;
+  for (var i = 0; i < line - 1; i++) pos += lines[i].length + 1;
+  editorEl.focus();
+  try { editorEl.setSelectionRange(pos, pos + lines[line - 1].length); } catch (e) { /* 型による */ }
+  var lh = parseFloat(getComputedStyle(editorEl).lineHeight) || 18;
+  // 画面の中ほどに置く (先頭に寄せると前後が見えない)
+  editorEl.scrollTop = Math.max(0, (line - 1) * lh - editorEl.clientHeight / 2);
+  syncLineNumbers();
+}
+
 function renderProps() {
   var snap = (refreshCause === 'editor') ? snapshotAddForm() : null;
   withFocusKept(function() {
@@ -806,6 +1051,7 @@ function renderProps() {
     applyListFilter();
   });
   if (snap) restoreAddForm(snap);
+  showSelectedLine();
   // パネルの中身が入れ替わると高さも変わる。帯の出し入れはここで見る。
   updatePropsOverflowHint();
 }
@@ -1000,6 +1246,8 @@ function zoomToFit() {
 // Base name of the file the user opened, so saving writes back to the same name
 // instead of a fresh download. Cleared when the diagram is replaced wholesale.
 var loadedFileName = '';
+// 開いたファイルの改行コード。新規の文書は LF。
+var loadedEol = String.fromCharCode(10);
 
 // Text as of the last save/open. The diagram only lives in this tab — there is no
 // autosave and no server — so closing it threw the work away without a word.
@@ -1095,7 +1343,11 @@ var saveHandle = null;
 // 「既に改行で終わっていれば足さない」にすると、2つ目のケースで利用者が
 // 打った末尾の改行が往復のたびに消える (実際そうなっていた)。
 function fileBody() {
-  return mmdText + '\n';
+  var body = mmdText + String.fromCharCode(10);
+  // 開いたファイルが CRLF なら CRLF で書き戻す (loadedEol は開く経路で決まる)。
+  var crlf = String.fromCharCode(13) + String.fromCharCode(10);
+  if (loadedEol === crlf) return body.split(String.fromCharCode(10)).join(crlf);
+  return body;
 }
 
 function downloadAsFile() {
@@ -1505,10 +1757,22 @@ function init() {
       setZoom(1.0);
       // 書き出し側で付けた末尾改行を1つだけ落とす (fileBody と対称)。
       // 落とさないと、保存 → 開き直しのたびに末尾の空行が1つ増えていく。
-      mmdText = String(ev.target.result || '').replace(/\n$/, '');
+      // 開いたファイルの改行コードを覚えて、保存でそのまま書き戻す。
+      //
+      // `<textarea>` の値は**ブラウザが LF に正規化する** (HTML の仕様)。
+      // そのため CRLF の .mmd を開くと、こちらが何もしなくても LF になり、
+      // 保存すると**ファイル全体が書き換わる**。実測: 4行の CRLF 文書を
+      // 開いて保存すると CRLF 0 / LF 5。Windows で作った図を1つ触るたびに
+      // git の差分がファイル全体になり、レビューで中身が読めなくなる。
+      var _raw = String(ev.target.result || '');
+      var _crlf = String.fromCharCode(13) + String.fromCharCode(10);
+      loadedEol = (_raw.indexOf(_crlf) >= 0) ? _crlf : String.fromCharCode(10);
+      mmdText = _raw.split(_crlf).join(String.fromCharCode(10))
+        .replace(new RegExp(String.fromCharCode(10) + '$'), '');
       loadedFileName = openedName;
       // ファイルを開いたときも文書は入れ替わる。
-      if (currentModule && currentModule.resetTransientState) currentModule.resetTransientState();
+      resetAllTransientState();
+      clearListFilter();
       // 別のファイルを開いたら、前の保存先への参照は捨てる。
       // 残しておくと、開いたつもりの無いファイルを上書きする。
       saveHandle = null;
@@ -2347,11 +2611,19 @@ function init() {
     // ブラウザによって Shift+z の e.key は 'Z' にも 'z' にもなるので、
     // 文字の大小ではなく **shiftKey で** 分ける。
     if (e.ctrlKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z') && !e.isComposing) {
-      e.preventDefault(); window.MA.history.undo();
+      e.preventDefault();
+      // 合図が工具列ボタンの無効化しか無く、キーボードで押している人には
+      // **どこまで戻ったかが分からなかった**。実測: 90打鍵したあと押し続けると
+      // 自分が編集を始める前 (起動時のひな形) まで無言で戻る。
+      var couldUndo = window.MA.history.canUndo();
+      window.MA.history.undo();
+      showUndoDepth(couldUndo ? '元に戻しました' : 'これ以上戻せません');
     } else if (e.ctrlKey && (e.key === 'y' || ((e.key === 'Z' || e.key === 'z') && e.shiftKey)) && !e.isComposing) {
       // Ctrl+Shift+Z は Figma / draw.io / VSCode で Redo 。Shift 併用だと e.key は 'Z' に
       // なるので、小文字比較だけだと分岐に入らない。
-      e.preventDefault(); window.MA.history.redo();
+      e.preventDefault(); var couldRedo = window.MA.history.canRedo();
+      window.MA.history.redo();
+      showUndoDepth(couldRedo ? 'やり直しました' : 'これ以上やり直せません');
     } else if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
       e.preventDefault();
       saveFileAs();
@@ -2385,6 +2657,13 @@ function init() {
     } else if ((e.key === 'e' || e.key === 'E') && !e.ctrlKey && !e.metaKey && !e.altKey && !inInput && !inEditor) {
       e.preventDefault();
       focusEditor();
+    } else if (e.key === 'F1' && !e.ctrlKey && !e.altKey) {
+      // `?` は本文に打てる文字なので、エディタと入力欄では出せない。
+      // **利用者が一番長くいる場所 (エディタ) でだけヘルプを呼べなかった。**
+      // 実測: エディタにカーソルがある状態で `?` を押すと、ヘルプは出ず
+      // 本文に「?」が入る。F1 はどこにいても効かせる。
+      e.preventDefault();
+      toggleShortcutHelp();
     } else if (e.key === '?' && !inInput && !inEditor) {
       // ショートカットが12個あるのに、それを知る手段が画面に無かった。
       // キーボード中心の人にとって一番価値のある部分が伝わっていない。
@@ -2533,7 +2812,8 @@ function init() {
       loadedFileName = '';
       // 文書が入れ替わったので、モジュールが持っている一時状態を捨てさせる。
       // 実装していないモジュールは何もしなくてよい (フォームを毎回作り直すため)。
-      if (mod.resetTransientState) mod.resetTransientState();
+      resetAllTransientState();
+      clearListFilter();
       markSaved();
       suppressSync = true;
       editorEl.value = mmdText;

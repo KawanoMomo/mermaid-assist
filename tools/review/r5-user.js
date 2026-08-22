@@ -23,10 +23,17 @@ const MAX_CLICKS_CONNECT = 3;     // 線を1本引く
 const MAX_UNDO_PER_EDIT = 1;      // 1編集を取り消す
 const MAX_MS_FEEDBACK = 1500;     // 操作してから画面に出るまで
 
-const TYPES = ['gantt', 'flowchart', 'block-beta', 'classDiagram', 'erDiagram', 'stateDiagram'];
+// 図種の一覧を直書きしていた。**検査の中身は図種に依存していない**のに、
+// 一覧だけが範囲を狭めていた。r1 / r2 / r6 / r11 / r12 / r14 / r18 は
+// 契約ベースへ書き換え済みで、この検査には書き換えが届いていなかった。
+const TYPES = ['gantt', 'sequenceDiagram', 'flowchart', 'stateDiagram', 'classDiagram',
+  'erDiagram', 'requirementDiagram', 'block-beta', 'timeline', 'mindmap', 'gitGraph',
+  'pie', 'journey', 'quadrantChart', 'xychart-beta', 'sankey-beta', 'C4Context',
+  'packet-beta', 'architecture-beta', 'kanban', 'radar-beta'];
 
 (async () => {
   const findings = [];
+  const excluded = [];   // 重ね合わせを持たない図種 (E2 の既知の制限)
   const b = await chromium.launch();
 
   for (const t of TYPES) {
@@ -42,7 +49,19 @@ const TYPES = ['gantt', 'flowchart', 'block-beta', 'classDiagram', 'erDiagram', 
     // U1 図の要素を1クリックで選べるか
     const hit = p.locator('#overlay-layer [data-element-id], #overlay-layer .overlay-bar').first();
     if ((await hit.count()) === 0) {
-      findings.push({ module: t, fn: 'U1 選択', what: '図の要素をクリックで選べない (オーバーレイが無い)' });
+      // 重ね合わせを持たない図種がある。mermaid が DSL の id を SVG に出さず、
+      // 位置由来の id (`node-1` / `edge_0_1`) しか無いので、並べ替えると
+      // 別の要素を指す。**入れないと決めている既知の制限** (E 区分 E2) で、
+      // `record-claims.js` が毎回実測して記録の正しさを確かめている。
+      //
+      // ここで指摘にすると、既知の制限を毎回言い直すだけになる。
+      // ただし黙って捨てない — **0件が何件分の0なのか**を出す
+      // (この規約は r16 / r23 / r24 が持っていて、この検査には無かった)。
+      // U1〜U3 だけを飛ばす。U4 (Undo) 以降は重ね合わせに依らないので、
+      // ここで `continue` すると**その図種の残りの検査ごと落ちる**
+      // (r18 が K1 の失敗で K2〜K5 を丸ごと捨てていたのと同じ形。
+      //  一度直した抜けを、別の検査で作りかけた)。
+      excluded.push(t);
     } else {
       const t0 = Date.now();
       await hit.click({ force: true });
@@ -143,5 +162,9 @@ const TYPES = ['gantt', 'flowchart', 'block-beta', 'classDiagram', 'erDiagram', 
   }
 
   await b.close();
+  if (excluded.length) {
+    console.log('  (重ね合わせが無く U1〜U3 を試せない: ' + excluded.length + ' 図種) ' +
+      excluded.join(',') + '  ← E2 の既知の制限。U4 以降は全図種で見ている');
+  }
   report('r5-user', findings, { examined: TYPES.length, total: 21 });
 })();

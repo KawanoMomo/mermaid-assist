@@ -163,7 +163,7 @@ window.MA.modules.xychartBeta = (function() {
         '<div style="margin-bottom:12px;font-size:11px;color:var(--text-secondary);">XY Chart</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">設定</label>' +
-          P.fieldHtml('Title', 'xy-title', m.title) +
+          P.fieldHtml('タイトル', 'xy-title', m.title) +
           P.primaryButtonHtml('xy-set-title', 'Title 適用') +
           '<div style="height:6px;"></div>' +
           '<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-primary);margin-bottom:6px;">' +
@@ -315,14 +315,15 @@ window.MA.modules.xychartBeta = (function() {
       },
       delete: function(text, lineNum) { return deleteSeries(text, lineNum); },
       update: function(text, lineNum, field, value) { return updateSeries(text, lineNum, field, value); },
+      // 素の行入れ替えは**図の宣言行と入れ替わって図を壊す**。
+      // 同じ種類の要素が乗っている行としか入れ替えない。
       moveUp: function(text, lineNum) {
-        if (lineNum <= 1) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum - 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, -1, (parseXY(text).elements || []));
       },
       moveDown: function(text, lineNum) {
-        var total = text.split('\n').length;
-        if (lineNum >= total) return text;
-        return window.MA.textUpdater.swapLines(text, lineNum, lineNum + 1);
+        return window.MA.textUpdater.moveElementLine(
+          text, lineNum, 1, (parseXY(text).elements || []));
       },
       connect: function(text) { return text; },
     },

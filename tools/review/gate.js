@@ -13,8 +13,8 @@ const path = require('path');
 const ROOT = process.argv[2] || process.cwd();
 
 // 下限。既存の件数を割り込んだら、テストが消されたということ。
-const MIN_UNIT = 970;
-const MIN_E2E = 406;
+const MIN_UNIT = 1084;
+const MIN_E2E = 435;
 const MIN_RENDER = 34;          // rename 26 + delete 8
 const MIN_RENDER_SUITES = 2;    // case ファイルの本数。1本消されても気付けるように
 
@@ -61,7 +61,7 @@ check('G4/G5', 'e2e', (!eFail || +eFail[1] === 0) && ePass >= MIN_E2E,
 // 並行レビュー。4観点すべてで指摘ゼロ。
 // 実行済みの結果を読む (gate から起動すると2重に走って遅い)。
 const outDir = path.join(__dirname, 'out');
-const reviewers = ['r1-destructive', 'r2-delete', 'r3-render', 'r4-ui', 'r5-user', 'r6-move', 'r7-consistency', 'r8-scale', 'r9-workflow', 'r10-roundtrip', 'r11-specialchars', 'r12-noop', 'r13-unknown-syntax', 'r14-boundary', 'r15-state-carryover', 'r16-count-parity', 'r17-undo-redo', 'r18-keyboard-only', 'r19-coverage', 'r20-unicode-names', 'r21-reachable', 'r22-silent-failure'];
+const reviewers = ['r1-destructive', 'r2-delete', 'r3-render', 'r4-ui', 'r5-user', 'r6-move', 'r7-consistency', 'r8-scale', 'r9-workflow', 'r10-roundtrip', 'r11-specialchars', 'r12-noop', 'r13-unknown-syntax', 'r14-boundary', 'r15-state-carryover', 'r16-count-parity', 'r17-undo-redo', 'r18-keyboard-only', 'r19-coverage', 'r20-unicode-names', 'r21-reachable', 'r22-silent-failure', 'r23-add-renders', 'r24-move-renders', 'terms'];
 //
 // 出力の**鮮度**も見る。ここを見ていなかったせいで、変異注入したときの
 // 結果ファイルがそのまま残り、ゲートが古いソースへの指摘を読んでいた。
@@ -169,6 +169,53 @@ try {
 } catch (e) { missingDoc.push('docs/backlog.md が読めない'); }
 check('DOC', '棚卸しと実体の対応', missingDoc.length === 0,
   missingDoc.length ? ('棚卸しに記録が無い: ' + missingDoc.join(', ')) : '全レビュアーが記録されている');
+
+// 棚卸しの散文が主張している「測れる事実」が今も正しいこと。
+//
+// A 区分 (テストで守られている) は抜き取り10件すべて記録どおりだったのに対し、
+// E 区分 (判断を書いた文章のみ) は **5件中4件が誤っていた**。
+// 同じ「済」でも、機械が触れる形かどうかで寿命が違う。
+//
+// `record-claims.js` は G1 (move: false のまま) / E2 (使える id を出さない) /
+// E7 (別名の ; は引用符でも通らない) を実測する。
+// 価値判断 (G2 のパネル構成、G3 の複写の意味) は正しく散文なので対象外。
+let recFail = [];
+try {
+  const f = path.join(outDir, 'record-claims.json');
+  if (!fs.existsSync(f)) recFail.push('未実行');
+  else if (fs.statSync(f).mtimeMs < srcTime) recFail.push('ソースより古い');
+  else {
+    const items = JSON.parse(fs.readFileSync(f, 'utf8'));
+    items.forEach((x) => recFail.push(x.module + '.' + x.fn));
+  }
+} catch (e) { recFail.push('読めない: ' + e.message); }
+check('REC', '棚卸しの主張の検証', recFail.length === 0,
+  recFail.length ? recFail.join(' / ') : '3件の主張が今も正しい');
+
+// バックログ (G区分) の**前提**が今も成り立っていること。
+//
+// G区分は「やらないが捨てていない」項目で、それぞれに先送りしてよい理由が
+// 書いてある。理由が崩れたら先送りできないのに、**崩れたことを誰も
+// 監視していなかった**。
+//
+// 実例: G4 は「契約経由で add を呼ぶのは検査とテストだけ」を理由に
+// 先送りし、復活条件を「その経路を作る時点」と書いた。**その経路は6ラウンド後に
+// 私自身が r8 を書き換えたときに作っていた** — 気付いたのは偶然だった。
+//
+// 人が決める項目 (訳す範囲・案の選択) は自動化できない。**どちらなのかを
+// 項目ごとに宣言させる**ところまでを機械で強制する。
+let premiseFail = [];
+try {
+  const f = path.join(outDir, 'backlog-premises.json');
+  if (!fs.existsSync(f)) premiseFail.push('未実行');
+  else if (fs.statSync(f).mtimeMs < srcTime) premiseFail.push('ソースより古い');
+  else {
+    const items = JSON.parse(fs.readFileSync(f, 'utf8'));
+    items.forEach((x) => premiseFail.push(x.module + '.' + x.fn));
+  }
+} catch (e) { premiseFail.push('読めない: ' + e.message); }
+check('PREMISE', 'バックログの前提', premiseFail.length === 0,
+  premiseFail.length ? premiseFail.join(' / ') : '全項目の前提が成り立っている');
 
 const failed = results.filter(r => !r.ok);
 console.log('');
