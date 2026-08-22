@@ -829,6 +829,27 @@ function applyListFilter() {
       listFilterText = box.value;
       filterRows();
     });
+    // 絞り込んだあと、その行へ行くのに**追加フォーム全体を通過する**。
+    // 実測 (1366x768、40ノードを1行に絞ったあと): **Tab 14回**。
+    // 「探す → 直す」は1日に何度も踏む流れなので、そのたびに14打鍵増える。
+    //
+    // 配置は変えずに、Enter で残った最初の行へ飛ばす
+    // (絞り込み欄で Enter を押したら結果へ、は一般的な作法)。
+    box.addEventListener('keydown', function(e) {
+      if (e.key !== 'Enter' || e.isComposing) return;
+      e.preventDefault();
+      var rows2 = propsEl.querySelectorAll('.ma-list-row');
+      for (var k = 0; k < rows2.length; k++) {
+        if (rows2[k].style.display === 'none') continue;
+        // 行の中で最初に押せるもの (編集ボタン) へ移す。無ければ行自体。
+        var btn = rows2[k].querySelector('button');
+        var target = btn || rows2[k];
+        if (!btn) target.setAttribute('tabindex', '-1');
+        target.focus();
+        target.scrollIntoView({ block: 'nearest' });
+        return;
+      }
+    });
   }
   filterRows();
 }
