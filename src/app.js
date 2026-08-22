@@ -703,11 +703,73 @@ function showParseErrorBanner(err) {
   // 1つも無いのに構文を疑わせるので、何も言わないより高くつく。
   // 分かっているのは「描けなかった」ことだけなので、そこまでを言う。
   el.textContent = cause || ('図を描けませんでした — 表示しているのは直前に描けた図です');
+
+  // どの行が悪いかを言う (FEAT-011)。
+  //
+  // mermaid は行番号を**返している**のに、こちらが捨てていた。
+  // 実測 (6種類の構文誤りすべて): 帯は「図を描けませんでした」だけで
+  // 行番号が出ず、どこを直せばよいか分からなかった。
+  // 一方 mermaid の例外には
+  //   message: "Parse error on line 6: ...^ Expecting 'SQE', ..."
+  //   hash.loc.first_line: 5
+  // が入っている。**捨てている情報を拾って出すだけ**。
+  //
+  // 外部でも同じ不満が挙がっている:「括弧の位置がずれると、問題を
+  // 指し示さない不可解な失敗になる」(2026-08-22 確認)。
+  var line = parseErrorLine(err);
+  if (line) {
+    var jump = document.createElement('button');
+    jump.id = 'parse-error-goto';
+    jump.type = 'button';
+    jump.textContent = line + ' 行目へ';
+    jump.title = '構文が崩れている行にカーソルを移します';
+    // 押したら本文のその行へ飛ぶ。既にある gotoEditorLine を使う
+    // (行へ飛ぶ仕組みを二重に持たない)。
+    jump.addEventListener('click', function() { gotoEditorLine(line); });
+    el.appendChild(document.createTextNode(' '));
+    el.appendChild(jump);
+  }
   el.hidden = false;
+}
+
+// mermaid の例外から「何行目か」を取り出す。
+//
+// 2通りの持ち方があり、どちらか一方しか無いことがある:
+//   hash.loc.first_line … 0 起点。実測で `D --> E["E"` の誤りに 5 が入り、
+//                         本文の行番号は 6 だった (+1 する)
+//   message の "Parse error on line 6" … 1 起点。そのまま使える
+// 両方無ければ null を返し、行番号は出さない (推測で行を指さない)。
+function parseErrorLine(err) {
+  if (!err) return null;
+  // 本文の行数。**どちらの経路にも同じ範囲検査を掛ける。**
+  //
+  // 最初は message 側にしか掛けておらず、2行の文書で「3 行目へ」と出た
+  // (閉じ括弧の欠落は入力の終端で気付かれるので、mermaid は本文の末尾より
+  // 1つ先を指す)。飛べない行を指すボタンは、無いより悪い。
+  var max = String(mmdText || '').split(String.fromCharCode(10)).length;
+  var clamp = function(n) {
+    if (!isFinite(n) || n < 1) return null;
+    return n > max ? max : n;   // 末尾より先を指したら末尾に丸める
+  };
+  try {
+    var h = err.hash;
+    if (h && h.loc && typeof h.loc.first_line === 'number' && h.loc.first_line >= 0) {
+      return clamp(h.loc.first_line + 1);
+    }
+    var m = /on line (\d+)/i.exec(String(err.message || err));
+    if (m) return clamp(parseInt(m[1], 10));
+  } catch (e) { /* 取り出せなければ出さない */ }
+  return null;
 }
 function hideParseErrorBanner() {
   var el = document.getElementById('parse-error-banner');
-  if (el) { el.hidden = true; el.classList.remove('warn'); }
+  if (el) {
+    el.hidden = true;
+    el.classList.remove('warn');
+    // 中身も消す。隠すだけだと「N 行目へ」のボタンが DOM に残り、
+    // 次のエラーまで**古い行番号を指したまま**になる (id で拾うと読めてしまう)。
+    el.textContent = '';
+  }
 }
 
 // 図は描けているが、入れた文字の一部が落ちているときの帯。
@@ -2785,6 +2847,27 @@ function init() {
                !document.getElementById('shortcut-help').hasAttribute('hidden')) {
       toggleShortcutHelp(false);
       focusPreview();
+    } else if (e.key === 'Escape' && inEditor) {
+      // エディタから図へ戻る (UI-054)。
+      //
+      // **エディタに入るとキーボードだけでは出られなかった。** Tab は字下げに
+      // 使うので (ADR-011)、外へ出す別のキーが要る。実測: エディタに焦点がある
+      // 状態で Escape / Ctrl+Tab / Shift+Tab / F6 / Ctrl+Shift+Tab / F1 /
+      // Ctrl+E / Ctrl+L の**8種すべてで焦点が動かなかった**。
+      //
+      // さらに `A` (追加フォームへ) / `E` (エディタへ) / 矢印 / Delete は
+      // どれも「図にフォーカスがあるとき」が条件で、その図には
+      // **`tabindex` が付いておらず Tab では入れない** (body から Tab を20回
+      // 押しても toolbar → editor で止まる)。つまりキーボード操作層の入口が
+      // マウス専用だった。
+      //
+      // 図に戻れば既存の `A` / `E` / 矢印がそのまま効く。`focusPreview` は
+      // 既にあり、`tabindex="-1"` を付けて焦点を移す。**経路だけが無かった。**
+      //
+      // エディタでの Escape は今まで何もしていなかったので、奪う操作は無い。
+      e.preventDefault();
+      focusPreview();
+      showTransient('図に移りました — E でエディタへ / A で追加フォームへ / ↑↓ で要素を選ぶ', 3500);
     } else if (e.key === 'Escape') {
       // Escape has to get out of connection mode too. Without it the only way
       // to leave was to complete the edge — clicking anywhere else on the canvas
