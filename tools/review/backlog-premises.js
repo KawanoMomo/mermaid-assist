@@ -50,7 +50,6 @@ const read = (rel) => {
 // 期限を過ぎていたら FAIL する。予告したのに実行しない、が起きなくなる。
 const SINCE = {
   G1: { since: 33, deadline: null },
-  G8: { since: 44, deadline: 54 },
   G9: { since: 50, deadline: null },
 };
 
@@ -189,7 +188,10 @@ ids.forEach((id) => {
     ageText = ' (' + waited + 'サイクル';
     if (age.deadline) {
       ageText += ' / 期限 R' + age.deadline;
-      if (now > age.deadline) {
+      // 「ラウンド N までに」なので、**N に達した時点で到来**。
+      // 最初 `now > deadline` にしていて、期限のラウンドを丸ごと
+      // 見逃していた — **N4 が防ぐはずの失敗を N4 自身がやっていた**。
+      if (now >= age.deadline) {
         findings.push({ module: id, fn: '期限の超過',
           what: 'ラウンド' + age.deadline + ' を期限として予告したが、' +
                 'いまラウンド' + now + '。**予告どおり凍結するか、期限を引き直す**' });
