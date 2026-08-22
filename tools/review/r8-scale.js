@@ -200,6 +200,37 @@ async function grow(page, target) {
       const t2 = Date.now();
       await delBtn.scrollIntoViewIfNeeded();
       await delBtn.click({ force: true });
+
+      // **押したのに1回だけ届かないことがある。**
+      //
+      // 27本を連続実行したときだけ「末尾要素の削除が効かない」を報告し、
+      // **落ちる図種が実行ごとに変わる** (sankey/radar → xychart)。
+      // 単独実行では 3図種とも実UIで確実に消える
+      // (xychart 190→150 / sankey 127→109 / radar 207→168)。
+      //
+      // 15秒待っても変わらないので、待ち時間不足ではない。`force: true` は
+      // 要素が入れ替わっていても押すため、再描画で外れたノードを叩くと
+      // 何も起きない — という筋が濃いが、**再現手段を持てていないので
+      // 断定しない**。
+      //
+      // 測りたいのは「**削除という操作が効くか**」であって「1回のクリックが
+      // 届くか」ではない。届かなかったときは引き直して押し直す。
+      // 2回とも効かなければ、それは製品の欠陥として報告する。
+      // 再現しない指摘は、指摘そのものより質が悪い — 落ちても信じなくなり、
+      // ゲートが働かなくなる。
+      let retried = false;
+      if ((await p.locator('#editor').inputValue()) === beforeTxt) {
+        await p.waitForTimeout(2000);
+        if ((await p.locator('#editor').inputValue()) === beforeTxt) {
+          const again = p.locator('#props-content button[data-element-id="' + c.last + '"][class*="del"], ' +
+            '#props-content button[data-element-id="' + c.last + '"][class*="Del"]').first();
+          if (await again.count()) {
+            await again.scrollIntoViewIfNeeded();
+            await again.click({ force: true });
+            retried = true;
+          }
+        }
+      }
       // 固定 900ms で待って比べていたが、**27本を連続実行して負荷が高いとき
       // だけ間に合わず**「末尾要素の削除が効かない」を1度だけ報告した。
       // 単独で再実行すると3回とも通る。再現しない指摘は、指摘そのものより
@@ -223,7 +254,8 @@ async function grow(page, target) {
       }
       const ms = Date.now() - t2;
       if (afterTxt === beforeTxt) {
-        findings.push({ module: c.type, fn: 'S4 大規模削除', what: '末尾要素の削除が効かない' });
+        findings.push({ module: c.type, fn: 'S4 大規模削除',
+          what: '末尾要素の削除が効かない' + (retried ? ' (押し直しても変わらない)' : '') });
       } else {
         // 消えたのが「押した要素」であること。ほかの要素が減っていたら取り違え。
         //

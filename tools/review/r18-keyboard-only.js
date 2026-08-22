@@ -75,9 +75,18 @@ const MAX_TAB = 30;   // これを超えて届かないなら実用上「到達�
     await p.evaluate(() => { var e = document.getElementById('editor'); if (e) e.focus(); });
     await p.keyboard.press('Escape');   // エディタ → 図 (A117 で足した経路)
     await p.waitForTimeout(400);
+    // **要素の id を直接見てはいけない。**
+    // ここは長く `a.id === 'preview-pane'` と書いていた。UI-073 で焦点を
+    // #preview-container (実際にスクロールする要素) へ移したとき、
+    // **振る舞いは良くなったのに 21図種すべてで誤報**し、K0 で打ち切るため
+    // 網羅率が 0/21 に落ちた (実測: A/E/矢印/Delete はどれも動いていた)。
+    //
+    // 見たいのは「エディタから出て図の操作層に入れたか」。
+    // 図の領域の中に焦点があるかで見る。同じ誤りを e2e でも2件踏んだ。
     const enteredDiagram = await p.evaluate(() => {
       var a = document.activeElement;
-      return !!(a && a.id === 'preview-pane');
+      var pane = document.getElementById('preview-pane');
+      return !!(a && pane && (a === pane || pane.contains(a)));
     });
     if (!enteredDiagram) {
       findings.push({ module: type, fn: 'K0 図に入る',
