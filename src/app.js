@@ -809,6 +809,34 @@ function clearListFilter() {
   var box = document.getElementById('ma-list-filter');
   if (box) box.value = '';
 }
+// 絞り込みで残った最初の行へ焦点を移す。
+//
+// **その場で捕まえた要素を使ってはいけない。** キーを押した瞬間と
+// 焦点を当てる瞬間の間にパネルが作り直されることがあり、捕まえた要素は
+// 文書から外れている (gitGraph で実測: `attached=false`)。
+// flowchart では作り直しが起きず、**1図種で確かめて全体に効くと思い込んだ**。
+//
+// 取り直して当てる。まだ作り直し中なら少しだけ待って繰り返す。
+function focusFirstVisibleRow(tries) {
+  if (!propsEl || tries <= 0) return;
+  setTimeout(function() {
+    var rows = propsEl.querySelectorAll('.ma-list-row');
+    for (var k = 0; k < rows.length; k++) {
+      if (rows[k].style.display === 'none') continue;
+      var btn = rows[k].querySelector('button');
+      var target = btn || rows[k];
+      if (!btn) target.setAttribute('tabindex', '-1');
+      target.focus();
+      if (document.activeElement === target) {
+        target.scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      break;   // 当たらなかった = 作り直しの最中。もう一度試す
+    }
+    focusFirstVisibleRow(tries - 1);
+  }, 60);
+}
+
 function applyListFilter() {
   if (!propsEl) return;
   var rows = propsEl.querySelectorAll('.ma-list-row');
@@ -838,17 +866,7 @@ function applyListFilter() {
     box.addEventListener('keydown', function(e) {
       if (e.key !== 'Enter' || e.isComposing) return;
       e.preventDefault();
-      var rows2 = propsEl.querySelectorAll('.ma-list-row');
-      for (var k = 0; k < rows2.length; k++) {
-        if (rows2[k].style.display === 'none') continue;
-        // 行の中で最初に押せるもの (編集ボタン) へ移す。無ければ行自体。
-        var btn = rows2[k].querySelector('button');
-        var target = btn || rows2[k];
-        if (!btn) target.setAttribute('tabindex', '-1');
-        target.focus();
-        target.scrollIntoView({ block: 'nearest' });
-        return;
-      }
+      focusFirstVisibleRow(6);
     });
   }
   filterRows();
