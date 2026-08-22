@@ -1030,6 +1030,14 @@ window.MA.modules.flowchart = (function() {
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">形状</label><select id="sel-node-shape" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + shapeOpts + '</select></div>' +
         window.MA.properties.connectButtonHtml('sel-node-connect') +
         window.MA.properties.actionBarHtml('sel-node', {
+        // ノードの前後挿入は出さない。**フローチャートはノードの並び順に
+        // 意味を持たない** — 構造を決めるのはエッジで、テキスト上の順序は
+        // 読みやすさの問題でしかない。「この前に挿入」を出すと、押した人は
+        // 流れに割り込めたと思うのに、実際は行が1つ増えるだけで線は繋がらない。
+        // 流れに割り込む操作は「エッジの行き先を変える + 新しい線を引く」で、
+        // 実測 3クリック + 4打鍵 + 線を引く操作1回 (R66)。
+        // 並び順に意味がある図種 (sequence / timeline / state / class / er) は
+        // insertBefore/After を出している。
           insertBefore: false, insertAfter: false,
           move: true, delete: true,
           labels: { delete: 'ノード削除' },
@@ -1108,6 +1116,14 @@ window.MA.modules.flowchart = (function() {
         '<div style="margin-bottom:8px;"><label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">To</label><select id="sel-edge-to" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' + toOpts + '</select></div>' +
         fieldHtml('ラベル', 'sel-edge-label', edge.label) +
         window.MA.properties.actionBarHtml('sel-edge', {
+        // ノードの前後挿入は出さない。**フローチャートはノードの並び順に
+        // 意味を持たない** — 構造を決めるのはエッジで、テキスト上の順序は
+        // 読みやすさの問題でしかない。「この前に挿入」を出すと、押した人は
+        // 流れに割り込めたと思うのに、実際は行が1つ増えるだけで線は繋がらない。
+        // 流れに割り込む操作は「エッジの行き先を変える + 新しい線を引く」で、
+        // 実測 3クリック + 4打鍵 + 線を引く操作1回 (R66)。
+        // 並び順に意味がある図種 (sequence / timeline / state / class / er) は
+        // insertBefore/After を出している。
           insertBefore: false, insertAfter: false,
           move: false, delete: true,
           labels: { delete: 'エッジ削除' },
