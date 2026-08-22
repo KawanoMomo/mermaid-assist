@@ -1450,8 +1450,23 @@ function hasUnsavedWork(text, saved, template) {
 //
 // Order: the name the file was opened under, then the diagram's own title, then
 // the diagram type with a date so at least the files sort and identify.
-function downloadBaseName(fileName, title, type, now) {
-  var base = sanitizeFileName(fileName || '') || sanitizeFileName(title || '');
+// 保存する名前を決める。
+//
+// **図のタイトルを名前に使わない (UI-066)。**
+//
+// 以前は `title` を使っていたので、**同じひな形から作った図が全部同じ名前**に
+// なった (実測: gantt のひな形はどれも `プロジェクト計画.mmd`)。
+// 上書きはブラウザが ' (1)' を付けて避けるが、**保存先に同名が並び、
+// 開くまでどれがどれか分からない**。
+//
+// かつ規則が2通りあった: 起動直後は `プロジェクト計画.mmd`、図種を切り替えると
+// `sequenceDiagram-20260823.mmd`。**同じ「新規の図」なのに名前の付き方が違う。**
+// 常に `<図種>-<日付>` に揃える (2026-08-23 決定)。
+//
+// **開いたファイル名は残す。** そちらは保存先の取り違えを防ぐために要る
+// (`設計-A.mmd` を開いたら `設計-A.mmd` に書き戻す)。
+function downloadBaseName(fileName, type, now) {
+  var base = sanitizeFileName(fileName || '');
   if (base) return base;
   var d = now || new Date();
   var stamp = d.getFullYear() +
@@ -1473,8 +1488,7 @@ function sanitizeFileName(s) {
 }
 
 function currentBaseName() {
-  return downloadBaseName(loadedFileName, parsed && parsed.title,
-    currentModule && currentModule.type);
+  return downloadBaseName(loadedFileName, currentModule && currentModule.type);
 }
 
 function openFile() {
