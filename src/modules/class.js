@@ -631,10 +631,22 @@ window.MA.modules.classDiagram = (function() {
         props.connectButtonHtml('sel-class-connect') +
         props.actionBarHtml('sel-class', {
           insertBefore: false, insertAfter: false,
-          // move は無効。_is*Line が「宣言行か」で判定しており、ブロック形式のクラス (`class Dog {`) を宣言行と誤判定し、他クラスの本体に飲み込ませる。
-          // mermaid の parse も render も通るため無言で壊れる。述語をブレース深度
-          // ベースに直すまで UI から出さない (敵対レビュー指摘)。
-          move: false, delete: true,
+          // move を再び出す (G1)。
+          //
+          // 止めていた理由は `_moveClassStep` の `_is*Line` が「宣言行か」で
+          // 判定しており、ブロック形式のクラス (`class Dog {`) を他クラスの
+          // 本体に飲み込ませることだった。**その実装はもう使っていない。**
+          // 契約経路 (`operations.moveUp`) は `moveElementLine` を使い、
+          // 要素の**ブロック単位**で入れ替える。
+          //
+          // 実測 (`class Animal {…} class Dog {…} class Cat {…}` で Dog を上へ):
+          //   古い経路 (moveClassUp)      → **変化なし** (空振り)
+          //   契約経路 (operations.moveUp) → Dog,Animal,Cat にブロックごと移動
+          //
+          // er / state は同じ扱いにしない。要素の `line` が**宣言行ではなく
+          // 関係行**を指しており (実測: er は両方とも line=2 の関係行、
+          // state は遷移行)、動かしても並びが変わらない。
+          move: true, delete: true,
           labels: { delete: 'クラス削除' },
         });
 
@@ -663,7 +675,8 @@ window.MA.modules.classDiagram = (function() {
 
       props.bindActionBar('sel-class', {
         up: function() {
-          var newText = moveClassUp(ctx.getMmdText(), cls.line);
+          // ブロック単位で入れ替える契約経路を使う (古い moveClassUp は空振りした)
+          var newText = window.MA.modules.classDiagram.operations.moveUp(ctx.getMmdText(), cls.line);
           if (newText === ctx.getMmdText()) return;
           window.MA.history.pushHistory();
           ctx.setMmdText(newText);
@@ -671,7 +684,7 @@ window.MA.modules.classDiagram = (function() {
           ctx.onUpdate();
         },
         down: function() {
-          var newText = moveClassDown(ctx.getMmdText(), cls.line);
+          var newText = window.MA.modules.classDiagram.operations.moveDown(ctx.getMmdText(), cls.line);
           if (newText === ctx.getMmdText()) return;
           window.MA.history.pushHistory();
           ctx.setMmdText(newText);

@@ -196,9 +196,20 @@ async function grow(page, target) {
       const t2 = Date.now();
       await delBtn.scrollIntoViewIfNeeded();
       await delBtn.click({ force: true });
-      await p.waitForTimeout(900);
+      // 固定 900ms で待って比べていたが、**27本を連続実行して負荷が高いとき
+      // だけ間に合わず**「末尾要素の削除が効かない」を1度だけ報告した。
+      // 単独で再実行すると3回とも通る。再現しない指摘は、指摘そのものより
+      // 質が悪い — 落ちても信じなくなるので、ゲートが働かなくなる。
+      //
+      // 変わるまで待ち、上限 (MAX_MS_DELETE) を超えたときだけ報告する。
+      // 本当に効かない実装なら何秒待っても変わらないので、検出力は落ちない。
+      let afterTxt = beforeTxt;
+      while (Date.now() - t2 < MAX_MS_DELETE) {
+        afterTxt = await p.locator('#editor').inputValue();
+        if (afterTxt !== beforeTxt) break;
+        await p.waitForTimeout(50);
+      }
       const ms = Date.now() - t2;
-      const afterTxt = await p.locator('#editor').inputValue();
       if (afterTxt === beforeTxt) {
         findings.push({ module: c.type, fn: 'S4 大規模削除', what: '末尾要素の削除が効かない' });
       } else {

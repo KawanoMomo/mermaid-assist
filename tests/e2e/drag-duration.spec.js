@@ -77,3 +77,36 @@ test.describe('duration 記法のガントでドラッグできる', () => {
     expect(s).toContain('after t1');
   });
 });
+
+// A116: マイルストーンを起点にする書き方で較正が 0 のままだった。
+//
+//     節目 :milestone, m1, 2026-03-01, 0d
+//     実装 :t2, after m1, 10d
+//
+// m1 は開始日を持つが期間が 0d (割ると壊れる)。t2 は期間を持つが開始日が無い。
+// どちらも単独では失格で、2点較正にも足りず pxPerDay=0 のままだった。
+// **倍率は幅と期間から、原点は開始日を持つバーから**、別々の相手に取ればよい。
+// マイルストーンは菱形で描かれ矩形として照合できない (barRects[0] が null) ので、
+// 原点には `after` を解決した開始日 (resolveSpan) を使う。
+//
+// 実測 (直す前 / 後): pxPerDay 0 → 54.4
+const MILESTONE = ['gantt', '    dateFormat YYYY-MM-DD', '    section S',
+  '    節目 :milestone, m1, 2026-03-01, 0d',
+  '    実装 :t2, after m1, 10d', ''].join(String.fromCharCode(10));
+
+test.describe('マイルストーンを起点にしたガント', () => {
+  test('pxPerDay が 0 のままにならない', async ({ page }) => {
+    await load(page, MILESTONE);
+    const px = await page.evaluate(() => window.MA.modules.gantt.getCalibration().pxPerDay);
+    expect(px).toBeGreaterThan(0);
+  });
+
+  test('動かせないバーは理由を出す', async ({ page }) => {
+    await load(page, MILESTONE);
+    // 掴めるバーは `after m1` の t2 だけ。動かないこと自体は仕様だが、
+    // **黙って動かない**のは壊れているようにしか見えない。
+    await dragBar(page, 't2', 70);
+    const s = await page.locator('#status-info').textContent();
+    expect(s).toContain('after m1');
+  });
+});

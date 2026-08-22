@@ -555,6 +555,19 @@ window.MA.modules.state = (function() {
           // mermaid の parse も render も通るため無言で壊れる。述語をブレース深度
           // ベースに直すまで UI から出さない (敵対レビュー指摘)。
           move: false, delete: true,
+          // できないことを**言う** (UI-049)。
+          //
+          // 最初に書いた理由 (「行が遷移行を指すため」) はひな形だけを測ったもので、
+          // `state Idle` のような宣言行を持つ文書では成り立たなかった。
+          // **本当の理由はもっと悪い — 図が壊れる。**
+          //
+          // 実測 (コンポジット状態を含む文書で Active を上へ):
+          //     state Active {
+          //     state Idle          ← 隣の状態が Active の**中に取り込まれた**
+          //         [*] --> Warm
+          //     }
+          // mermaid の parse も render も通るので、無言で別の図になる。
+          moveDisabledReason: 'コンポジット状態を動かすと、隣の状態がその中に取り込まれて図が壊れます',
           labels: { delete: '状態削除' },
         });
 

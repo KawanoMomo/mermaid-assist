@@ -135,6 +135,12 @@ window.MA.modules.blockBeta = (function() {
         var parentIndent = lines[i].match(/^(\s*)/)[1] || '';
         var step = parentIndent.indexOf('\t') !== -1 ? '\t' : '  ';
         var indent = parentIndent + step;
+        // すでに子がいるなら、その字下げに合わせる。固定幅で足すと、4字下げで
+        // 書かれたファイルに 2字下げの行が入り、隣と揃わない (実測: 既存の子が
+        // 8 に対し足した子が 2)。図は描けるが、Git の差分にはそのまま出る。
+        for (var ci = i + 1; ci < endIdx; ci++) {
+          if (lines[ci].trim()) { indent = lines[ci].match(/^(\s*)/)[1] || indent; break; }
+        }
         lines.splice(endIdx, 0, indent + token);
         return lines.join('\n');
       }

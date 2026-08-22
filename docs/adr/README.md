@@ -22,6 +22,12 @@
 | [024](ADR-024-calibration-input-soundness.md) | 較正の入力健全性 — 横断 ADR-010 の前提の明文化 | アーキテクチャ | 承認 | 2026-08-19 |
 | [025](ADR-025-gantt-overview-detail-mode.md) | Gantt の概観/詳細モードと mermaid config の一元化 | アーキテクチャ | 承認 | 2026-08-19 |
 | [026](ADR-026-conditional-auto-quote.md) | 記号を含むラベルの条件付き auto-quote | インターフェース | 承認 | 2026-08-21 |
+| [027](ADR-027-updater-signature-unification.md) | 更新関数のシグネチャ統一 | インターフェース | 承認 | 2026-08-21 |
+| [028](ADR-028-move-block-semantics.md) | 並べ替えは同じ種類の隣の要素とブロック単位で入れ替える | インターフェース | 承認 | 2026-08-22 |
+| [029](ADR-029-add-kind-alias.md) | `operations.add` は `parse` が返す kind を別名として受ける | インターフェース | 承認 | 2026-08-22 |
+| [030](ADR-030-adaptive-render-debounce.md) | 描き直しの待ち時間は前回かかった時間から決める | 性能 | 承認 | 2026-08-22 |
+| [031](ADR-031-field-label-three-words.md) | パネルの欄名は「ID / ラベル / タイトル」の3語に限る | UI/UX | 承認 | 2026-08-22 |
+| [032](ADR-032-backlog-premise-gate.md) | 先送りした項目は前提を機械に見張らせる | プロセス | 承認 | 2026-08-22 |
 
 ## 命名規則
 

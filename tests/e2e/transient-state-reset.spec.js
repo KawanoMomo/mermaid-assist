@@ -100,3 +100,49 @@ test('図種を切り替えてから開いても、前の文書の親グルー�
   await openDoc(page, 'ts-b2.mmd', BLOCK_DOC);
   expect(await selectedParent(page)).not.toContain('G1');
 });
+
+// A114: 同じ形が c4 にも残っていた。block を直したとき19モジュールを数えて
+// いなかった。c4 は**種類**まで覚えるので block より重い — 外部システムを
+// 足したあと別の図を開くと、種類も親境界も残り、要素の意味が変わる。
+//
+// 実測 (直す前 / 後): System_Ext / B1  →  Person / (なし・トップレベル)
+const C4_DOC = (who) => ['C4Context',
+  '    title ' + who,
+  '    Enterprise_Boundary(B1, "B1") {',
+  '      Person(' + who + 'u, "U", "d")',
+  '    }',
+  '    System(' + who + 's, "S", "d")'].join(NL) + NL;
+
+async function selectedById(page, id) {
+  return page.evaluate((i) => {
+    const s = document.getElementById(i);
+    if (!s) return '(欄が無い)';
+    const o = s.options[s.selectedIndex];
+    return o ? o.text.trim() : '(選択なし)';
+  }, id);
+}
+
+test('c4: 別の文書を開いたら、前の文書の種類と親境界は残らない', async ({ page }) => {
+  page.on('dialog', (d) => d.accept());
+  await page.goto(HTML_URL);
+  await page.waitForSelector('#preview-svg svg', { timeout: 20000 });
+  await page.waitForTimeout(600);
+  await openDoc(page, 'ts-c1.mmd', C4_DOC('a'));
+
+  // 既定と違う種類・親を選んで足す
+  await page.locator('#c4-add-kind').selectOption('System_Ext');
+  await page.locator('#c4-add-parent').selectOption('B1');
+  await page.waitForTimeout(300);
+  await page.locator('#c4-add-id').fill('newone');
+  await page.locator('#c4-add-label').fill('New');
+  await page.locator('#c4-add-btn').click();
+  await page.waitForTimeout(1600);
+  // 汚れたことを先に確かめる。ここが既定のままだと、後の判定は
+  // 「そもそも覚えていない」を見ているだけになる。
+  expect(await selectedById(page, 'c4-add-kind')).toContain('System_Ext');
+  expect(await selectedById(page, 'c4-add-parent')).toContain('B1');
+
+  await openDoc(page, 'ts-c2.mmd', C4_DOC('b'));
+  expect(await selectedById(page, 'c4-add-kind')).not.toContain('System_Ext');
+  expect(await selectedById(page, 'c4-add-parent')).not.toContain('B1');
+});

@@ -253,6 +253,25 @@ window.MA.properties = (function() {
                 escHtml(labels.down || '↓ 下へ') + '</button>';
       }
       html += '</div>';
+    } else if (opts.moveDisabledReason) {
+      // 並べ替えができない図種で、ボタンを**消さずに理由つきで出す** (UI-049)。
+      //
+      // classDiagram では ↑↓ が出るのに erDiagram では出ない。利用者から見ると
+      // その差は内部事情 (要素の line が宣言行を指すか関係行を指すか) で決まって
+      // おり、画面から読めない。**無いものは探しても見つからない**ので、
+      // 探す時間がそのまま失われる。
+      //
+      // 理由を書いたモジュールだけがこの形になる。書かなければ今までどおり
+      // 何も出ない — 全パネルを一度に変えると、まだ測っていない図種まで
+      // 「できない理由」を名乗ることになる。
+      html += '<div class="action-bar-row" data-action-bar-row="move-disabled">';
+      html += '<button id="' + idPrefix + '-up" class="action-btn" disabled ' +
+              'title="' + escHtml(opts.moveDisabledReason) + '">' +
+              escHtml(labels.up || '↑ 上へ') + '</button>';
+      html += '<button id="' + idPrefix + '-down" class="action-btn" disabled ' +
+              'title="' + escHtml(opts.moveDisabledReason) + '">' +
+              escHtml(labels.down || '↓ 下へ') + '</button>';
+      html += '</div>';
     }
     html += '<div id="' + idPrefix + '-extra" class="action-bar-extra"></div>';
     if (includeDelete) {

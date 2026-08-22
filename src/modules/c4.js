@@ -341,6 +341,15 @@ window.MA.modules.c4 = (function() {
       if (parent && parent.endLine > parent.line) {
         insertAt = parent.endLine - 1; // just before the closing brace
         indentUnit = (lines[parent.line - 1].match(/^(\s*)/)[1] || '') + '    ';
+        // すでに子がいるなら、その字下げに合わせる。固定の4字で足すと、8字下げで
+        // 書かれたファイルに 4字下げの行が入り、隣と揃わない。図は描けるが、
+        // Git の差分では揃っていない行がそのまま見える。
+        for (var ci = parent.line; ci < parent.endLine - 1; ci++) {
+          if (lines[ci] && lines[ci].trim()) {
+            indentUnit = lines[ci].match(/^(\s*)/)[1] || indentUnit;
+            break;
+          }
+        }
       }
     }
     // mermaid accepts a duplicate alias without complaint, but the property panel
@@ -820,6 +829,12 @@ window.MA.modules.c4 = (function() {
   }
 
   return {
+    // A113 と同じ形。block を直したときに c4 を数えていなかった。
+    // c4 は**種類**まで覚えるので block より重い。実測: 外部システム
+    // (System_Ext) を境界 B1 に足したあと、同じ名前の B1 を持つ別の図を
+    // 開くと、種類も親境界もそのまま残り、押すと `System_Ext(zz)` が
+    // B1 の中に入った。要素の**意味**が変わるので図の読み違いに直結する。
+    resetTransientState: function() { lastAddKind = 'Person'; lastAddParent = ''; },
     type: 'C4Context',
     displayName: 'C4',
     ELEMENT_KINDS: ELEMENT_KINDS,
@@ -885,7 +900,14 @@ window.MA.modules.c4 = (function() {
     operations: {
       add: function(text, kind, props) {
         if (REL_KINDS.indexOf(kind) >= 0) return addRel(text, kind, props.from, props.to, props.label, props.tech);
-        if (ELEMENT_KINDS.indexOf(kind) >= 0) return addElement(text, kind, props.id, props.label, props.descr, props.tech);
+        // 境界の中に入れる指定を**契約経路だけ落としていた**。UI パネルは
+        // parent を渡している (c4-add-btn) のに、ここは引数が1つ足りず、
+        // 契約どおり呼ぶと常にトップレベルに出ていた。黙って別の場所に置く。
+        // 呼び手の名前ゆれ (parentId / parent) はどちらも受ける。
+        if (ELEMENT_KINDS.indexOf(kind) >= 0) {
+          return addElement(text, kind, props.id, props.label, props.descr, props.tech,
+            props.parentId || props.parent);
+        }
         return text;
       },
       // Boundary-aware, like the property panel. These entry points are not wired
