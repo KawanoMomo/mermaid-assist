@@ -4,11 +4,14 @@ window.MA.modules = window.MA.modules || {};
 
 window.MA.modules.blockBeta = (function() {
   var COLUMNS_RE = /^columns\s+(\d+)\s*$/;
-  // `block:id`, `block:id columns N`, and the column-span form `block:id:N`.
-  // Every place that asks "is this a group start?" must use this one regex —
-  // a depth counter and an identity check that disagree will pair the wrong
-  // braces and delete the wrong range.
-  var GROUP_START_RE = /^block:([A-Za-z_][A-Za-z0-9_-]*)(?::\d+)?\s*(?:columns\s+\d+)?\s*$/;
+  // `block:id`, `block:id columns N`, the column-span form `block:id:N`, and the
+  // anonymous `block` (mermaid accepts a group with no id).
+  // Every place that asks "is this a group start?" must use this one regex — a
+  // depth counter and an identity check that disagree will pair the wrong `end`
+  // and delete the wrong range. The anonymous form belongs here for the same
+  // reason: it opens a block that `end` closes, so omitting it makes the counter
+  // miss an opening and treat an inner `end` as the outer group's.
+  var GROUP_START_RE = /^block(?::([A-Za-z_][A-Za-z0-9_-]*)(?::\d+)?)?\s*(?:columns\s+\d+)?\s*$/;
   var BLOCK_TOKEN_RE = /([A-Za-z_][A-Za-z0-9_-]*)(?:\["([^"]*)"\]|\(\("([^"]*)"\)\)|\("([^"]*)"\))?/g;
   var LINK_RE = /^([A-Za-z_][A-Za-z0-9_-]*)\s*(?:--\s*"?([^"]*?)"?\s*)?-->\s*([A-Za-z_][A-Za-z0-9_-]*)\s*$/;
 
@@ -21,6 +24,7 @@ window.MA.modules.blockBeta = (function() {
     if (!text || !text.trim()) return result;
     var lines = text.split('\n');
     var relCounter = 0;
+    var anonCounter = 0;
     var groupStack = [];
     for (var i = 0; i < lines.length; i++) {
       var lineNum = i + 1;
@@ -36,8 +40,16 @@ window.MA.modules.blockBeta = (function() {
       var gm = trimmed.match(GROUP_START_RE);
       if (gm) {
         var parent = groupStack.length ? groupStack[groupStack.length - 1] : null;
-        result.elements.push({ kind: 'group', id: gm[1], label: gm[1], parentId: parent, line: lineNum });
-        groupStack.push(gm[1]);
+        // An anonymous `block` has no id to address it by, but the panel still needs
+        // a stable handle — otherwise it lists `undefined` and its children report
+        // an undefined parent. Synthesise one, the way relations already do.
+        var anonymous = gm[1] === undefined;
+        var gid = anonymous ? '__anon_' + (anonCounter++) : gm[1];
+        result.elements.push({
+          kind: 'group', id: gid, label: anonymous ? '(無名グループ)' : gm[1],
+          parentId: parent, line: lineNum, anonymous: anonymous,
+        });
+        groupStack.push(gid);
         continue;
       }
 
@@ -95,7 +107,12 @@ window.MA.modules.blockBeta = (function() {
   // adding a block to g1 lands inside g10 whenever g10 appears first.
   function isGroupStart(trimmed, id) {
     var m = trimmed.match(GROUP_START_RE);
-    return !!m && m[1] === id;
+    if (!m) return false;
+    // Anonymous groups carry a synthesised id (`__anon_N`) that does not appear in
+    // the text. Callers that address one always pin the line as well, so matching
+    // on "this line opens an anonymous group" is enough here.
+    if (m[1] === undefined) return /^__anon_/.test(String(id));
+    return m[1] === id;
   }
 
   function addNestedBlock(text, parentId, id, label) {
@@ -321,8 +338,10 @@ window.MA.modules.blockBeta = (function() {
 
         // 親グループの選択は再描画をまたいで保持する。同じ group に続けて入れる
         // ケースが普通なので、毎回「なし」に戻ると選び直しが要る。
+        // 無名グループは合成 id でしか指せず、テキスト上は同じ `block` 行なので
+        // 「どれに入れるか」を確実に決められない。親としては選ばせない。
         var groupOpts = [{ value: '', label: '（なし・トップレベル）', selected: !lastAddParent }].concat(
-          groups.map(function(g) {
+          groups.filter(function(g) { return !g.anonymous; }).map(function(g) {
             var depth = 0, cur = g;
             while (cur && cur.parentId) {
               depth++;
