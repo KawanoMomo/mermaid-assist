@@ -65,9 +65,15 @@ test.describe('一覧の名前と Fit', () => {
     expect(rows.length).toBe(2);
     // 前提: この名前は実際に切れている (切れていないなら測定条件が壊れている)
     expect(rows[0].cut).toBe(true);
-    // 切れた分を読む手段がある。**末尾まで含む**こと (先頭だけでは見分けられない)
-    expect(rows[0].title).toBe('ComM_ChannelStateManager_MainFunction');
-    expect(rows[1].title).toBe('ComM_ChannelStateManager_Init');
+    // 切れた分を読む手段がある。**末尾まで含む**こと (先頭だけでは見分けられない)。
+    //
+    // 行の title は「名前 + 補足 (`(N0, rect)` など)」になったので完全一致では見ない。
+    // ただし toContain には緩めない —— 名前が途中で切られていないことを担保したいので、
+    // 先頭一致で固定する。`toContain` だと `ComM_Channel` だけ入っていても通ってしまい、
+    // このテストが守りたかったもの (末尾まで読める) を守れなくなる。
+    const startsWith = (s, p) => s.slice(0, p.length) === p;
+    expect(startsWith(rows[0].title, 'ComM_ChannelStateManager_MainFunction')).toBe(true);
+    expect(startsWith(rows[1].title, 'ComM_ChannelStateManager_Init')).toBe(true);
   });
 
   test('Fit を押して見える範囲が減らない — 縦長の図', async ({ page }) => {

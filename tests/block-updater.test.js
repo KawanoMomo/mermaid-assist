@@ -495,3 +495,80 @@ describe('B1d: インデント文字の追随', function() {
     expect(x.match(/^(\s*)/)[1]).toBe('    ');
   });
 });
+
+describe('無名 block グループ', function() {
+  var T = 'block-beta\n  columns 1\n  block:outer\n    block\n      x\n      y\n    end\n    z\n  end\n  w\n';
+
+  test('N1: 無名グループを含む outer を削除しても孤立 end が残らない', function() {
+    var p = block.parseBlock(T);
+    var o = p.elements.filter(function(e) { return e.id === 'outer'; })[0];
+    var out = block.deleteBlock(T, o.line, 'outer');
+    expect(out.split('\n').filter(function(l) { return l.trim() === 'end'; }).length).toBe(0);
+    expect(out).not.toContain('block:outer');
+    expect(out).toContain('w');
+  });
+
+  test('N2: 無名グループが group として parse される', function() {
+    var p = block.parseBlock(T);
+    var anon = p.elements.filter(function(e) { return e.kind === 'group' && e.anonymous; });
+    expect(anon.length).toBe(1);
+    expect(typeof anon[0].id).toBe('string');
+  });
+
+  test('N3: 無名グループの子の parentId が合成 id を指す', function() {
+    var p = block.parseBlock(T);
+    var anon = p.elements.filter(function(e) { return e.anonymous; })[0];
+    var x = p.elements.filter(function(e) { return e.id === 'x'; })[0];
+    expect(x.parentId).toBe(anon.id);
+  });
+
+  test('N4: 複数の無名グループが別々の id を持つ', function() {
+    var t = 'block-beta\n  block\n    a\n  end\n  block\n    b\n  end\n';
+    var p = block.parseBlock(t);
+    var anons = p.elements.filter(function(e) { return e.anonymous; });
+    expect(anons.length).toBe(2);
+    expect(anons[0].id === anons[1].id).toBe(false);
+  });
+
+  test('N5: 無名グループを行番号で削除できる', function() {
+    var p = block.parseBlock(T);
+    var anon = p.elements.filter(function(e) { return e.anonymous; })[0];
+    var out = block.deleteBlock(T, anon.line, anon.id);
+    expect(out).toContain('block:outer');
+    expect(out).not.toContain('x');
+    expect(out.split('\n').filter(function(l) { return l.trim() === 'end'; }).length).toBe(1);
+  });
+});
+
+describe('無名グループを id で正しく指し分ける', function() {
+  var T = 'block-beta\n  columns 1\n  block\n    x\n  end\n  block\n    y\n  end\n  z\n';
+
+  test('N6: __anon_1 への追加が __anon_0 に入らない', function() {
+    var out = block.addNestedBlock(T, '__anon_1', 'nb', 'NB');
+    var lines = out.split('\n');
+    var nb = -1, xi = -1, yi = -1;
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].indexOf('nb') >= 0) nb = i;
+      if (lines[i].trim() === 'x') xi = i;
+      if (lines[i].trim() === 'y') yi = i;
+    }
+    expect(nb).toBeGreaterThan(yi);
+    expect(nb).toBeGreaterThan(xi);
+  });
+
+  test('N7: __anon_0 と __anon_1 で出力が異なる', function() {
+    var a = block.addNestedBlock(T, '__anon_0', 'nb', 'NB');
+    var b2 = block.addNestedBlock(T, '__anon_1', 'nb', 'NB');
+    expect(a === b2).toBe(false);
+  });
+
+  test('N8: 無名グループを削除しても他方は残る', function() {
+    var p = block.parseBlock(T);
+    var anons = p.elements.filter(function(e) { return e.anonymous; });
+    expect(anons.length).toBe(2);
+    var out = block.deleteBlock(T, anons[1].line, anons[1].id);
+    expect(out).toContain('x');
+    expect(out).not.toContain('y');
+    expect(out.split('\n').filter(function(l) { return l.trim() === 'end'; }).length).toBe(1);
+  });
+});

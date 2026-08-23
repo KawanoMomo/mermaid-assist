@@ -121,8 +121,11 @@ window.MA.properties = (function() {
 
   // fieldHtml: standard text input field with label
   function fieldHtml(label, id, value, placeholder) {
+    // `for` を落とすと、この入力欄は支援技術から名前なしに見える。実測では
+    // placeholder が名前に流用され、Tech と Description がどちらも「省略可」という
+    // 同じ名前になっていた。ラベルは既に隣にあるので、結び付けるだけで直る。
     return '<div style="margin-bottom:8px;">' +
-      '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">' + escHtml(label) + '</label>' +
+      '<label for="' + escHtml(id) + '" style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">' + escHtml(label) + '</label>' +
       '<input id="' + id + '" type="text" value="' + escHtml(value || '') + '" placeholder="' + escHtml(placeholder || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
     '</div>';
   }
@@ -136,8 +139,10 @@ window.MA.properties = (function() {
       opts += '<option value="' + escHtml(options[i].value) + '"' + sel + '>' + escHtml(options[i].label) + '</option>';
     }
     var fontStyle = monoFont ? 'font-family:var(--font-mono);' : '';
+    // fieldHtml と同じ理由で `for` が要る。実測では From と To の2つが同じ選択肢を
+    // 持つ無名の combobox として並び、支援技術では見分けがつかなかった。
     return '<div style="margin-bottom:8px;">' +
-      '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">' + escHtml(label) + '</label>' +
+      '<label for="' + escHtml(id) + '" style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">' + escHtml(label) + '</label>' +
       '<select id="' + id + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;' + fontStyle + '">' + opts + '</select>' +
     '</div>';
   }
@@ -157,6 +162,10 @@ window.MA.properties = (function() {
     return '</div>';
   }
 
+  // 説明用の隠し span に振る id の連番。パネルは innerHTML で作り直されるので、
+  // 増え続けても DOM に残るのは今表示している行ぶんだけ。
+  var descSeq = 0;
+
   // listItemHtml: row with label + select-edit and delete buttons
   // opts: { label, sublabel?, selectClass, deleteClass, dataElementId?, dataLine?, dataEndLine?, mono? }
   function listItemHtml(opts) {
@@ -166,29 +175,80 @@ window.MA.properties = (function() {
     if (opts.dataElementId !== undefined) dataAttrs += ' data-element-id="' + escHtml(opts.dataElementId) + '"';
     if (opts.dataLine !== undefined) dataAttrs += ' data-line="' + opts.dataLine + '"';
     if (opts.dataEndLine !== undefined) dataAttrs += ' data-end-line="' + opts.dataEndLine + '"';
+    // 「編集」も「✕」も、どの行のものかがボタン名から分からない。支援技術の
+    // ボタン一覧では同名が並ぶだけで選べないので、行のラベルを名前に入れる。
+    var selAria = ' aria-label="' + escHtml('「' + String(opts.label).trim() + '」を編集') + '"';
     var selectBtn = opts.selectClass ?
-      '<button class="' + opts.selectClass + '"' + dataAttrs + ' style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' : '';
+      '<button class="' + opts.selectClass + '"' + dataAttrs + selAria + ' style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;min-height:24px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' : '';
     // deleteLabel / deleteTitle let a module warn about a cascading delete on the
     // button itself. The row's text is ellipsised at the panel width, so a warning
     // placed in the label is frequently invisible.
     var delLabel = opts.deleteLabel ? escHtml(opts.deleteLabel) : '✕';
-    // 記号だけのボタンは、何を消すのか読み取れない。deleteTitle を渡していない
-    // モジュールにも行のラベルから既定の説明を与える。ホバーとスクリーンリーダの
+    // 記号だけのボタンは、何を消すのか読み取れない。ホバーとスクリーンリーダの
     // 両方でここが唯一の手がかりになる。
-    var delTitleText = opts.deleteTitle || ('「' + String(opts.label) + '」を削除');
-    var delTitle = ' title="' + escHtml(delTitleText) + '"';
-    var deleteBtn = opts.deleteClass ?
-      '<button class="' + opts.deleteClass + '"' + dataAttrs + delTitle + ' style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">' + delLabel + '</button>' : '';
+    //
+    // deleteTitle が受け取るのは「削除すると 3 要素 / 2 リレーションが消えます」の
+    // ような**動作の説明だけ**で、どの行のものかは付けない。行の識別はここで一度だけ
+    // 足す。以前は deleteTitle を渡していない経路 (この関数を通る 41 か所のうち
+    // 36 か所) で既定値に行ラベルが入り、そこへさらに前置していたため
+    // 「A」「A」を削除 と二重に読み上げられていた。
+    //
+    // 名前 (aria-label) と説明 (aria-describedby) を分ける。
+    //
+    // title と aria-label を同一文字列にしていたとき、Chromium は
+    // 「名前に採用されなかった title」を description に回すため、
+    // **name と description がバイト一致**していた (20要素の C4 で削除ボタン 39個
+    // すべてが description === name。実測)。NVDA は「オブジェクトの説明を報告」が
+    // 既定 ON、JAWS / VoiceOver も description を読むので、同じ全文が2回読まれる。
+    // 20要素で読み上げ 3,522 文字、name 最長 74 文字。
+    //
+    // aria-describedby は description の計算で title より優先されるので、
+    // マウス用ツールチップ (title) を残したまま重複だけ消える。
+    // 識別部分は削らない —— 100要素で名前を「削除」に縮めると 199 個の同名ボタンが
+    // 並び、支援技術のボタン一覧で選べなくなる (この関数が解こうとした問題そのもの)。
+    var rowLabel = String(opts.label).trim();   // mindmap は階層を表す先頭空白を持つ
+    var delIdent = '「' + rowLabel + '」を削除';
+    var deleteBtn = '';
+    var descSpan = '';
+    if (opts.deleteClass) {
+      var delAria = ' aria-label="' + escHtml(delIdent) + '"';
+      var delTitle = '', delDescribedBy = '';
+      // 名前が既に言っていることは説明しない。c4 / block / flowchart は
+      // カスケードが無い行に `deleteTitle: '削除'` を渡すので、そのまま説明にすると
+      // 名前「「X」を削除」の後ろで「削除」ともう一度読まれる (実測で41個中22個)。
+      var hasExtraInfo = opts.deleteTitle && ('「' + rowLabel + '」を' + opts.deleteTitle) !== delIdent;
+      if (hasExtraInfo) {
+        // カスケードの警告がある場合だけ、詳細を description に回す。
+        var descId = 'ma-del-desc-' + (descSeq++);
+        descSpan = '<span id="' + descId + '" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;">' +
+          escHtml(opts.deleteTitle) + '</span>';
+        delDescribedBy = ' aria-describedby="' + descId + '"';
+        delTitle = ' title="' + escHtml('「' + rowLabel + '」を' + opts.deleteTitle) + '"';
+      }
+      // 警告が無い場合は title を付けない。付けると内容が aria-label と一致し、
+      // Chromium がそれを description に回して同じ文字列を2回読ませる。
+      // ホバーで失うのは「✕ は削除」という自明な説明だけで、行の全文は行そのものの
+      // title から今までどおり読める。
+      deleteBtn = '<button class="' + opts.deleteClass + '"' + dataAttrs + delTitle + delAria + delDescribedBy +
+        ' style="background:var(--accent-red);color:#fff;border:none;padding:4px 8px;min-width:24px;min-height:24px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">' + delLabel + '</button>';
+    }
     // 行に印を付ける。一覧の絞り込みはこの印を見て行を選ぶので、
     // 各モジュールは何もしなくてよい (41か所がこの関数を通る)。
+    // 行の文字はパネル幅で切り落とされる。既定幅でも半数以上の行が省略され、
+    // しかも `(in 親)` のような補足は行末にあるので真っ先に消える。切れた行を
+    // 読む手段が本文テキストを見に行くことしか無かったので、全文を title に置く。
+    var rowFull = String(opts.label) + (opts.sublabel ? ' ' + String(opts.sublabel) : '');
     return '<div class="ma-list-row" style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
       // 名前欄は 123px しかなく、長い名前は ellipsis で切れる。実測では
       // "ComM_ChannelStateManager_MainFunction" が "ComM_ChannelStat" までしか
       // 読めず、**先頭が共通で末尾だけ違う名前を見分けられない** (組込みの
       // BSW 名は先頭共通が普通)。gantt.js は自前の行に title を付けていたが、
       // 41か所が通るこの共有関数には無かった。切れたときの唯一の手がかりを足す。
-      '<div title="' + escHtml(String(opts.label)) + '" style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + fontStyle + '">' + escHtml(opts.label) + sub + '</div>' +
-      selectBtn + deleteBtn +
+      //
+      // 補足 (`(in 親ID)` など) も入れる。補足は行末にあるので真っ先に切れるが、
+      // 「どの親の中か」は名前と同じくらい効く手がかりになる。
+      '<div title="' + escHtml(rowFull) + '" style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + fontStyle + '">' + escHtml(opts.label) + sub + '</div>' +
+      selectBtn + deleteBtn + descSpan +
     '</div>';
   }
 
@@ -199,7 +259,9 @@ window.MA.properties = (function() {
 
   // primaryButtonHtml: full-width accent button
   function primaryButtonHtml(id, label) {
-    return '<button id="' + id + '" style="width:100%;background:var(--accent);color:#fff;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;">' + escHtml(label) + '</button>';
+    // 白文字だと accent (#7c8cf8) に対して 3.02:1 で AA に届かない。地の色は
+    // そのままに文字を暗くすると 6.28:1 になる。
+    return '<button id="' + id + '" style="width:100%;background:var(--accent);color:#0d1117;border:none;padding:5px 8px;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;">' + escHtml(label) + '</button>';
   }
 
   // dangerButtonHtml: full-width red button (for delete actions)
@@ -364,11 +426,39 @@ window.MA.properties = (function() {
       // so a line number alone cannot say which one the user pressed — resolving by
       // line picks the first every time, and pressing b's ✕ deletes a.
       var elId = btn.getAttribute('data-element-id');
+      // 押した行が一覧の何番目だったかを覚えておく。パネルは innerHTML で作り直され、
+      // 押したボタンごと DOM から消えるので、そのままだとフォーカスが body へ落ちる。
+      // 実測: 100要素の図で `c50` の ✕ を押すと、隣の `c51` の ✕ へ戻るまで **Tab 120回**。
+      // 「支援技術のボタン一覧から選べるようにする」ためにこの関数へ名前を入れたのに、
+      // 選んだ直後に居場所を失っていた。
+      var siblings = Array.prototype.slice.call(propsEl.querySelectorAll('.' + deleteClass));
+      var pressedAt = siblings.indexOf(btn);
+
+      var beforeText = ctx.getMmdText();
       var newText = useEndLine
-        ? deleteFn(ctx.getMmdText(), ln, endLn)
-        : deleteFn(ctx.getMmdText(), ln, elId);
+        ? deleteFn(beforeText, ln, endLn)
+        : deleteFn(beforeText, ln, elId);
       ctx.setMmdText(newText);
       ctx.onUpdate();
+      // 何行消えたかをその場で言う。押す前の `✕N` を持たない図種
+      // (er / class / sequence / state / mindmap) でも、実際には3〜5行消える。
+      // 空になったコンテナを畳むようにしたぶん、無警告で消える量はさらに増えた。
+      if (window.MA.reportDeleted) window.MA.reportDeleted(beforeText, newText);
+
+      // 作り直された後の一覧で、消した位置の次 → 無ければ前 → それも無ければ
+      // 一覧そのもの、の順に置く。ctx.onUpdate() が同期でパネルを作り直す実装と
+      // 非同期の実装の両方があるので、次のタスクで拾う。
+      if (pressedAt >= 0 && typeof window.setTimeout === 'function') {
+        window.setTimeout(function() {
+          var host = (typeof document !== 'undefined' && document.getElementById)
+            ? (document.getElementById('props-content') || propsEl) : propsEl;
+          if (!host || !host.querySelectorAll) return;
+          var after = host.querySelectorAll('.' + deleteClass);
+          if (!after.length) return;
+          var target = after[Math.min(pressedAt, after.length - 1)];
+          if (target && target.focus) target.focus();
+        }, 0);
+      }
     });
   }
 

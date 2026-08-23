@@ -696,4 +696,373 @@ describe('Q7: deletionImpactFrom は exact と一致する', function() {
     expect(fast.elements).toBe(2);
     expect(fast.relations).toBe(1);
   });
+
+  // 上のフィクスチャはリレーションが全部境界の外にある。境界の中に Rel がある形は
+  // 「要素を1つ消す → Rel も消える → 境界が空になって畳まれる」という連鎖になり、
+  // ここを通さないと不一致が素通りする (実際、閾値式の実装がこれで過少申告していた)。
+  var NESTED = [
+    'C4Context',
+    '    System(s0, "S0")',
+    '    System_Boundary(b1, "B1") {',
+    '        Person(s2, "S2")',
+    '        Container_Boundary(b7, "B7") {',
+    '            System_Ext(s8, "S8")',
+    '            Rel(s0, s8, "r9")',
+    '        }',
+    '    }',
+    ''
+  ].join('\n');
+
+  var INNER_REL = [
+    'C4Context',
+    '    System_Boundary(b, "社内") {',
+    '        System(a, "受注")',
+    '        Rel(a, z, "連携")',
+    '    }',
+    '    System(z, "外部")',
+    ''
+  ].join('\n');
+
+  [NESTED, INNER_REL].forEach(function(doc, di) {
+    test('Q7c-' + (di + 1) + ': 境界内に Rel がある図でも exact と一致する', function() {
+      var p = c4.parseC4(doc);
+      expect(p.elements.length).toBeGreaterThan(0);
+      for (var i = 0; i < p.elements.length; i++) {
+        var e = p.elements[i];
+        var exact = c4.deletionImpact(doc, e);
+        var fast = c4.deletionImpactFrom(p, e, doc);
+        expect(fast.elements).toBe(exact.elements);
+        expect(fast.relations).toBe(exact.relations);
+      }
+    });
+  });
+
+  test('Q7d: 入れ子境界の奥の要素は連鎖ぶんも数える', function() {
+    var p = c4.parseC4(NESTED);
+    var s8 = p.elements.filter(function(e) { return e.id === 's8'; })[0];
+    var fast = c4.deletionImpactFrom(p, s8, NESTED);
+    // s8 + 空になる b7 = 2 要素、Rel(s0, s8) = 1
+    expect(fast.elements).toBe(2);
+    expect(fast.relations).toBe(1);
+  });
+
+  // ELEMENT_KINDS に無い境界種別。素の `Boundary(...)` と `Deployment_Node(...)` は
+  // mermaid の正規構文だがパーサが elements に返さないため、件数を parsed.elements で
+  // 数えていたときは、これを跨ぐ連鎖でループが止まって過少申告していた
+  // (✕2 と出るのに文書全体が消える)。削除本体は matchBraces でテキストの波括弧を
+  // 数えているので、こちらも同じ波括弧で数える。
+  //
+  // Rel の相手は境界ではなく通常の要素にしてある。`Rel(e11, b7, ...)` のように
+  // 境界の id を指す形は mermaid.parse は通るが mermaid.render が
+  // "Cannot read properties of undefined (reading 'x')" で落ちる (実機で確認)。
+  // 描画できない形をフィクスチャに固定すると、直したい欠陥ではなく mermaid の
+  // 制限をテストで守ってしまう。
+  var BARE_BOUNDARY = [
+    'C4Context',
+    '    title T',
+    '    System_Boundary(b7, "B7") {',
+    '        Boundary(b9, "B9", "grp") {',
+    '            Boundary(b10, "B10", "grp") {',
+    '                Person(e11, "P11", "desc")',
+    '            }',
+    '        }',
+    '    }',
+    '    System(out, "外部")',
+    '    Rel(e11, out, "r")',
+    ''
+  ].join('\n');
+
+  // Deployment_Node をただ入れ子にしただけでは、畳まれる境界の中に集計対象の要素が
+  // 無いので件数に差が出ず、欠陥を素通りさせる (実測: 上の欠陥を再現させても
+  // この形だけは通ってしまった)。集計される Container_Boundary を、
+  // Deployment_Node を跨がないと空にならない位置に置く。
+  var DEPLOY_NODE = [
+    'C4Deployment',
+    '    title T',
+    '    Deployment_Node(dc, "DC") {',
+    '        Container_Boundary(env, "本番環境") {',
+    '            Deployment_Node(host, "Host") {',
+    '                Container(app, "App", "Go")',
+    '            }',
+    '        }',
+    '    }',
+    '    System(ext, "外部")',
+    '    Rel(app, ext, "呼ぶ")',
+    ''
+  ].join('\n');
+
+  [BARE_BOUNDARY, DEPLOY_NODE].forEach(function(doc, di) {
+    test('Q7e-' + (di + 1) + ': ELEMENT_KINDS に無い境界を跨いでも exact と一致する', function() {
+      var p = c4.parseC4(doc);
+      expect(p.elements.length).toBeGreaterThan(0);
+      for (var i = 0; i < p.elements.length; i++) {
+        var e = p.elements[i];
+        var exact = c4.deletionImpact(doc, e);
+        var fast = c4.deletionImpactFrom(p, e, doc);
+        expect(fast.elements).toBe(exact.elements);
+        expect(fast.relations).toBe(exact.relations);
+      }
+    });
+  });
+
+  test('Q7f: 素の Boundary の連鎖でも件数が実際の削除と合う', function() {
+    var p = c4.parseC4(BARE_BOUNDARY);
+    var e11 = p.elements.filter(function(e) { return e.id === 'e11'; })[0];
+    var fast = c4.deletionImpactFrom(p, e11, BARE_BOUNDARY);
+    // e11 と、外側の System_Boundary(b7) が畳まれて 2 要素。b9 / b10 は
+    // parsed.elements に現れないので件数には入らないが、テキストからは消える。
+    expect(fast.elements).toBe(2);
+    expect(fast.relations).toBe(1);
+    // 実際に削除したとき、数えた件数と残るテキストが食い違わないこと。
+    var after = c4.deleteElementLine(BARE_BOUNDARY, e11.line);
+    expect(after.indexOf('Boundary(b9')).toBe(-1);
+    expect(after.indexOf('Boundary(b10')).toBe(-1);
+    expect(after.indexOf('System_Boundary(b7')).toBe(-1);
+    expect(after.indexOf('Rel(e11')).toBe(-1);
+    expect(after.indexOf('System(out')).toBeGreaterThan(-1);
+  });
+
+  // 深さ50を超える入れ子。ここまでのフィクスチャはすべて深さ数段だったので、
+  // 「内側から外側へ (降順) 見る」ことと周回上限の組み合わせが正しさの条件に
+  // なっていることを1本も守っていなかった。昇順に戻すミューテーションは
+  // 1134 件すべてを通してしまい (SURVIVED)、実際には深さ55で fast=56→51、
+  // 深さ100で fast=101→51 と過少申告する。
+  [55, 120].forEach(function(depth) {
+    test('Q7h-' + depth + ': 深さ' + depth + 'の入れ子でも exact と一致する', function() {
+      var lines = ['C4Context', '    title T'];
+      for (var i = 0; i < depth; i++) {
+        lines.push(new Array(i + 2).join('    ') + '    System_Boundary(d' + i + ', "D' + i + '") {');
+      }
+      lines.push(new Array(depth + 2).join('    ') + 'Person(leaf, "L")');
+      for (var j = depth - 1; j >= 0; j--) {
+        lines.push(new Array(j + 2).join('    ') + '    }');
+      }
+      var doc = lines.join('\n') + '\n';
+      var p = c4.parseC4(doc);
+      var leaf = p.elements.filter(function(e) { return e.id === 'leaf'; })[0];
+      expect(leaf).not.toBe(undefined);
+      var exact = c4.deletionImpact(doc, leaf);
+      var fast = c4.deletionImpactFrom(p, leaf, doc);
+      // leaf + 畳まれる境界 depth 個
+      expect(exact.elements).toBe(depth + 1);
+      expect(fast.elements).toBe(exact.elements);
+      expect(fast.relations).toBe(exact.relations);
+    });
+  });
+
+  // 境界の中身がコメントだけになる形。`hasContent` から stripComment を外すと
+  // コメント行が「中身」に見えて畳まれなくなり、件数が食い違う。
+  test('Q7i: 中身がコメントだけになる境界も畳まれた前提で数える', function() {
+    var doc = [
+      'C4Context', '    title T',
+      '    System_Boundary(b1, "B1") {', '        Person(p1, "P1")', '        %% ただのメモ', '    }', ''
+    ].join('\n');
+    var p = c4.parseC4(doc);
+    var p1 = p.elements.filter(function(e) { return e.id === 'p1'; })[0];
+    var exact = c4.deletionImpact(doc, p1);
+    var fast = c4.deletionImpactFrom(p, p1, doc);
+    expect(exact.elements).toBe(2);          // p1 と b1
+    expect(fast.elements).toBe(exact.elements);
+    expect(fast.relations).toBe(exact.relations);
+  });
+
+  // `deletionImpactFrom` は renderProps が一覧の行ごとに呼ぶので、毎キーストロークの
+  // 経路に乗っている。答えは変わらないが桁で遅くなる変更 —— 「既に消えた境界を
+  // 飛ばす」を外す (実測 27.7ms → 17,329ms) や、走査を昇順に戻す (27.7ms → 211.7ms)
+  // —— を、答えだけ見るテストは1本も検出できなかった (どちらもミューテーションで
+  // SURVIVED)。
+  //
+  // しきい値は実測値から2桁ぶん離してある。現状 28ms 前後・退行時 17 秒なので、
+  // 遅いマシンや GC のばらつきで揺れる幅ではない。
+  test('Q7j: 深い入れ子でも一覧1回ぶんの再計算が現実的な時間で終わる', function() {
+    var depth = 200;
+    var lines = ['C4Context', '    title T'];
+    for (var i = 0; i < depth; i++) {
+      lines.push(new Array(i + 2).join('  ') + 'System_Boundary(d' + i + ', "D") {');
+    }
+    lines.push(new Array(depth + 2).join('  ') + 'Person(leaf, "L")');
+    for (var j = depth - 1; j >= 0; j--) lines.push(new Array(j + 2).join('  ') + '}');
+    var doc = lines.join('\n') + '\n';
+    var p = c4.parseC4(doc);
+    var started = Date.now();
+    for (var k = 0; k < p.elements.length; k++) c4.deletionImpactFrom(p, p.elements[k], doc);
+    var elapsed = Date.now() - started;
+    expect(elapsed < 2000).toBe(true);
+  });
+
+  test('Q7g: Deployment_Node を跨ぐ連鎖でも件数が実際の削除と合う', function() {
+    var p = c4.parseC4(DEPLOY_NODE);
+    var app = p.elements.filter(function(e) { return e.id === 'app'; })[0];
+    var fast = c4.deletionImpactFrom(p, app, DEPLOY_NODE);
+    // app と、host が畳まれた結果空になる env = 2 要素。dc も畳まれるが
+    // Deployment_Node は parsed.elements に現れないので件数には入らない。
+    expect(fast.elements).toBe(2);
+    expect(fast.relations).toBe(1);
+    var after = c4.deleteElementLine(DEPLOY_NODE, app.line);
+    expect(after.indexOf('Deployment_Node(host')).toBe(-1);
+    expect(after.indexOf('Container_Boundary(env')).toBe(-1);
+    expect(after.indexOf('Deployment_Node(dc')).toBe(-1);
+    expect(after.indexOf('Rel(app')).toBe(-1);
+    expect(after.indexOf('System(ext')).toBeGreaterThan(-1);
+  });
+});
+
+describe('リレーションの削除も後始末を通る', function() {
+  // 要素と境界の削除は tidyAfterDelete を通っていたのに、リレーションだけが素の
+  // deleteLine のまま残っていた。境界の中身がリレーションだけだと、✕ を1回押した
+  // 時点で空の境界が残り、mermaid が受理しない ——
+  // **GUI 操作1回で、GUI では直せない状態**になる (本文を手で編集するしかない)。
+  test('RD1: 境界の中身がリレーションだけなら、消すと境界ごと畳まれる', function() {
+    var t = [
+      'C4Context', '    title 受発注', '    System(z, "外部システム")',
+      '    System_Boundary(b, "社内") {', '        Rel(z, z, "自己参照")', '    }', ''
+    ].join('\n');
+    var rel = c4.parseC4(t).relations[0];
+    var out = c4.deleteRelLine(t, rel.line);
+    expect(out.indexOf('System_Boundary(b')).toBe(-1);
+    expect(out.indexOf('{')).toBe(-1);
+    expect(out.indexOf('System(z, "外部システム")')).toBeGreaterThan(-1);
+  });
+
+  test('RD2: 中身が残っていれば境界は畳まない', function() {
+    var t = [
+      'C4Context', '    title T', '    System(z, "外部")',
+      '    System_Boundary(b, "社内") {', '        System(a, "受注")', '        Rel(a, z, "連携")', '    }', ''
+    ].join('\n');
+    var rel = c4.parseC4(t).relations[0];
+    var out = c4.deleteRelLine(t, rel.line);
+    expect(out.indexOf('System_Boundary(b')).toBeGreaterThan(-1);
+    expect(out.indexOf('System(a, "受注")')).toBeGreaterThan(-1);
+    expect(out.indexOf('Rel(a, z')).toBe(-1);
+  });
+
+  test('RD3: 畳むときコメントは残す', function() {
+    var t = [
+      'C4Context', '    title T', '    System(z, "外部")',
+      '    System_Boundary(b, "社内") {', '        %% 連携の根拠', '        Rel(z, z, "自己")', '    }', ''
+    ].join('\n');
+    var rel = c4.parseC4(t).relations[0];
+    var out = c4.deleteRelLine(t, rel.line);
+    expect(out.indexOf('System_Boundary(b')).toBe(-1);
+    expect(out.indexOf('%% 連携の根拠')).toBeGreaterThan(-1);
+  });
+});
+
+describe('境界を畳むときの後始末', function() {
+  test('T1: 畳みと刈りが2周必要な形でも収束する', function() {
+    // x を消す → b1 が空になって畳まれる → b1 の id が消える
+    // → `Rel(a, b1)` がダングリングになって刈られる → b2 が空になって畳まれる
+    // 1周で止めると、b2 の中にダングリングな Rel が残ったままになる。
+    //
+    // ミューテーション検査で「不動点をやめて1周だけにする」が生き残ったため追加した。
+    // 既存の E1 / Q7c はどれも1周で片付く形だった。
+    var t = [
+      'C4Context', '    title T', '    System(a, "A")',
+      '    System_Boundary(b1, "B1") {', '        System(x, "X")', '    }',
+      '    System_Boundary(b2, "B2") {', '        Rel(a, b1, "r")', '    }', ''
+    ].join('\n');
+    var x = c4.parseC4(t).elements.filter(function(e) { return e.id === 'x'; })[0];
+    var out = c4.deleteElementLine(t, x.line);
+    expect(out.indexOf('System_Boundary(b1')).toBe(-1);
+    expect(out.indexOf('Rel(a, b1')).toBe(-1);
+    expect(out.indexOf('System_Boundary(b2')).toBe(-1);
+    expect(out.indexOf('{')).toBe(-1);            // 空の境界が1つも残らない
+    expect(out.indexOf('System(a, "A")')).toBeGreaterThan(-1);
+  });
+
+  test('T2: 畳むときも利用者が書いたコメントは捨てない', function() {
+    // 畳む理由は mermaid が空の境界を受理しないことであって、本文を消すことでは
+    // ない。境界があった位置へ繰り上げる (block 側の EG7 と同じ扱い)。
+    var t = [
+      'C4Context', '    title T',
+      '    System_Boundary(b, "B") {', '        %% ECU 側の内訳', '        System(s, "S")', '    }', ''
+    ].join('\n');
+    var s = c4.parseC4(t).elements.filter(function(e) { return e.id === 's'; })[0];
+    var out = c4.deleteElementLine(t, s.line);
+    expect(out.indexOf('System_Boundary(b')).toBe(-1);
+    expect(out.indexOf('%% ECU 側の内訳')).toBeGreaterThan(-1);
+  });
+
+  test('T3: 入れ子が二段まとめて畳まれてもコメントは順序どおり残る', function() {
+    var t = [
+      'C4Context', '    title T',
+      '    System_Boundary(b1, "B1") {', '        %% 外',
+      '        System_Boundary(b2, "B2") {', '            %% 内', '            System(s, "S")', '        }',
+      '    }', ''
+    ].join('\n');
+    var s = c4.parseC4(t).elements.filter(function(e) { return e.id === 's'; })[0];
+    var out = c4.deleteElementLine(t, s.line);
+    var outer = out.indexOf('%% 外');
+    var inner = out.indexOf('%% 内');
+    expect(outer).toBeGreaterThan(-1);
+    expect(inner).toBeGreaterThan(-1);
+    expect(inner > outer).toBe(true);
+  });
+});
+
+describe('境界内にリレーションがある場合の削除', function() {
+  // collapse を先に走らせると、その時点で境界は Rel 行を含むので「空でない」と
+  // 判定され、あとから prune が Rel を落として空の境界が残る。mermaid は空境界を
+  // 受理しないため、削除しただけで図が描画不能になる。
+  test('E1: 境界内の唯一の要素を消すと、境界内の Rel ごと境界が畳まれる', function() {
+    var t = 'C4Context\n    title T\n    System_Boundary(b, "社内") {\n        System(a, "受注")\n        Rel(a, z, "連携")\n    }\n    System(z, "外部")\n';
+    var p = c4.parseC4(t);
+    var a = p.elements.filter(function(e) { return e.id === 'a'; })[0];
+    var out = c4.deleteElementLine(t, a.line);
+    expect(out).not.toContain('System_Boundary');
+    expect(out.split('\n').filter(function(l) { return l.trim() === '}'; }).length).toBe(0);
+    expect(out).toContain('System(z, "外部")');
+  });
+
+  test('E2: 境界内に Rel と他要素が残るなら境界は保持される', function() {
+    var t = 'C4Context\n    System_Boundary(b, "社内") {\n        System(a, "受注")\n        System(c2, "在庫")\n        Rel(a, c2, "参照")\n    }\n';
+    var p = c4.parseC4(t);
+    var a = p.elements.filter(function(e) { return e.id === 'a'; })[0];
+    var out = c4.deleteElementLine(t, a.line);
+    expect(out).toContain('System_Boundary(b, "社内") {');
+    expect(out).toContain('System(c2, "在庫")');
+    expect(out).not.toContain('Rel(a, c2');
+  });
+
+  test('E3: 入れ子境界でも Rel 経由の連鎖が最後まで畳まれる', function() {
+    var t = 'C4Context\n    System_Boundary(o, "外") {\n        System_Boundary(i, "内") {\n            System(a, "A")\n            Rel(a, z, "x")\n        }\n    }\n    System(z, "Z")\n';
+    var p = c4.parseC4(t);
+    var a = p.elements.filter(function(e) { return e.id === 'a'; })[0];
+    var out = c4.deleteElementLine(t, a.line);
+    expect(out).not.toContain('System_Boundary');
+    expect(out).toContain('System(z, "Z")');
+  });
+});
+
+describe('kindOptionsFor: 境界⇄非境界の変換を出さない', function() {
+  // 変換には2行にまたがる波括弧の増減が要るため未対応。ミューテーション検査で
+  // フィルタを外しても全通過していた (SURVIVED) ので、候補の中身を固定する。
+  test('K1: 境界の候補に非境界の kind が混ざらない', function() {
+    var opts = c4.kindOptionsFor('System_Boundary', true).map(function(o) { return o.value; });
+    expect(opts).toContain('System_Boundary');
+    expect(opts).not.toContain('Person');
+    expect(opts).not.toContain('System');
+    expect(opts).not.toContain('Container');
+  });
+
+  test('K2: 非境界の候補に境界の kind が混ざらない', function() {
+    var opts = c4.kindOptionsFor('Person', false).map(function(o) { return o.value; });
+    expect(opts).toContain('Person');
+    expect(opts).not.toContain('System_Boundary');
+    expect(opts).not.toContain('Container_Boundary');
+    expect(opts).not.toContain('Enterprise_Boundary');
+  });
+
+  test('K3: 境界の候補には3種類すべての境界が並ぶ', function() {
+    var opts = c4.kindOptionsFor('System_Boundary', true).map(function(o) { return o.value; });
+    expect(opts).toContain('Container_Boundary');
+    expect(opts).toContain('Enterprise_Boundary');
+  });
+
+  test('K4: 候補に無い kind でも選択中のものは必ず含まれる', function() {
+    var opts = c4.kindOptionsFor('Deployment_Node', false);
+    var sel = opts.filter(function(o) { return o.selected; });
+    expect(sel.length).toBe(1);
+    expect(sel[0].value).toBe('Deployment_Node');
+  });
 });

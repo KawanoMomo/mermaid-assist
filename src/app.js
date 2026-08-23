@@ -464,9 +464,9 @@ async function refresh(skipRender) {
     previewSvgEl.style.transform = 'none';
     previewSvgEl.innerHTML =
       '<div style="max-width:680px;padding:16px;overflow-wrap:anywhere;white-space:normal;">' +
-        (cause ? '<p style="color:var(--accent-red);margin:0 0 12px 0;font-size:13px;line-height:1.6;">' +
+        (cause ? '<p style="color:var(--accent-red-text);margin:0 0 12px 0;font-size:13px;line-height:1.6;">' +
           window.MA.htmlUtils.escHtml(cause) + '</p>' : '') +
-        '<p style="color:var(--accent-red);margin:0;font-family:var(--font-mono);font-size:12px;line-height:1.5;">Render error:<br>' +
+        '<p style="color:var(--accent-red-text);margin:0;font-family:var(--font-mono);font-size:12px;line-height:1.5;">Render error:<br>' +
           String(e).replace(/</g, '&lt;') + '</p>' +
       '</div>';
     statusParseEl.textContent = 'Error';
@@ -637,6 +637,43 @@ function deleteSelectedElements(sel) {
 //
 // 一番下まで見えているときは出さない。常に出すと「まだ下がある」の合図が
 // 意味を失い、無視されるようになる。
+// `✕3` の 3 が何の数なのか、画面のどこにも書いていなかった。
+//
+// 詳細は削除ボタンの `title`（マウスのホバー）と `aria-label` / `aria-describedby`
+// （支援技術）にしかない。Chrome は `title` をキーボードのフォーカスでは出さないので、
+// **マウスを使わない晴眼者はカスケード削除の警告を一切取得できない**。
+// 「唯一の警告」がこの層に届いていなかった (WCAG 3.3.2)。
+//
+// 数字付きの ✕ が実際に出ているときだけ、一覧の手前に一度だけ凡例を出す。
+// 常設しないのは、パネルを縦に太らせないため。
+function updateCascadeLegend() {
+  var host = document.getElementById('props-content');
+  if (!host) return;
+  var old = document.getElementById('props-cascade-legend');
+  var hasCount = false;
+  var btns = host.querySelectorAll('button[class*="delete"]');
+  for (var i = 0; i < btns.length; i++) {
+    if (/^✕\s*\d+$/.test((btns[i].textContent || '').trim())) { hasCount = true; break; }
+  }
+  if (!hasCount) {
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    return;
+  }
+  if (old) return;   // 既に出ている
+  var el = document.createElement('div');
+  el.id = 'props-cascade-legend';
+  // aria-hidden — 同じ内容は各ボタンの aria-describedby から既に読まれる。
+  // ここで二重に読ませない。届いていなかったのは「見えている経路」だけ。
+  el.setAttribute('aria-hidden', 'true');
+  el.style.cssText = 'margin-bottom:6px;font-size:10px;color:var(--text-secondary);line-height:1.5;';
+  el.textContent = '✕ の数字は、そのボタンを押したとき一緒に消える件数です。';
+  var filter = document.getElementById('ma-list-filter');
+  var anchor = filter && filter.parentNode && filter.parentNode.parentNode === host ? filter.parentNode : null;
+  if (anchor && anchor.nextSibling) host.insertBefore(el, anchor.nextSibling);
+  else if (anchor) host.appendChild(el);
+  else host.insertBefore(el, host.firstChild);
+}
+
 function updatePropsOverflowHint() {
   var el = document.getElementById('props-content');
   var hint = document.getElementById('props-more');
@@ -711,18 +748,55 @@ function focusPreview() {
   if (pane && pane.focus) { pane.setAttribute('tabindex', '-1'); pane.focus(); }
 }
 
+// ヘルプを開く直前にフォーカスがあった要素。閉じたときに戻す。
+var helpReturnFocus = null;
+
 function toggleShortcutHelp(force) {
   var box = document.getElementById('shortcut-help');
   if (!box) return;
   var show = (force === undefined) ? box.hasAttribute('hidden') : force;
-  if (show) box.removeAttribute('hidden');
-  else box.setAttribute('hidden', '');
+  if (show) {
+    // 開く前の居場所を覚えて、中へフォーカスを移す。
+    // 移さないと支援技術には「何も起きていない」ように見え、role="dialog" を
+    // 付けただけでは通知にならない。閉じたときに元へ戻すのは、Escape で
+    // 抜ける導線そのものを見失わせないため。
+    helpReturnFocus = document.activeElement;
+    box.removeAttribute('hidden');
+    var closeBtn = document.getElementById('shortcut-help-close');
+    if (closeBtn && closeBtn.focus) closeBtn.focus();
+    else if (box.focus) box.focus();
+  } else {
+    box.setAttribute('hidden', '');
+    if (helpReturnFocus && helpReturnFocus.focus && document.contains(helpReturnFocus)) {
+      helpReturnFocus.focus();
+    }
+    helpReturnFocus = null;
+  }
 }
 
 function twoDigit(n) { return (n < 10 ? '0' : '') + n; }
 function savedMessage(d) {
   return '保存: ' + twoDigit(d.getHours()) + ':' + twoDigit(d.getMinutes());
 }
+// パネルの ✕ からも同じ言い方で結果を出すために公開する。
+//
+// これまで「N件削除 — Ctrl+Z で戻せます」はキーボード削除の経路にしか出て
+// おらず、一覧の ✕ を押したときは無言だった。同じ操作の結果が経路によって
+// 見え方が違う。さらに `✕N` の件数警告を持つのは C4 / flowchart / block / gantt
+// だけで、er・class・sequence・state・mindmap は `✕` のみなのに実際には
+// 3〜5行が消える (stateDiagram で `Idle` を消すと遷移3本が飛ぶ)。
+// 空になったコンテナを畳むようにしたぶん、無警告で消える量はさらに増えた。
+//
+// 押す前の警告は各モジュールが `✕N` で出す (持っているものだけ)。押した後の
+// 事実は、ここで全図種ぶん同じ形で出す。
+window.MA.reportDeleted = function(beforeText, afterText) {
+  var before = String(beforeText).split('\n').length;
+  var after = String(afterText).split('\n').length;
+  var removed = before - after;
+  if (removed <= 0) return;
+  showTransient(removed + ' 行を削除 — Ctrl+Z で戻せます');
+};
+
 function deletedMessage(n) {
   return n + '件削除 — Ctrl+Z で戻せます';
 }
@@ -982,7 +1056,17 @@ function focusFirstVisibleRow(tries) {
     var rows = propsEl.querySelectorAll('.ma-list-row');
     for (var k = 0; k < rows.length; k++) {
       if (rows[k].style.display === 'none') continue;
-      var btn = rows[k].querySelector('button');
+      // **押せる**ボタンを選ぶ。`querySelector('button')` は行の先頭ボタンを返すが、
+      // それが disabled だと `focus()` は効かず、`activeElement === target` の
+      // 判定が必ず外れて「作り直しの最中」と誤認し、6回リトライして諦めていた。
+      // gantt の先頭セクションは ↑ が disabled なので、**絞り込み欄で Enter を
+      // 押しても行へ飛べない**状態になっていた (実測: 焦点は追加フォームの
+      // ラベル欄に残る)。
+      var btn = null;
+      var cands = rows[k].querySelectorAll('button');
+      for (var c = 0; c < cands.length; c++) {
+        if (!cands[c].disabled) { btn = cands[c]; break; }
+      }
       var target = btn || rows[k];
       if (!btn) target.setAttribute('tabindex', '-1');
       target.focus();
@@ -1005,7 +1089,10 @@ function applyListFilter() {
   if (!box) {
     var wrap = document.createElement('div');
     wrap.style.cssText = 'margin-bottom:6px;';
-    wrap.innerHTML = '<input id="ma-list-filter" type="text" placeholder="一覧を絞り込む (' +
+    // aria-label を明示する。無いと placeholder が唯一のアクセシブル名になり、
+    // 打ち始めた瞬間に名前ごと消える (支援技術には無名の入力欄として残る)。
+    wrap.innerHTML = '<input id="ma-list-filter" type="text" aria-label="一覧を絞り込む" ' +
+      'placeholder="一覧を絞り込む (' +
       rows.length + '件)" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);' +
       'color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
       '<div id="ma-list-filter-count" hidden style="font-size:10px;margin-top:2px;"></div>';
@@ -1193,13 +1280,34 @@ function renderProps() {
     applyListFilter();
   });
   if (snap) restoreAddForm(snap);
+  updateCascadeLegend();
   showSelectedLine();
   // パネルの中身が入れ替わると高さも変わる。帯の出し入れはここで見る。
   updatePropsOverflowHint();
 }
 
 function renderPropsInner() {
-  if (!propsEl || !currentModule) return;
+  if (!propsEl) return;
+  // 図種を判定できないときにパネルを**前の文書のまま残していた**。
+  //
+  // 早期 return はパネルの DOM をそのままにするので、前の文書の一覧・行番号・
+  // ボタンが生きたまま残る。プレビューは新しい文書を正しく描き、ステータスバーも
+  // 前の文書の内容を出すので、異常を示すものが画面に一つも無い。その状態で ✕ を
+  // 押すと、**前の文書の行番号で今の文書の別の行が消える** (実測: C4Deployment の
+  // 図で「System(sys, ...)」の ✕ を押すと `Deployment_Node(ecu, ...) {` が消え、
+  // 孤児の `}` が残って描画不能になった)。
+  //
+  // 操作できるものを残さず、判定できないことをそのまま出す。
+  if (!currentModule) {
+    propsEl.innerHTML =
+      '<div style="padding:8px;font-size:11px;color:var(--text-secondary);line-height:1.6;">' +
+      '図の種類を判定できませんでした。<br>' +
+      '1行目の図種宣言（<code>flowchart TD</code> など）を確認してください。<br><br>' +
+      '判定できない間は、前の図の一覧をそのまま出すと<strong>別の行を消してしまう</strong>ため、' +
+      '編集用の一覧は表示しません。' +
+      '</div>';
+    return;
+  }
   // 図種による場合分けは不要になった。gantt も他の20図種と同じ
   // 4引数契約 (selData, parsedData, propsEl, ctx) で呼ぶ。
   {
@@ -1241,6 +1349,12 @@ function setZoomFromUser(z) {
     // Step off 100% in the direction asked for, rather than landing on it — the
     // first click after leaving overview should visibly do something.
     setZoom(z > zoom ? 1.1 : 0.9);
+    // 詳細モードはチャートを自然幅で描き直す (ADR-025)。概観から「－」で抜けると、
+    // 90% を掛けてもなお元より広くなる —— 実測で SVG 幅 788px → 1560px。
+    // 「縮小を押したのに広がった」と見えるので、何が起きたかを一言出す。
+    // 戻り方も添える (以前は Fit しか無く、それが画面に書かれていなかった)。
+    showTransient('詳細表示に切り替えました（全期間を実寸で描きます）。' +
+      '倍率表示を押すと概観に戻ります', 3500);
     scheduleRefresh();
     return;
   }
@@ -1355,9 +1469,40 @@ function applyMermaidConfig(parsedData) {
 function updateZoomLabel() {
   if (!zoomDisplayEl) return;
   var isGantt = currentModule && currentModule.type === 'gantt';
-  zoomDisplayEl.textContent = (isGantt && ganttViewMode === 'overview')
-    ? '概観'
+  // 詳細モードでも「詳細」と分かるようにする。以前は概観だけが名前を持ち、
+  // 詳細は「90%」としか出なかったので、**いまどちらにいるのか読み取れなかった**
+  // (「詳細」という語が画面のどこにも出ない)。
+  zoomDisplayEl.textContent = isGantt
+    ? (ganttViewMode === 'overview' ? '概観' : '詳細 ' + Math.round(zoom * 100) + '%')
     : Math.round(zoom * 100) + '%';
+  if (zoomDisplayEl.setAttribute) {
+    zoomDisplayEl.setAttribute('aria-label', isGantt
+      ? (ganttViewMode === 'overview'
+        ? '表示は概観。押すと詳細に切り替わります'
+        : '表示は詳細 ' + Math.round(zoom * 100) + '%。押すと概観に戻ります')
+      : '拡大率 ' + Math.round(zoom * 100) + '%');
+    zoomDisplayEl.disabled = !isGantt;
+    zoomDisplayEl.style.cursor = isGantt ? 'pointer' : 'default';
+  }
+}
+
+// 概観 ⇄ 詳細 の往復。
+//
+// 概観からは ＋ / － のどちらを押しても詳細へ抜けるが、詳細から概観へ戻る道は
+// Fit しか無かった。しかも詳細モードはチャートを自然幅で描き直すので、
+// **「－（縮小）」を押すと図はかえって広がる** (実測: SVG 幅 788px → 1560px、
+// 5タスク中2本が画面外)。「縮小」を押して大きくなり、戻り方も分からない、という
+// 状態だったので、倍率表示そのものを往復のスイッチにする。
+function toggleGanttViewMode() {
+  if (!currentModule || currentModule.type !== 'gantt') return;
+  if (ganttViewMode === 'overview') {
+    setGanttViewMode('detail');
+    setZoom(1.0);
+  } else {
+    setGanttViewMode('overview');
+    setZoom(1.0);
+  }
+  scheduleRefresh();
 }
 
 function setGanttViewMode(mode) {
@@ -2029,6 +2174,12 @@ function init() {
   document.getElementById('btn-zoom-fit').addEventListener('click', function() {
     zoomToFit();
   });
+  // 倍率表示そのものが概観 ⇄ 詳細のスイッチ。ツールバーを横に伸ばさずに
+  // 往復させるため、既にそこにある表示を再利用する。
+  var zoomToggleEl = document.getElementById('zoom-display');
+  if (zoomToggleEl) {
+    zoomToggleEl.addEventListener('click', function() { toggleGanttViewMode(); });
+  }
 
   // ── File input handler ───────────────────────────────────────────────────
   document.getElementById('file-input').addEventListener('change', function(e) {
@@ -2970,8 +3121,12 @@ function init() {
     } else if (e.key === 'Escape' &&
                document.getElementById('shortcut-help') &&
                !document.getElementById('shortcut-help').hasAttribute('hidden')) {
+      // ここで focusPreview() を呼ぶと、toggleShortcutHelp が戻した「開く前の
+      // 居場所」を上書きしてしまう (実測: エディタから F1 → Escape で
+      // #preview-container に着地し、打っていた場所へ戻れない)。
+      // 戻し先は toggleShortcutHelp が持っているので、そちらに任せる。
+      e.preventDefault();
       toggleShortcutHelp(false);
-      focusPreview();
     } else if (e.key === 'Escape' && inEditor) {
       // エディタから図へ戻る (UI-054)。
       //

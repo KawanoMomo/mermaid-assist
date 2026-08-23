@@ -255,29 +255,118 @@ window.MA.modules.c4 = (function() {
   // whenever the cheap analysis is conclusive. renderProps needs this for every row
   // and runs on each keystroke; measuring 105 elements the exact form cost 280ms
   // per render because it reparses the document twice per row.
+  // 削除で消える行を、実際に削除を走らせずに求める。tidyAfterDelete と同じ順序で
+  // 「消えた要素 → その要素を指すリレーション → 空になった境界」を不動点まで回す。
+  //
+  // 以前は「囲む境界の要素数が1以下なら正確版へ」という閾値を置いていたが、これは
+  // 不動点化する前の挙動に合わせた校正だった。境界の中身がリレーションだけになった
+  // 場合も畳まれるようになったため、閾値をすり抜けて件数を過少申告していた
+  // (実測: ✕2 と出るのに実際は3個消える)。境界は必ず正確版へ回す実装も併用して
+  // いたが、そちらは 200要素の図で 646ms かかり毎キーストロークの描画に耐えない。
+  // 数え方そのものを削除と同じ規則で書けば、両方が同時に解ける。
+  // renderProps は一覧の行ごとに deletionImpactFrom を呼ぶので、同じ文書に対して
+  // 要素数ぶん呼ばれる。行分割と matchBraces をその都度やると O(n^2) になり、
+  // 500要素で 196ms かかった (閾値方式の 646ms を直したのに別経路で戻してしまう)。
+  // テキストが同じ間だけ1件記憶する。文字列は不変なので同一性の比較で足りる。
+  var braceMemoText = null;
+  var braceMemo = null;
+  function linesWithBraces(text) {
+    var s = String(text);
+    if (braceMemoText === s && braceMemo) return braceMemo;
+    var ls = s.split('\n');
+    var pairs = matchBraces(ls);
+    // for-in + parseInt を不動点ループの中で回すと効く。開き行の昇順で配列にしておく。
+    var pairList = [];
+    for (var k in pairs) {
+      if (Object.prototype.hasOwnProperty.call(pairs, k)) {
+        pairList.push([parseInt(k, 10), pairs[k]]);
+      }
+    }
+    pairList.sort(function (a, b) { return a[0] - b[0]; });
+    // 「その行に中身があるか」も1回だけ決めておく。境界の空判定で何度も引かれる。
+    var hasContent = [];
+    for (var m = 0; m < ls.length; m++) hasContent.push(!!stripComment(ls[m]));
+    braceMemoText = s;
+    braceMemo = { lines: ls, bracePairs: pairs, pairList: pairList, hasContent: hasContent };
+    return braceMemo;
+  }
+
   function deletionImpactFrom(parsed, el, text) {
-    if (!el.isBoundary) {
-      var enclosing = null;
-      for (var bi = 0; bi < parsed.elements.length; bi++) {
-        var b = parsed.elements[bi];
-        if (!b.isBoundary || b.id === el.id) continue;
-        if (el.line > b.line && el.line < b.endLine) {
-          if (!enclosing || b.line > enclosing.line) enclosing = b;
+    var memo = linesWithBraces(text);
+    var lines = memo.lines;
+    var pairList = memo.pairList;
+    var hasContent = memo.hasContent;
+    var removed = {};
+    var i, j;
+
+    function markRange(from, to) {
+      for (var k = from; k <= to && k <= lines.length; k++) removed[k] = true;
+    }
+    markRange(el.line, el.isBoundary && el.endLine ? el.endLine : el.line);
+
+    // 上限は文書の行数に連動させる。固定値 50 にしていたとき、内側から外側への
+    // 連鎖が1周で片付かない実装 (昇順走査) に戻すと、深さ50を超えた図で
+    // **件数を過少申告したまま黙って打ち切る**状態になっていた
+    // (実測: 深さ100で exact=101 に対し fast=51)。
+    // 下の降順走査があれば連鎖は1周で収束するので通常2〜3周で抜けるが、
+    // 「打ち切りが正しさを守っている」構図にはしない。
+    var maxRounds = lines.length + 2;
+    for (var guard = 0; guard < maxRounds; guard++) {
+      var changed = false;
+
+      // 消えた要素の id を集める。同じ id が範囲外にも残っていれば「消えていない」。
+      var goneIds = {}, aliveIds = {};
+      for (i = 0; i < parsed.elements.length; i++) {
+        var e = parsed.elements[i];
+        if (removed[e.line]) goneIds[e.id] = true; else aliveIds[e.id] = true;
+      }
+
+      // 端点が消えたリレーションは削除に巻き込まれる。元から壊れていたものは残す。
+      for (i = 0; i < parsed.relations.length; i++) {
+        var r = parsed.relations[i];
+        if (removed[r.line]) continue;
+        if ((goneIds[r.from] && !aliveIds[r.from]) || (goneIds[r.to] && !aliveIds[r.to])) {
+          removed[r.line] = true;
+          changed = true;
         }
       }
-      // A boundary left empty collapses, and that can cascade outwards — too
-      // fiddly to shortcut, so fall back to the exact computation. Rare: it needs
-      // this element to be the only thing inside its boundary.
-      if (enclosing && contentCount(parsed, enclosing) <= 1) return deletionImpact(text, el);
 
-      var relHits = 0;
-      for (var ri = 0; ri < parsed.relations.length; ri++) {
-        var r = parsed.relations[ri];
-        if (r.from === el.id || r.to === el.id) relHits++;
+      // 中身が空になった境界は畳まれる。畳む範囲は削除本体 (collapseEmptyBoundaries)
+      // と同じ matchBraces() から取る。
+      //
+      // ここを parsed.elements の isBoundary で回していたときは、ELEMENT_KINDS に
+      // 無い境界種別 — mermaid の正規構文である素の `Boundary(...)` や
+      // `Deployment_Node(...)` — がパーサから返らないため、それを跨ぐ連鎖でループが
+      // 止まり件数を過少申告していた (実測: ✕2 と出るのに文書全体が消える)。
+      // 削除がテキストの波括弧で数えるなら、こちらも同じ波括弧で数える。
+      // 内側から外側へ (開き行の降順で) 見る。内側が畳まれた結果として外側も空になる
+      // 連鎖が1回の走査で片付き、不動点ループの回数が入れ子の深さに比例しなくなる。
+      // これは**性能のためだけ**の順序で、答えは昇順でも同じところに収束する
+      // (上限を行数に連動させたので打ち切られない)。実測 deepNest 200 要素:
+      // 降順 27.7ms / 昇順 211.7ms。
+      for (var pi = pairList.length - 1; pi >= 0; pi--) {
+        var o = pairList[pi][0];                // 0 起点の行 index
+        var closeIdx = pairList[pi][1];
+        // 既に消えている境界は飛ばす。**これを外すと実用にならない**: 消えた境界も
+        // 毎周「空だ」と判定して markRange し直すので changed が立ち続け、不動点
+        // ループが上限まで回る。実測 deepNest 200 要素で 27.7ms → 17,329ms (626倍)、
+        // flat 400 要素で 26.0ms → 4,726ms。答えは変わらないので、テストでは
+        // 時間の上限 (Q7j) で守っている。
+        if (removed[o + 1]) continue;
+        var empty = true;
+        for (j = o + 1; j < closeIdx; j++) {
+          if (!removed[j + 1] && hasContent[j]) { empty = false; break; }
+        }
+        if (empty) { markRange(o + 1, closeIdx + 1); changed = true; }
       }
-      return { elements: 1, relations: relHits };
+
+      if (!changed) break;
     }
-    return deletionImpact(text, el); // boundaries are few; keep the exact answer
+
+    var elCount = 0, relCount = 0;
+    for (i = 0; i < parsed.elements.length; i++) if (removed[parsed.elements[i].line]) elCount++;
+    for (i = 0; i < parsed.relations.length; i++) if (removed[parsed.relations[i].line]) relCount++;
+    return { elements: elCount, relations: relCount };
   }
 
   function contentCount(parsed, boundary) {
@@ -373,7 +462,31 @@ window.MA.modules.c4 = (function() {
     return window.MA.textUpdater.matchEol(text, lines.join(String.fromCharCode(10)));
   }
 
+  // 境界を端点にした Rel は mermaid.parse を通るのに mermaid.render が
+  // "Cannot read properties of undefined (reading 'x')" で落ちる —— 存在しない id を
+  // 指したときとまったく同じ壊れ方をする (自分を囲む境界 / 兄弟の境界 / 境界から境界 /
+  // トップレベル要素から境界 / Container_Boundary、実機 v11.13.0 で確認した5形状すべて NG)。
+  //
+  // 判定は **テキストを書く関数の側** に置く。追加フォームのドロップダウンから
+  // 境界を外しただけでは、既存 Rel の編集パネル (From / To は自由入力の
+  // <input type=text>) と operations.connect / operations.add から素通りする。
+  // 実際、ドロップダウンだけ塞いだ状態で編集パネルに境界 id を打つと、警告も出ずに
+  // 書き込まれて図が描けなくなっていた。同じファイルの operations.delete が
+  // 「まだ繋がっていないが、その日に備えて」と守っているのと真逆になっていた。
+  //
+  // 弾いた場合はテキストを変えずに返す。呼び出し側は結果が変わらないことで拒否を
+  // 知る (更新系の他の関数も、対象行が見つからないときは同じく text を返す)。
+  function isBoundaryId(text, id) {
+    if (!id) return false;
+    var parsed = parseC4(text);
+    for (var i = 0; i < parsed.elements.length; i++) {
+      if (parsed.elements[i].id === id) return !!parsed.elements[i].isBoundary;
+    }
+    return false;
+  }
+
   function addRel(text, kind, from, to, label, tech) {
+    if (isBoundaryId(text, from) || isBoundaryId(text, to)) return text;
     var lines = text.split('\n');
     var insertAt = lines.length;
     while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
@@ -384,6 +497,26 @@ window.MA.modules.c4 = (function() {
   }
 
   function deleteLine(text, lineNum) { return window.MA.textUpdater.deleteLine(text, lineNum); }
+
+  // リレーションの削除も後始末を通す。境界の中身がリレーションだけだと、それを
+  // 消した時点で境界が空になり、mermaid は空の境界を受理しない。
+  //
+  //     System(z, "外部システム")
+  //     System_Boundary(b, "社内") {
+  //         Rel(z, z, "自己参照")
+  //     }
+  //
+  // ここでリレーション一覧の ✕ を1回押すと `System_Boundary(b, "社内") { }` が
+  // 残り、赤帯「図を描けませんでした」になる。**GUI 操作1回で、GUI では直せない
+  // 状態**になっていた (本文を手で編集するしかない)。
+  //
+  // 要素と境界の削除は tidyAfterDelete を通るようになっていたのに、リレーション
+  // だけが素の deleteLine のまま残っていた。E1 のテストコメント自身が「mermaid は
+  // 空境界を受理しないため、削除しただけで図が描画不能になる」と書いているのに、
+  // 実装の適用範囲がそれに追いついていなかった。
+  function deleteRelLine(text, lineNum) {
+    return tidyAfterDelete(text, window.MA.textUpdater.deleteLine(text, lineNum));
+  }
 
   // Delete a boundary together with everything it encloses. Matches the delete
   // semantics of requirement/ER (container delete removes its contents) rather
@@ -433,7 +566,16 @@ window.MA.modules.c4 = (function() {
           if (stripComment(lines[j])) { empty = false; break; }
         }
         if (empty) {
-          lines.splice(o, closeIdx - o + 1);
+          // 中に残っているコメントは利用者が書いた文。畳む理由は mermaid が空の境界を
+          // 受理しないことであって、本文を捨てることではないので、境界があった位置へ
+          // 繰り上げる。畳むたびに最低でも開き行と閉じ行の2行が減るので終わる。
+          var kept = [];
+          var headIndent = String(lines[o]).match(/^(\s*)/)[1];
+          for (var k = o + 1; k < closeIdx; k++) {
+            var ct = String(lines[k]).trim();
+            if (ct.indexOf('%%') === 0) kept.push(headIndent + ct);
+          }
+          lines.splice.apply(lines, [o, closeIdx - o + 1].concat(kept));
           collapsed = true;
           break; // indices shifted; recompute
         }
@@ -443,13 +585,32 @@ window.MA.modules.c4 = (function() {
     return lines;
   }
 
+  // The two clean-ups feed each other: pruning a relation can empty the boundary
+  // that held it, and collapsing a boundary can strand relations that pointed into
+  // it. Running them once in either order leaves work behind — collapse-then-prune
+  // left `Kind(...) { }` whenever the boundary's last non-element line was a
+  // relation, and mermaid will not render an empty boundary. Repeat to a fixed
+  // point instead, with a guard so a malformed document still terminates.
+  function tidyAfterDelete(before, afterText) {
+    var prev = afterText;
+    // 上限は文書の行数に連動 (deletionImpactFrom と同じ理由)。
+    var maxRounds = String(afterText).split('\n').length + 2;
+    for (var guard = 0; guard < maxRounds; guard++) {
+      var pruned = pruneDanglingRels(before, prev);
+      var collapsed = collapseEmptyBoundaries(pruned.split('\n')).join('\n');
+      if (collapsed === prev) return collapsed;
+      prev = collapsed;
+    }
+    return prev;
+  }
+
   // Delete one element line, then tidy up what that leaves behind.
   function deleteElementLine(text, lineNum) {
     var lines = text.split('\n');
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
     lines.splice(idx, 1);
-    return pruneDanglingRels(text, collapseEmptyBoundaries(lines).join('\n'));
+    return tidyAfterDelete(text, lines.join('\n'));
   }
 
   function deleteBoundary(text, startLine, endLine) {
@@ -459,7 +620,7 @@ window.MA.modules.c4 = (function() {
     if (from < 0 || from >= lines.length) return text;
     if (to < from || to >= lines.length) to = from;
     lines.splice(from, to - from + 1);
-    return pruneDanglingRels(text, collapseEmptyBoundaries(lines).join('\n'));
+    return tidyAfterDelete(text, lines.join('\n'));
   }
 
   function updateElement(text, lineNum, field, value) {
@@ -569,6 +730,9 @@ window.MA.modules.c4 = (function() {
     if (!matchedKind) return text;
     var args = parseArgs(km[1]);
     var from = args[0] || '', to = args[1] || '', label = args[2] || '', tech = args[3] || '';
+    // 端点の書き換えも addRel と同じ判定を通す。ここを素通りさせると、編集パネルの
+    // 自由入力から境界 id を打ち込んで描画不能な図を作れてしまう。
+    if ((field === 'from' || field === 'to') && isBoundaryId(text, value)) return text;
     if (field === 'from') from = value;
     else if (field === 'to') to = value;
     else if (field === 'label') label = value;
@@ -608,11 +772,20 @@ window.MA.modules.c4 = (function() {
       // resetting to Person/top-level every time makes the user re-pick each round.
       var kindOpts = ELEMENT_KINDS.map(function(k) { return { value: k, label: k, selected: k === lastAddKind }; });
       var relKindOpts = REL_KINDS.map(function(k) { return { value: k, label: k, selected: k === 'Rel' }; });
-      var elemIdOpts = els.map(function(e) { return { value: e.id, label: e.id + ' (' + e.kind + ')' }; });
-      if (elemIdOpts.length === 0) elemIdOpts = [{ value: '', label: '（要素を先に追加）' }];
+      // 境界は Rel の端点にできない。mermaid.parse は通るが mermaid.render が
+      // "Cannot read properties of undefined (reading 'x')" で落ち、存在しない id を
+      // 指したときと同じ壊れ方をする (囲む境界・兄弟の境界・境界間・Container_Boundary、
+      // 実機で確認したすべての形で NG)。選べるままにしておくと、2クリックで描画不能な
+      // 図ができあがるのに UI 側には何の警告も出ない。
+      var relEndpoints = els.filter(function(e) { return !e.isBoundary; });
+      var elemIdOpts = relEndpoints.map(function(e) { return { value: e.id, label: e.id + ' (' + e.kind + ')' }; });
+      // 「要素を先に追加」では嘘になる。この分岐に入るのは境界しか無い図で、
+      // 要素一覧には境界が並んでいる (しかも「要素を追加」フォームで足したばかり)。
+      // 足りないのは「境界でない要素」。
+      if (elemIdOpts.length === 0) elemIdOpts = [{ value: '', label: '（境界でない要素を先に追加）' }];
 
       var boundaries = els.filter(function(e) { return e.isBoundary; });
-      var parentOpts = [{ value: '', label: '（なし・トップレベル）', selected: !lastAddParent }];
+      var parentOpts = [{ value: '', label: '（指定なし＝トップレベル）', selected: !lastAddParent }];
       boundaries.forEach(function(b) {
         parentOpts.push({ value: b.id, label: b.id + ' (' + b.label + ')', selected: b.id === lastAddParent });
       });
@@ -682,7 +855,7 @@ window.MA.modules.c4 = (function() {
           P.fieldHtml('ID', 'c4-add-id', '', '例: user1') +
           P.fieldHtml('ラベル', 'c4-add-label', '', '例: Customer') +
           P.selectFieldHtml('親境界', 'c4-add-parent', parentOpts) +
-          P.fieldHtml('Tech (Container系のみ)', 'c4-add-tech', '', '省略可') +
+          P.fieldHtml('Tech（Container 系のみ）', 'c4-add-tech', '', '省略可') +
           P.fieldHtml('Description', 'c4-add-descr', '', '省略可') +
           P.primaryButtonHtml('c4-add-btn', '+ 要素追加') +
         '</div>' +
@@ -750,7 +923,7 @@ window.MA.modules.c4 = (function() {
       P.bindSelectButtons(propsEl, 'c4-select-rel', 'rel');
       P.bindDeleteButtons(propsEl, 'c4-delete-element', ctx, deleteElementLine);
       P.bindDeleteButtons(propsEl, 'c4-delete-boundary', ctx, deleteBoundary, true);
-      P.bindDeleteButtons(propsEl, 'c4-delete-rel', ctx, deleteLine);
+      P.bindDeleteButtons(propsEl, 'c4-delete-rel', ctx, deleteRelLine);
       return;
     }
 
@@ -772,7 +945,7 @@ window.MA.modules.c4 = (function() {
           P.fieldHtml('ラベル', 'c4-edit-label', el.label) +
           P.fieldHtml('Tech', 'c4-edit-tech', el.tech || '') +
           P.fieldHtml('Description', 'c4-edit-descr', el.descr || '') +
-          P.dangerButtonHtml('c4-edit-delete', el.isBoundary ? '削除（中の要素ごと）' : '削除');
+          P.dangerButtonHtml('c4-edit-delete', el.isBoundary ? '削除（中の要素も一緒に）' : '削除');
         var ln = el.line;
         var endLn = el.endLine;
         var isB = !!el.isBoundary;
@@ -798,11 +971,26 @@ window.MA.modules.c4 = (function() {
         for (var ri = 0; ri < rels.length; ri++) if (rels[ri].id === sel.id) { rel = rels[ri]; break; }
         if (!rel) { propsEl.innerHTML = '<p>リレーションが見つかりません</p>'; return; }
         var rOpts = REL_KINDS.map(function(k) { return { value: k, label: k, selected: k === rel.kind }; });
+        // From / To は自由入力だった。境界の id を打ち込むと、警告も出ずに書き込まれて
+        // 図が描けなくなる (境界を端点にした Rel は parse を通って render で落ちる)。
+        // 追加フォームと同じ選択肢に揃えて、そもそも打てないようにする。
+        //
+        // ただし今の値が一覧に無い場合 —— 手書きのダングリング参照や、まさに境界を
+        // 指している既存の行 —— はその値も選択肢に残す。黙って別の端点に付け替えると、
+        // 「開いただけで中身が変わる」ことになる。
+        function endpointOpts(cur) {
+          var opts = els.filter(function(e) { return !e.isBoundary; })
+            .map(function(e) { return { value: e.id, label: e.id + ' (' + e.kind + ')', selected: e.id === cur }; });
+          if (!opts.some(function(o) { return o.value === cur; })) {
+            opts.unshift({ value: cur, label: cur + '（現在の値・この図に無い要素）', selected: true });
+          }
+          return opts;
+        }
         propsEl.innerHTML =
           P.panelHeaderHtml(rel.from + ' → ' + rel.to) +
           P.selectFieldHtml('Kind', 'c4-edit-rel-kind', rOpts) +
-          P.fieldHtml('From', 'c4-edit-rel-from', rel.from) +
-          P.fieldHtml('To', 'c4-edit-rel-to', rel.to) +
+          P.selectFieldHtml('From', 'c4-edit-rel-from', endpointOpts(rel.from)) +
+          P.selectFieldHtml('To', 'c4-edit-rel-to', endpointOpts(rel.to)) +
           P.fieldHtml('ラベル', 'c4-edit-rel-label', rel.label) +
           P.fieldHtml('Tech', 'c4-edit-rel-tech', rel.tech || '') +
           P.dangerButtonHtml('c4-edit-rel-delete', '削除');
@@ -817,7 +1005,7 @@ window.MA.modules.c4 = (function() {
         });
         P.bindEvent('c4-edit-rel-delete', 'click', function() {
           window.MA.history.pushHistory();
-          ctx.setMmdText(deleteLine(ctx.getMmdText(), rln));
+          ctx.setMmdText(deleteRelLine(ctx.getMmdText(), rln));
           window.MA.selection.clearSelection();
           ctx.onUpdate();
         });
@@ -834,7 +1022,14 @@ window.MA.modules.c4 = (function() {
     // (System_Ext) を境界 B1 に足したあと、同じ名前の B1 を持つ別の図を
     // 開くと、種類も親境界もそのまま残り、押すと `System_Ext(zz)` が
     // B1 の中に入った。要素の**意味**が変わるので図の読み違いに直結する。
-    resetTransientState: function() { lastAddKind = 'Person'; lastAddParent = ''; },
+    // 波括弧のメモも一緒に捨てる。図種を切り替えても解放されないと、大きい文書を
+    // 1件セッション中ずっと握り続ける。
+    resetTransientState: function() {
+      lastAddKind = 'Person';
+      lastAddParent = '';
+      braceMemoText = null;
+      braceMemo = null;
+    },
     type: 'C4Context',
     displayName: 'C4',
     ELEMENT_KINDS: ELEMENT_KINDS,
@@ -946,7 +1141,7 @@ window.MA.modules.c4 = (function() {
     addElement: addElement, addRel: addRel,
     updateElement: updateElement, updateRel: updateRel, deleteLine: deleteLine,
     deleteBoundary: deleteBoundary, isBoundaryKind: isBoundaryKind,
-    deleteElementLine: deleteElementLine, kindOptionsFor: kindOptionsFor,
+    deleteElementLine: deleteElementLine, deleteRelLine: deleteRelLine, kindOptionsFor: kindOptionsFor,
     deletionImpact: deletionImpact, deletionImpactFrom: deletionImpactFrom,
     BOUNDARY_KINDS: BOUNDARY_KINDS,
     uniqueId: uniqueId, stripComment: stripComment,

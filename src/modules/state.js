@@ -216,8 +216,55 @@ window.MA.modules.state = (function() {
   // those. Pressing ✕ on Idle removed `[*] --> Idle` and Idle stayed.
   //
   // `stateId` is optional so older single-argument callers keep working.
+  // 中身が無くなった合成状態を畳む。
+  //
+  // mermaid は空の合成状態を **parse は通す** のに、描画で落ちる:
+  // "No such shape: roundedWithTitle"。`state S { }` も、ラベル付きの
+  // `state "表示名" as S { }` も、入れ子の空も、コメントだけの中身も同じ
+  // (v11.13.0 で実測)。parse が通ってしまうぶんステータスバーは OK のままで、
+  // 図だけが消える。
+  //
+  // 合成状態の範囲は parseState() が返す groups から取る。ここで独自に `{` を
+  // 数えると、範囲を決める述語と一覧を作る述語が別物になり、両者がずれた瞬間に
+  // 誤った行が消える (block / c4 で実際に起きた「述語の非対称」)。
+  function collapseEmptyComposites(text) {
+    var cur = text;
+    // 1回畳むごとに必ず2行以上減るので、行数を上限にすれば取りこぼさない。
+    // 固定値 (200) にしていたとき、それより深い入れ子で畳み残しが出た。
+    var maxRounds = text.split('\n').length + 2;
+    for (var guard = 0; guard < maxRounds; guard++) {
+      var parsed = parseState(cur);
+      var lines = cur.split('\n');
+      var target = null;
+      for (var i = 0; i < parsed.groups.length; i++) {
+        var g = parsed.groups[i];
+        if (!g.endLine || g.endLine <= g.line) continue;   // 閉じていない合成は触らない
+        var empty = true;
+        for (var j = g.line; j < g.endLine - 1; j++) {     // 本体だけを見る (0 起点)
+          var s = String(lines[j] || '').trim();
+          if (!s || s.indexOf('%%') === 0) continue;       // 空行とコメントは中身ではない
+          empty = false;
+          break;
+        }
+        if (empty) { target = g; break; }
+      }
+      if (!target) return cur;
+      // 中に残っているコメントは利用者が書いた文。畳む位置へ繰り上げる
+      // (block の EG7 / c4 の T2 と同じ扱い)。
+      var kept = [];
+      var headIndent = String(lines[target.line - 1] || '').match(/^(\s*)/)[1];
+      for (var k = target.line; k < target.endLine - 1; k++) {
+        var ct = String(lines[k] || '').trim();
+        if (ct.indexOf('%%') === 0) kept.push(headIndent + ct);
+      }
+      lines.splice.apply(lines, [target.line - 1, target.endLine - target.line + 1].concat(kept));
+      cur = lines.join('\n');
+    }
+    return cur;
+  }
+
   function deleteState(text, lineNum, stateId) {
-    if (!stateId) return window.MA.textUpdater.deleteLine(text, lineNum);
+    if (!stateId) return collapseEmptyComposites(window.MA.textUpdater.deleteLine(text, lineNum));
     var lines = text.split('\n');
     var out = [];
     for (var i = 0; i < lines.length; i++) {
@@ -234,7 +281,7 @@ window.MA.modules.state = (function() {
       if (note && note[1] === stateId) continue;
       out.push(lines[i]);
     }
-    return out.join('\n');
+    return collapseEmptyComposites(out.join('\n'));
   }
 
   // mermaid はラベル中の " をエスケープできないが、&quot; はそのまま " として
@@ -360,8 +407,9 @@ window.MA.modules.state = (function() {
     return lines.join('\n');
   }
 
+  // 合成状態の中身が遷移だけだった場合、それを消すと合成が空になる。
   function deleteTransition(text, lineNum) {
-    return window.MA.textUpdater.deleteLine(text, lineNum);
+    return collapseEmptyComposites(window.MA.textUpdater.deleteLine(text, lineNum));
   }
 
   function updateTransition(text, lineNum, field, value) {
@@ -380,10 +428,35 @@ window.MA.modules.state = (function() {
     return lines.join('\n');
   }
 
+  // mermaid は中身の無い合成状態を **parse は通す** のに描画で落ちる
+  // (`No such shape: roundedWithTitle`)。空のまま作ると「+ 複合状態を追加」を1回
+  // 押しただけで図が消えるのに、ステータスバーは OK のままで手がかりが無い。
+  // block の addGroup / c4 の addElement と同じく、必ず子を1つ添えて作る。
+  //
+  // 子は `[*] --> <id>_1` にする。`state <id>_1` は mermaid が受理しない
+  // (同じ roundedWithTitle で落ちる。実機 v11.13.0 で確認)。裸の id 宣言も描けるが、
+  // 合成状態の子はプロパティパネルの一覧に出ないため、遷移として置いたほうが
+  // 「遷移一覧」から編集・削除できる。合成は初期状態を持つのが普通でもある。
+  function freeStateId(text, want) {
+    var parsed = parseState(text);
+    var taken = parsed.elements.map(function(e) { return e.id; })
+      .concat((parsed.groups || []).map(function(g) { return g.id; }));
+    if (taken.indexOf(want) === -1) return want;
+    for (var n = 2; n < 1000; n++) {
+      if (taken.indexOf(want + '_' + n) === -1) return want + '_' + n;
+    }
+    return want;
+  }
+
   function addComposite(text, id, label) {
+    // コンテナ id 自体も重複させない。mermaid は重複した別名を黙って受理するのに、
+    // プロパティパネルは最初の一致で選択を解決するので、その後の編集・削除が
+    // 別の合成状態に当たる (c4 の uniqueId と同じ理由)。
+    id = freeStateId(text, id);
+    var childId = freeStateId(text + '\n    state ' + id, id + '_1');
     var block = [
       '    state "' + (label || id) + '" as ' + id + ' {',
-      '        ',
+      '        [*] --> ' + childId,
       '    }',
     ];
     var lines = text.split('\n');
@@ -393,10 +466,11 @@ window.MA.modules.state = (function() {
     return lines.join('\n');
   }
 
+  // 合成を丸ごと消すと、それを囲んでいた外側の合成が空になることがある。
   function deleteComposite(text, startLine, endLine) {
     var lines = text.split('\n');
     lines.splice(startLine - 1, (endLine - startLine + 1));
-    return lines.join('\n');
+    return collapseEmptyComposites(lines.join('\n'));
   }
 
   function addNote(text, position, target, noteText) {
@@ -479,11 +553,15 @@ window.MA.modules.state = (function() {
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">複合状態を追加</label>' +
-          '<div style="display:flex;gap:4px;">' +
-            '<input id="st-add-comp-id" type="text" placeholder="ID" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' +
-            '<input id="st-add-comp-label" type="text" placeholder="label" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' +
-            '<button id="st-add-comp-btn" title="複合状態を追加" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">+</button>' +
-          '</div>' +
+          // ここだけ横並びだった。パネルは 220px 固定で、この行は約 330px 要る。
+          // 実測では 1366 / 1500 / 1920 / 2560px のいずれでも `+` がパネルの外に
+          // はみ出し、**どの画面幅でもマウスで押せなかった**。さらに横あふれで
+          // パネル自体に横スクロールが生まれ、Tab で `+` へ到達すると 139px 右へ
+          // ずれて戻らず、一覧行のラベルが隠れて「編集」「✕」だけが並ぶ。
+          // 他の追加フォームと同じ縦積みにする。
+          P.fieldHtml('ID', 'st-add-comp-id', '', '例: Running') +
+          P.fieldHtml('ラベル', 'st-add-comp-label', '', '省略可、IDと同じ') +
+          P.primaryButtonHtml('st-add-comp-btn', '+ 複合状態追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">状態一覧</label>' +
@@ -520,6 +598,11 @@ window.MA.modules.state = (function() {
         var id = document.getElementById('st-add-comp-id').value.trim();
         var label = document.getElementById('st-add-comp-label').value.trim();
         if (!id) { alert('ID は必須です'); return; }
+        // 重複を黙って改名すると、設計書と id を揃えている利用者が取り違える。
+        var finalId = freeStateId(ctx.getMmdText(), id);
+        if (finalId !== id) {
+          alert('ID "' + id + '" は既に使われているため "' + finalId + '" で追加します');
+        }
         window.MA.history.pushHistory();
         ctx.setMmdText(addComposite(ctx.getMmdText(), id, label));
         ctx.onUpdate();
@@ -699,7 +782,13 @@ window.MA.modules.state = (function() {
         // mermaid は参照だけで状態を作るので、**一覧から消えても図には残る**。
         // A10 で UI の経路は直したが、契約の経路が古いままだった (r2 を契約ベースにして発覚)。
         if (opts.id) return deleteState(text, lineNum, opts.id);
-        return window.MA.textUpdater.deleteLine(text, lineNum);
+        // id 無しの経路も畳み込みを通す。ここだけ素の deleteLine のままだと、
+        // 合成状態の中身が1行しか無い図で `state S { }` が残り mermaid が render で
+        // 落ちる。class の operations.delete は classId が undefined でも
+        // collapseEmptyNamespaces を通っており、**同じコミットの中で state と class の
+        // 判断が割れていた**。今は app.js が必ず id を渡すので到達しないが、
+        // 契約テストと将来の呼び手が踏む。
+        return collapseEmptyComposites(window.MA.textUpdater.deleteLine(text, lineNum));
       },
       update: function(text, lineNum, field, value, opts) {
         opts = opts || {};

@@ -16,7 +16,13 @@
   --text-secondary: #8b949e;
   --accent:       #7c8cf8;
   --accent-green: #7ee787;
-  --accent-red:   #f74a4a;
+  /* 赤は「白文字を載せる地」と「暗い地に置く文字」の両方に使われており、必要な
+     明るさが正反対になる。1色で兼ねていたので、地としては白文字が 3.48:1 で
+     読めず、暗くすると今度は文字として 3.06:1 まで落ちた。役割ごとに分ける。
+       --accent-red      : ボタンの地。白文字に対して 4.98:1
+       --accent-red-text : 暗い地に置く文字。最悪ケース (bg-tertiary) で 6.04:1 */
+  --accent-red:   #d32f2f;
+  --accent-red-text: #ff7b72;
   --accent-orange: #ffa657;
   --font-mono: 'IBM Plex Mono', 'Consolas', monospace;
   --font-sans: 'Noto Sans JP', 'Segoe UI', sans-serif;
@@ -29,6 +35,16 @@
    scrollbars and selects they render today. */
 input[type="date"] {
   color-scheme: dark;
+}
+
+/* placeholder の色を指定しないと Chromium の既定 (rgb(117,117,117)) が使われ、
+   この地 (rgb(33,38,45)) に対して 3.30:1 しかない。WCAG 1.4.3 (AA) は 12px の
+   文字に 4.5:1 を要求する。--text-secondary なら 4.95:1 で満たす。
+   一覧の絞り込み欄は placeholder に件数を出しているので、読めないと
+   「何件から絞っているか」が分からないまま打ち始めることになる。 */
+input::placeholder, textarea::placeholder {
+  color: var(--text-secondary);
+  opacity: 1;   /* Firefox は既定で薄くするので戻す */
 }
 
 /* ── Reset / Base ──────────────────────────────────────────────────────────── */
@@ -108,13 +124,17 @@ html, body {
   border-color: transparent;
 }
 
+/* 倍率の表示はボタンでもある (概観 ⇄ 詳細)。42px 固定だと「詳細 90%」が入らない
+   ので下限だけ決めて中身に合わせる。ガント以外では disabled にしているので、
+   .tb-btn:disabled の色がそのまま「押せない」を表す。 */
 #zoom-display {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-secondary);
-  width: 42px;
+  min-width: 42px;
   text-align: center;
   user-select: none;
+  white-space: nowrap;
 }
 
 /* Export menu wrapper */
@@ -529,7 +549,7 @@ html, body {
 }
 
 #status-parse { color: var(--accent-green); }
-#status-parse.error { color: var(--accent-red); }
+#status-parse.error { color: var(--accent-red-text); }
 #status-info  { color: var(--text-secondary); margin-left: auto; }
 /* 版はステータス行の右端に小さく置く。縦には増やさない。 */
 /* 未保存の印。版の隣に置く。目に入る必要があるので薄くしない。 */
@@ -538,7 +558,7 @@ html, body {
 #status-file { color: var(--text-secondary); font-size: 11px; margin-left: 12px;
   max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   display: inline-block; vertical-align: bottom; }
-#status-dirty { color: var(--accent-red); font-size: 11px; margin-left: 12px;
+#status-dirty { color: var(--accent-red-text); font-size: 11px; margin-left: 12px;
                 white-space: nowrap; }
 #status-version { color: var(--text-secondary); opacity: .7; font-size: 11px;
                   margin-left: 12px; white-space: nowrap; }
@@ -604,7 +624,7 @@ html, body {
 }
 .action-btn-danger {
   width: 100%;
-  background: var(--accent-red, #f74a4a);
+  background: var(--accent-red);
   border: none;
   color: #fff;
   padding: 6px 10px;
@@ -643,7 +663,13 @@ html, body {
     <div class="tb-sep"></div>
 
     <button class="tb-btn" id="btn-zoom-out" title="縮小">－</button>
-    <span id="zoom-display">100%</span>
+    <!-- 倍率の表示そのものをボタンにする。ガントの「概観 / 詳細」は
+         概観 → (＋ か －) → 詳細 の一方通行で、**戻る手段が Fit だけ**だった。
+         しかも表示は「詳細」ではなく「90%」なので、いま何モードなのかも
+         読み取れない。ツールバーを横に伸ばさずに往復させるため、既にそこにある
+         表示を押せるようにする。ガント以外では押しても何も起きない (既定倍率へ
+         戻す動作は Fit が持っている)。 -->
+    <button id="zoom-display" class="tb-btn" title="概観と詳細を切り替え（ガントのみ）">100%</button>
     <button class="tb-btn" id="btn-zoom-in"  title="拡大">＋</button>
     <button class="tb-btn" id="btn-zoom-fit" title="幅に合わせる">Fit</button>
 
@@ -729,10 +755,17 @@ html, body {
   </div><!-- /#main -->
 
   <!-- ── Shortcut help (? キー) ────────────────────────────────── -->
-  <div id="shortcut-help" hidden>
+  <!-- role="dialog" + aria-modal と、開いたときのフォーカス移動 (app.js) は
+       キーボードトラップの「標準以外の方法なら利用者に通知」(WCAG 2.1.2) を
+       成立させるために要る。エディタは Tab を字下げに使う (ADR-011) ので、
+       抜ける方法は Escape だけ。それはこのヘルプに書いてあるが、role が無く
+       開いてもフォーカスが移らないと、**支援技術の利用者はヘルプが開いたことに
+       気づけない** (実測: role: null / aria-modal: null / 開いた後の
+       activeElement は TEXTAREA#editor のまま)。通知されている前提が崩れる。 -->
+  <div id="shortcut-help" role="dialog" aria-modal="true" aria-labelledby="shortcut-help-title" tabindex="-1" hidden>
     <div id="shortcut-help-inner">
       <div id="shortcut-help-head">
-        <span>キーボードショートカット</span>
+        <span id="shortcut-help-title">キーボードショートカット</span>
         <button id="shortcut-help-close" title="閉じる (Escape)">✕</button>
       </div>
       <table id="shortcut-help-table">
@@ -759,7 +792,13 @@ html, body {
   </div>
 
   <!-- ── Status bar ──────────────────────────────────────────────────────── -->
-  <div id="statusbar">
+  <!-- role="status" — 削除や件数の変化を支援技術に伝える唯一の経路。
+       これが無いと `[aria-live]` が画面に0件で、削除しても「1件と関連2件を削除 —
+       Ctrl+Z で戻せます」も、要素数の変化も**まったく読み上げられない**
+       (CDP のツリー 6,441 ノード中 live 保持ノード 0件を実測)。
+       押した直後にフォーカスが body へ落ちる既存の挙動と合わさると、
+       支援技術の利用者は削除できたかどうかを判定できない。 -->
+  <div id="statusbar" role="status" aria-live="polite">
     <span id="status-parse">Ready</span>
     <span id="status-info"></span>
     <!-- 版の刻印。

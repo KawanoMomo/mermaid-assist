@@ -295,8 +295,50 @@ window.MA.modules.classDiagram = (function() {
   // memberless class.
   //
   // `classId` is optional so the older single-argument callers keep working.
+  // 中身が無くなった namespace を畳む。mermaid は空の namespace を受理しない
+  // (`namespace N { }` は Parse error。コメントだけの中身も同じ。v11.13.0 で実測)。
+  // namespace に入れた唯一のクラスを消すと、それだけで図が描画不能になっていた。
+  //
+  // 範囲は parseClass() が返す groups から取る。ここで独自に `{` を数えると、
+  // 範囲を決める述語と一覧を作る述語が別物になり、ずれた瞬間に誤った行が消える
+  // (block / c4 で実際に起きた「述語の非対称」)。
+  function collapseEmptyNamespaces(text) {
+    var cur = text;
+    // 1回畳むごとに必ず2行以上減るので、行数を上限にすれば取りこぼさない。
+    // 固定値 (200) にしていたとき、それより深い入れ子で畳み残しが出た。
+    var maxRounds = text.split('\n').length + 2;
+    for (var guard = 0; guard < maxRounds; guard++) {
+      var parsed = parseClass(cur);
+      var lines = cur.split('\n');
+      var target = null;
+      for (var i = 0; i < (parsed.groups || []).length; i++) {
+        var g = parsed.groups[i];
+        if (!g.endLine || g.endLine <= g.line) continue;   // 閉じていない namespace は触らない
+        var empty = true;
+        for (var j = g.line; j < g.endLine - 1; j++) {     // 本体だけを見る (0 起点)
+          var s = String(lines[j] || '').trim();
+          if (!s || s.indexOf('%%') === 0) continue;       // 空行とコメントは中身ではない
+          empty = false;
+          break;
+        }
+        if (empty) { target = g; break; }
+      }
+      if (!target) return cur;
+      // 中に残っているコメントは利用者が書いた文。畳む位置へ繰り上げる。
+      var kept = [];
+      var headIndent = String(lines[target.line - 1] || '').match(/^(\s*)/)[1];
+      for (var k = target.line; k < target.endLine - 1; k++) {
+        var ct = String(lines[k] || '').trim();
+        if (ct.indexOf('%%') === 0) kept.push(headIndent + ct);
+      }
+      lines.splice.apply(lines, [target.line - 1, target.endLine - target.line + 1].concat(kept));
+      cur = lines.join('\n');
+    }
+    return cur;
+  }
+
   function deleteClass(text, lineNum, classId) {
-    if (!classId) return window.MA.textUpdater.deleteLine(text, lineNum);
+    if (!classId) return collapseEmptyNamespaces(window.MA.textUpdater.deleteLine(text, lineNum));
     var lines = text.split('\n');
     var out = [];
     var skipToBrace = false;
@@ -316,7 +358,7 @@ window.MA.modules.classDiagram = (function() {
       if (mem && mem[1] === classId) continue;
       out.push(lines[i]);
     }
-    return out.join('\n');
+    return collapseEmptyNamespaces(out.join('\n'));
   }
 
   // Whether the line is a relation with classId at either end.
@@ -431,10 +473,28 @@ window.MA.modules.classDiagram = (function() {
     return lines.join('\n');
   }
 
+  // mermaid は空の namespace を受理しない (`Parse error`)。空のまま作ると
+  // 「+ namespace 追加」を1回押しただけで図が描画不能になる。block の addGroup /
+  // c4 の addElement と同じく、必ず子を1つ添えて作る。
+  //
+  // `+ クラス追加` には namespace の指定が無いため、空 namespace を自分で埋める
+  // 手段が UI に無かった。プレースホルダを置くことで、名前を書き換えて使い始められる。
+  function freeClassId(text, want) {
+    var parsed = parseClass(text);
+    var taken = parsed.elements.map(function(e) { return e.id; })
+      .concat((parsed.groups || []).map(function(g) { return g.id; }));
+    if (taken.indexOf(want) === -1) return want;
+    for (var n = 2; n < 1000; n++) {
+      if (taken.indexOf(want + '_' + n) === -1) return want + '_' + n;
+    }
+    return want;
+  }
+
   function addNamespace(text, id) {
+    id = freeClassId(text, id);
     var block = [
       '    namespace ' + id + ' {',
-      '        ',
+      '        class ' + freeClassId(text, id + '_1'),
       '    }',
     ];
     var lines = text.split('\n');
@@ -539,10 +599,10 @@ window.MA.modules.classDiagram = (function() {
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">名前空間を追加</label>' +
-          '<div style="display:flex;gap:4px;">' +
-            '<input id="cl-add-ns-id" type="text" placeholder="NamespaceName" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' +
-            '<button id="cl-add-ns-btn" title="名前空間を追加" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">+</button>' +
-          '</div>' +
+          // state の「複合状態を追加」と同じく横並びでパネル幅を超えていた。
+          // 他の追加フォームと同じ縦積みにする。
+          props.fieldHtml('ID', 'cl-add-ns-id', '', '例: Ctrl') +
+          props.primaryButtonHtml('cl-add-ns-btn', '+ namespace 追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">クラス一覧</label>' +
@@ -588,6 +648,11 @@ window.MA.modules.classDiagram = (function() {
       bindEvent('cl-add-ns-btn', 'click', function() {
         var id = document.getElementById('cl-add-ns-id').value.trim();
         if (!id) { alert('ID は必須です'); return; }
+        // 重複を黙って改名すると、設計書と id を揃えている利用者が取り違える。
+        var finalNsId = freeClassId(ctx.getMmdText(), id);
+        if (finalNsId !== id) {
+          alert('ID "' + id + '" は既に使われているため "' + finalNsId + '" で追加します');
+        }
         window.MA.history.pushHistory();
         ctx.setMmdText(addNamespace(ctx.getMmdText(), id));
         ctx.onUpdate();

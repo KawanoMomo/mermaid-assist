@@ -96,3 +96,32 @@ describe('parseC4: System_Boundary', function() {
     expect(i.endLine).toBe(5);
   });
 });
+
+describe('C4 の5つの variant はすべて図種として認識される', function() {
+  // Context と Container しか見ていなかったので、`C4Component` / `C4Dynamic` /
+  // `C4Deployment` は「図種が判定できない」扱いになっていた。しかも Variant の
+  // プルダウンにはこの3つが並んでおり、選べるのに認識されない。
+  //
+  // 判定に失敗するとプロパティパネルが前の文書のまま残り、一覧の ✕ が**前の文書の
+  // 行番号で今の文書の別の行を消す**。プレビューは正しく描けているので、
+  // 異常を示すものが画面に一つも無い。
+  var detect = window.MA.parserUtils.detectDiagramType;
+
+  ['C4Context', 'C4Container', 'C4Component', 'C4Dynamic', 'C4Deployment'].forEach(function(v) {
+    test('DT-' + v + ': 図種として認識される', function() {
+      expect(detect(v + '\n    title T\n    System(a, "A")\n')).toBe('C4Context');
+    });
+  });
+
+  test('DT-parse: 認識される5つは c4 のパーサも読める（判定と実装を揃える）', function() {
+    // 片方だけ増えると、選べるのに認識されない / 認識されるのに読めない、の
+    // どちらかが起きる。
+    ['C4Context', 'C4Container', 'C4Component', 'C4Dynamic', 'C4Deployment'].forEach(function(v) {
+      var t = v + '\n    title T\n    System(a, "A")\n';
+      expect(detect(t)).toBe('C4Context');
+      var p = c4.parseC4(t);
+      expect(p.meta.variant).toBe(v.replace('C4', ''));
+      expect(p.elements.length).toBe(1);
+    });
+  });
+});

@@ -19,7 +19,10 @@ window.MA.modules.blockBeta = (function() {
   // 記号は形状やリンクの記法に使うので識別子から外す。
   // `-` を先頭に許すと `-->` の一部を id と読むので、先頭だけ別に書く。
   var ID = '[^\\s\\[\\](){}"<>:,\\-][^\\s\\[\\](){}"<>:,]*';
-  var GROUP_START_RE = new RegExp('^block:(' + ID + ')(?::\\d+)?\\s*(?:columns\\s+\\d+)?\\s*$');
+  // 無名グループ (`block` だけの行) も group 開始として数える。mermaid はこれを
+  // 受理し `end` で閉じるので、ここから漏らすと深度カウントが開きを1つ数え落とし、
+  // 内側の `end` を外側 group のものと誤認して範囲がずれる。
+  var GROUP_START_RE = new RegExp('^block(?::(' + ID + ')(?::\\d+)?)?\\s*(?:columns\\s+\\d+)?\\s*$');
   // 形状付きトークン。菱形 `{"..."}` と六角 `{{"..."}}` を知らないと、
   // `c{"Actuator"}` が `c` と `Actuator` の2ブロックに割れて幽霊が出る。
   var BLOCK_TOKEN_RE = new RegExp('(' + ID + ')' +
@@ -35,6 +38,7 @@ window.MA.modules.blockBeta = (function() {
     if (!text || !text.trim()) return result;
     var lines = text.split('\n');
     var relCounter = 0;
+    var anonCounter = 0;
     var groupStack = [];
     for (var i = 0; i < lines.length; i++) {
       var lineNum = i + 1;
@@ -58,8 +62,15 @@ window.MA.modules.blockBeta = (function() {
       var gm = trimmed.match(GROUP_START_RE);
       if (gm) {
         var parent = groupStack.length ? groupStack[groupStack.length - 1] : null;
-        result.elements.push({ kind: 'group', id: gm[1], label: gm[1], parentId: parent, line: lineNum });
-        groupStack.push(gm[1]);
+        // 無名グループには指し示す id が無い。合成しないと一覧に undefined が並び、
+        // 中の要素の parentId も undefined になる。リンクが __rel_N を振るのと同じ。
+        var anonymous = gm[1] === undefined;
+        var gid = anonymous ? '__anon_' + (anonCounter++) : gm[1];
+        result.elements.push({
+          kind: 'group', id: gid, label: anonymous ? '(無名グループ)' : gm[1],
+          parentId: parent, line: lineNum, anonymous: anonymous,
+        });
+        groupStack.push(gid);
         continue;
       }
 
@@ -96,6 +107,34 @@ window.MA.modules.blockBeta = (function() {
     return lines.join('\n');
   }
 
+  // mermaid は中身の無い `block … end` を受理しない。空のまま作ると「+ グループ追加」
+  // を1回押しただけで parse が Error になり、しかもプレビューは直前の図を出したまま
+  // なので、壊れたことが画面から分からない (実機で確認: 押下後 parse=Error、svg は
+  // 前の内容のまま)。c4 の addElement が境界に対してやっているのと同じく、必ず子を
+  // 1つ添えて作る。
+  //
+  // id は衝突させない。mermaid は重複した id を黙って受理するのに renderProps は
+  // 最初の一致で選択を解決するため、重複するとその後の編集・削除が別のブロックに
+  // 当たる (c4 の uniqueId と同じ理由)。
+  function addGroup(text, gid) {
+    var taken = collectIds(text);
+    function free(want) {
+      if (taken.indexOf(want) === -1) { taken.push(want); return want; }
+      for (var n = 2; n < 1000; n++) {
+        var cand = want + '_' + n;
+        if (taken.indexOf(cand) === -1) { taken.push(cand); return cand; }
+      }
+      return want;
+    }
+    var id = free(gid);
+    var childId = free(id + '_1');
+    var lines = text.split('\n');
+    var insertAt = lines.length;
+    while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
+    lines.splice(insertAt, 0, '  block:' + id, '    ' + childId + '["新規ブロック"]', '  end');
+    return { text: lines.join('\n'), id: id, childId: childId };
+  }
+
   // Index of the 'end' that closes the group opened at startIdx. Counts nesting
   // depth: the first 'end' after a group start belongs to the innermost group,
   // not necessarily to this one. Returns -1 when the group is left unclosed.
@@ -117,14 +156,41 @@ window.MA.modules.blockBeta = (function() {
   // adding a block to g1 lands inside g10 whenever g10 appears first.
   function isGroupStart(trimmed, id) {
     var m = trimmed.match(GROUP_START_RE);
-    return !!m && m[1] === id;
+    if (!m) return false;
+    // 無名グループの id (`__anon_N`) はテキストに現れないので、行だけでは
+    // 「どの無名グループか」を決められない。ここでは名前付きだけを answer し、
+    // 無名は行番号で引く groupLineOf() 側に任せる。
+    if (m[1] === undefined) return false;
+    return m[1] === id;
+  }
+
+  // id からその group の開始行 index を引く。無名グループは parse が振った
+  // `__anon_N` でしか指せず、その対応は行の並び順にしか無いので parse を通す。
+  function groupLineOf(text, id) {
+    var lines = text.split('\n');
+    if (/^__anon_/.test(String(id))) {
+      var parsed = parseBlock(text);
+      for (var k = 0; k < parsed.elements.length; k++) {
+        var e = parsed.elements[k];
+        if (e.kind === 'group' && e.id === id) return e.line - 1;
+      }
+      return -1;
+    }
+    for (var i = 0; i < lines.length; i++) {
+      if (isGroupStart(lines[i].trim(), id)) return i;
+    }
+    return -1;
   }
 
   function addNestedBlock(text, parentId, id, label) {
     var token = label && label !== id ? id + '["' + encodeLabel(label) + '"]' : id;
     var lines = text.split('\n');
-    for (var i = 0; i < lines.length; i++) {
-      if (isGroupStart(lines[i].trim(), parentId)) {
+    // 先頭から isGroupStart で走査していたため、無名グループを指定すると常に最初の
+    // 無名グループへ入っていた (`__anon_1` を渡しても `__anon_0` に入る)。id から
+    // 行を引く経路に一本化する。
+    var i = groupLineOf(text, parentId);
+    if (i >= 0) {
+      {
         var endIdx = findMatchingEnd(lines, i);
         if (endIdx === -1) return text;
         // Indent one step past the parent rather than a fixed four spaces. The text
@@ -196,7 +262,11 @@ window.MA.modules.blockBeta = (function() {
     var idsBefore = collectIds(text);
 
     // Group block:ID ... end
-    if (isGroupStart(trimmed, blockId)) {
+    // 無名グループは id が行に無いので isGroupStart では答えられない。ここは
+    // 行番号で対象が決まっているため、「この行が group を開いているか」で足りる。
+    var opensGroup = isGroupStart(trimmed, blockId) ||
+      (/^__anon_/.test(String(blockId)) && GROUP_START_RE.test(trimmed));
+    if (opensGroup) {
       var endIdx = findMatchingEnd(lines, idx);
       // An unclosed group (the user deleted its `end` mid-edit) must not swallow
       // the rest of the file; drop the header line alone and leave the body.
@@ -216,26 +286,94 @@ window.MA.modules.blockBeta = (function() {
         lines[idx] = indent + kept.join(' ');
       }
     }
-    // Cascade: drop links whose endpoint no longer exists. Comparing the id sets
-    // before and after keeps two cases honest — an id that also lives outside the
-    // deleted range survives, so its links stay; and a link that was already
-    // dangling before this edit is left exactly as the user wrote it.
-    var result = lines.join('\n');
-    var idsAfter = collectIds(result);
+    return tidyAfterDelete(idsBefore, lines.join('\n'));
+  }
+
+  // Cascade: drop links whose endpoint no longer exists. Comparing the id sets
+  // before and after keeps two cases honest — an id that also lives outside the
+  // deleted range survives, so its links stay; and a link that was already
+  // dangling before this edit is left exactly as the user wrote it.
+  function pruneDanglingLinks(idsBefore, text) {
+    var idsAfter = collectIds(text);
     var removedIds = idsBefore.filter(function(id) { return idsAfter.indexOf(id) === -1; });
-    if (removedIds.length === 0) return result;
+    if (removedIds.length === 0) return text;
 
     var linkRe = new RegExp('^(\\s*)(' + ID + ')\\s*(?:--\\s*"?[^"]*?"?\\s*)?-->\\s*(' + ID + ')\\s*$');
-    lines = result.split('\n').filter(function(ln) {
+    return text.split('\n').filter(function(ln) {
       var m = ln.match(linkRe);
       if (!m) return true;
       return removedIds.indexOf(m[2]) === -1 && removedIds.indexOf(m[3]) === -1;
-    });
-    return lines.join('\n');
+    }).join('\n');
   }
 
+  // 中身が無くなったグループを畳む。mermaid は空の `block … end` を受理しない ——
+  // 名前付き (`block:g1`)、無名 (`block`)、コメントだけ、いずれも Parse error に
+  // なる (v11.13.0 で実測)。一方 `columns N` だけのグループとリンクだけのグループは
+  // 受理されるので、これらは中身とみなして畳まない。
+  //
+  // 最後の子ブロックを消しただけで図が描画不能になっていた:
+  //   block:g1
+  //     n10["N10"]     ← これを削除
+  //   end
+  // → `block:g1` / `end` が残り Parse error。ファズで、元が描画できる文書30件中
+  //    1件がこの形で壊れた。
+  function collapseEmptyGroups(lines) {
+    var out = lines.slice();
+    // 上から見つけた順に畳む。外側は内側の行を中身として数えるので、外側が空に
+    // なるのは内側が畳まれた後。不動点まで回すことで内側から順に片付く。
+    var maxRounds = lines.length + 2;   // 1回畳むごとに2行以上減るので取りこぼさない
+    for (var guard = 0; guard < maxRounds; guard++) {
+      var openIdx = -1, endIdx = -1;
+      for (var i = 0; i < out.length && openIdx === -1; i++) {
+        if (!GROUP_START_RE.test(out[i].trim())) continue;
+        var e = findMatchingEnd(out, i);
+        if (e === -1) continue;             // 閉じていないグループには触らない
+        var empty = true;
+        for (var j = i + 1; j < e; j++) {
+          var s = out[j].trim();
+          if (!s || s.indexOf('%%') === 0) continue;   // 空行とコメントは中身ではない
+          empty = false;
+          break;
+        }
+        if (empty) { openIdx = i; endIdx = e; }
+      }
+      if (openIdx === -1) break;
+      // 中に残っているコメントは利用者が書いた文。畳む理由は mermaid が空グループを
+      // 受理しないことであって、本文を捨てることではないので、グループがあった位置へ
+      // 繰り上げる。畳むたびに最低でも header と end の2行が減るので不動点に落ちる。
+      var kept = [];
+      var headIndent = out[openIdx].match(/^(\s*)/)[1];
+      for (var k = openIdx + 1; k < endIdx; k++) {
+        var c = out[k].trim();
+        if (c.indexOf('%%') === 0) kept.push(headIndent + c);
+      }
+      out.splice.apply(out, [openIdx, endIdx - openIdx + 1].concat(kept));
+    }
+    return out;
+  }
+
+  // 削除の後始末。「消えた id を指すリンクを刈る」と「空になったグループを畳む」を
+  // 不動点まで交互に適用する。一方通行だとどちらかが必ず残る:
+  //   畳むのが先 → 中のリンクごと消え、それが別のグループを空にした分を取り逃がす
+  //   刈るのが先 → リンクだけだったグループが空のまま残り mermaid が受理しない
+  // c4 の tidyAfterDelete と同じ理由・同じ形。C4 では順序を一方通行にしたせいで
+  // 空の境界が残る Critical になっており、block は畳む処理自体が無かった。
+  function tidyAfterDelete(idsBefore, afterText) {
+    var prev = afterText;
+    for (var guard = 0; guard < 50; guard++) {
+      var pruned = pruneDanglingLinks(idsBefore, prev);
+      var collapsed = collapseEmptyGroups(pruned.split('\n')).join('\n');
+      if (collapsed === prev) return collapsed;
+      prev = collapsed;
+    }
+    return prev;
+  }
+
+  // リンクだけを持つグループは mermaid が受理するので、そのリンクを消すと
+  // グループが空になって描画不能になる。削除経路はここも通す。
   function deleteLink(text, lineNum) {
-    return window.MA.textUpdater.deleteLine(text, lineNum);
+    var idsBefore = collectIds(text);
+    return tidyAfterDelete(idsBefore, window.MA.textUpdater.deleteLine(text, lineNum));
   }
 
   // Rewrite one block token on a line, leaving every other token byte-identical.
@@ -439,7 +577,7 @@ window.MA.modules.blockBeta = (function() {
 
         // 親グループの選択は再描画をまたいで保持する。同じ group に続けて入れる
         // ケースが普通なので、毎回「なし」に戻ると選び直しが要る。
-        var groupOpts = [{ value: '', label: '（なし・トップレベル）', selected: !lastAddParent }].concat(
+        var groupOpts = [{ value: '', label: '（指定なし＝トップレベル）', selected: !lastAddParent }].concat(
           groups.map(function(g) {
             var depth = 0, cur = g;
             while (cur && cur.parentId) {
@@ -565,13 +703,13 @@ window.MA.modules.blockBeta = (function() {
         P.bindEvent('block-add-group-btn', 'click', function() {
           var gid = document.getElementById('block-add-group-id').value.trim();
           if (!gid) { alert('グループ ID は必須です'); return; }
+          var added = addGroup(ctx.getMmdText(), gid);
+          // 重複を黙って改名すると、設計書と id を揃えている利用者が取り違える。
+          if (added.id !== gid) {
+            alert('グループ ID "' + gid + '" は既に使われているため "' + added.id + '" で追加します');
+          }
           window.MA.history.pushHistory();
-          var t = ctx.getMmdText();
-          var lines = t.split('\n');
-          var insertAt = lines.length;
-          while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
-          lines.splice(insertAt, 0, '  block:' + gid, '  end');
-          ctx.setMmdText(lines.join('\n'));
+          ctx.setMmdText(added.text);
           ctx.onUpdate();
         });
         P.bindEvent('block-add-link-btn', 'click', function() {
@@ -742,6 +880,7 @@ window.MA.modules.blockBeta = (function() {
     },
     addBlock: addBlock, addNestedBlock: addNestedBlock, addLink: addLink,
     deleteBlock: deleteBlock, deleteLink: deleteLink, deletionImpact: deletionImpact,
+    addGroup: addGroup,
     updateBlockLabel: updateBlockLabel, updateBlockId: updateBlockId, updateLink: updateLink, setColumns: setColumns,
   };
 })();
