@@ -321,7 +321,8 @@ window.MA.modules.blockBeta = (function() {
     var out = lines.slice();
     // 上から見つけた順に畳む。外側は内側の行を中身として数えるので、外側が空に
     // なるのは内側が畳まれた後。不動点まで回すことで内側から順に片付く。
-    for (var guard = 0; guard < 500; guard++) {
+    var maxRounds = lines.length + 2;   // 1回畳むごとに2行以上減るので取りこぼさない
+    for (var guard = 0; guard < maxRounds; guard++) {
       var openIdx = -1, endIdx = -1;
       for (var i = 0; i < out.length && openIdx === -1; i++) {
         if (!GROUP_START_RE.test(out[i].trim())) continue;

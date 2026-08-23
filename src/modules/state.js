@@ -229,7 +229,10 @@ window.MA.modules.state = (function() {
   // 誤った行が消える (block / c4 で実際に起きた「述語の非対称」)。
   function collapseEmptyComposites(text) {
     var cur = text;
-    for (var guard = 0; guard < 200; guard++) {
+    // 1回畳むごとに必ず2行以上減るので、行数を上限にすれば取りこぼさない。
+    // 固定値 (200) にしていたとき、それより深い入れ子で畳み残しが出た。
+    var maxRounds = text.split('\n').length + 2;
+    for (var guard = 0; guard < maxRounds; guard++) {
       var parsed = parseState(cur);
       var lines = cur.split('\n');
       var target = null;

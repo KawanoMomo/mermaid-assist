@@ -87,6 +87,47 @@ describe('state: 空になった合成状態を残さない', function() {
   });
 });
 
+describe('畳み込みの上限は文書の大きさに追従する', function() {
+  // 上限を固定値 (200) にしていたとき、それより深い入れ子では畳み残しが出た。
+  // 1回畳むごとに必ず2行以上減るので、行数を上限にすれば取りこぼさない。
+  test('GUARD1: state — 250段の入れ子が1つ残らず畳まれる', function() {
+    var d = ['stateDiagram-v2'];
+    for (var i = 0; i < 250; i++) d.push(new Array(i + 2).join('  ') + 'state D' + i + ' {');
+    d.push(new Array(252).join('  ') + 'X --> Y');
+    for (var j = 249; j >= 0; j--) d.push(new Array(j + 2).join('  ') + '}');
+    var text = d.join('\n') + '\n';
+    var rel = S.parse(text).relations[0];
+    var out = S.deleteTransition(text, rel.line);
+    expect((out.match(/\{/g) || []).length).toBe(0);
+    expect(hasEmptyBraceBlock(out)).toBe(false);
+  });
+
+  // 注意: これは class 側の上限を検証していない。namespace は入れ子にできず、
+  // 1回の deleteClass で空になる namespace は高々1つなので、周回数が上限に届く
+  // 経路がそもそも存在しない (上限を 200 の固定値に戻すミューテーションを当てても
+  // このテストは通ってしまう = SURVIVED)。
+  // class の上限を行数に連動させているのは state / block と揃えるためで、
+  // 現時点では到達不能な防御。検証できるのは「namespace が多数あっても1つずつ
+  // 正しく畳まれる」ことだけなので、テスト名もそれに合わせてある。
+  test('GUARD2: class — namespace が250個あっても1つずつ正しく畳まれる', function() {
+    var d = ['classDiagram'];
+    for (var i = 0; i < 250; i++) {
+      d.push('    namespace N' + i + ' {');
+      d.push('        class C' + i);
+      d.push('    }');
+    }
+    var text = d.join('\n') + '\n';
+    var cur = text;
+    for (var k = 0; k < 250; k++) {
+      var e = C.parse(cur).elements.filter(function(x) { return x.kind === 'class'; })[0];
+      if (!e) break;
+      cur = C.deleteClass(cur, e.line, e.id);
+    }
+    expect((cur.match(/namespace/g) || []).length).toBe(0);
+    expect(hasEmptyBraceBlock(cur)).toBe(false);
+  });
+});
+
 describe('class: 空になった namespace を残さない', function() {
   function deleteClassById(text, id) {
     var e = C.parse(text).elements.filter(function(x) { return x.id === id; })[0];
