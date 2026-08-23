@@ -664,7 +664,7 @@ window.MA.modules.c4 = (function() {
       if (elemIdOpts.length === 0) elemIdOpts = [{ value: '', label: '（要素を先に追加）' }];
 
       var boundaries = els.filter(function(e) { return e.isBoundary; });
-      var parentOpts = [{ value: '', label: '（なし・トップレベル）', selected: !lastAddParent }];
+      var parentOpts = [{ value: '', label: '（指定なし＝トップレベル）', selected: !lastAddParent }];
       boundaries.forEach(function(b) {
         parentOpts.push({ value: b.id, label: b.id + ' (' + b.label + ')', selected: b.id === lastAddParent });
       });
@@ -734,7 +734,7 @@ window.MA.modules.c4 = (function() {
           P.fieldHtml('ID', 'c4-add-id', '', '例: user1') +
           P.fieldHtml('ラベル', 'c4-add-label', '', '例: Customer') +
           P.selectFieldHtml('親境界', 'c4-add-parent', parentOpts) +
-          P.fieldHtml('Tech (Container系のみ)', 'c4-add-tech', '', '省略可') +
+          P.fieldHtml('Tech（Container 系のみ）', 'c4-add-tech', '', '省略可') +
           P.fieldHtml('Description', 'c4-add-descr', '', '省略可') +
           P.primaryButtonHtml('c4-add-btn', '+ 要素追加') +
         '</div>' +
@@ -773,7 +773,7 @@ window.MA.modules.c4 = (function() {
         var tech = document.getElementById('c4-add-tech').value.trim();
         var descr = document.getElementById('c4-add-descr').value.trim();
         var parent = document.getElementById('c4-add-parent').value;
-        if (!id || !label) { alert('ID と Label は必須'); return; }
+        if (!id || !label) { alert('ID と Label は必須です'); return; }
         var before = ctx.getMmdText();
         var finalId = uniqueId(before, id);
         // A duplicate alias is renamed rather than rejected, because mermaid accepts
@@ -792,7 +792,7 @@ window.MA.modules.c4 = (function() {
         var to = document.getElementById('c4-add-rel-to').value;
         var label = document.getElementById('c4-add-rel-label').value.trim();
         var tech = document.getElementById('c4-add-rel-tech').value.trim();
-        if (!from || !to) { alert('From/To は必須'); return; }
+        if (!from || !to) { alert('From と To を選択してください'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addRel(ctx.getMmdText(), kind, from, to, label, tech));
         ctx.onUpdate();
@@ -824,7 +824,7 @@ window.MA.modules.c4 = (function() {
           P.fieldHtml('ラベル', 'c4-edit-label', el.label) +
           P.fieldHtml('Tech', 'c4-edit-tech', el.tech || '') +
           P.fieldHtml('Description', 'c4-edit-descr', el.descr || '') +
-          P.dangerButtonHtml('c4-edit-delete', el.isBoundary ? '削除（中の要素ごと）' : '削除');
+          P.dangerButtonHtml('c4-edit-delete', el.isBoundary ? '削除（中の要素も一緒に）' : '削除');
         var ln = el.line;
         var endLn = el.endLine;
         var isB = !!el.isBoundary;

@@ -194,8 +194,12 @@ window.MA.properties = (function() {
       '<button class="' + opts.deleteClass + '"' + dataAttrs + delTitle + delAria + ' style="background:var(--accent-red);color:#fff;border:none;padding:4px 8px;min-width:24px;min-height:24px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">' + delLabel + '</button>' : '';
     // 行に印を付ける。一覧の絞り込みはこの印を見て行を選ぶので、
     // 各モジュールは何もしなくてよい (41か所がこの関数を通る)。
+    // 行の文字はパネル幅で切り落とされる。既定幅でも半数以上の行が省略され、
+    // しかも `(in 親)` のような補足は行末にあるので真っ先に消える。切れた行を
+    // 読む手段が本文テキストを見に行くことしか無かったので、全文を title に置く。
+    var rowFull = String(opts.label) + (opts.sublabel ? ' ' + String(opts.sublabel) : '');
     return '<div class="ma-list-row" style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
-      '<div style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + fontStyle + '">' + escHtml(opts.label) + sub + '</div>' +
+      '<div title="' + escHtml(rowFull) + '" style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + fontStyle + '">' + escHtml(opts.label) + sub + '</div>' +
       selectBtn + deleteBtn +
     '</div>';
   }

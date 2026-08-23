@@ -481,7 +481,7 @@ window.MA.modules.blockBeta = (function() {
 
         // 親グループの選択は再描画をまたいで保持する。同じ group に続けて入れる
         // ケースが普通なので、毎回「なし」に戻ると選び直しが要る。
-        var groupOpts = [{ value: '', label: '（なし・トップレベル）', selected: !lastAddParent }].concat(
+        var groupOpts = [{ value: '', label: '（指定なし＝トップレベル）', selected: !lastAddParent }].concat(
           groups.map(function(g) {
             var depth = 0, cur = g;
             while (cur && cur.parentId) {
@@ -620,7 +620,7 @@ window.MA.modules.blockBeta = (function() {
           var from = document.getElementById('block-add-link-from').value;
           var to = document.getElementById('block-add-link-to').value;
           var label = document.getElementById('block-add-link-label').value.trim();
-          if (!from || !to) { alert('From / To を選択してください'); return; }
+          if (!from || !to) { alert('From と To を選択してください'); return; }
           window.MA.history.pushHistory();
           ctx.setMmdText(addLink(ctx.getMmdText(), from, to, label));
           ctx.onUpdate();

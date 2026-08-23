@@ -450,7 +450,7 @@ window.MA.modules.requirementDiagram = (function() {
           var fv = document.getElementById('req-add-rel-from').value;
           var tv = document.getElementById('req-add-rel-to').value;
           var rtv = document.getElementById('req-add-rel-type').value;
-          if (!fv || !tv) { alert('From / To を選択してください'); return; }
+          if (!fv || !tv) { alert('From と To を選択してください'); return; }
           window.MA.history.pushHistory();
           ctx.setMmdText(addRelation(ctx.getMmdText(), fv, rtv, tv));
           ctx.onUpdate();

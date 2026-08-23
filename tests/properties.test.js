@@ -231,7 +231,10 @@ describe('listItemHtml: 削除ボタンの警告表示', function() {
   test('deleteClass が無ければ削除ボタンごと出ない', function() {
     var html = P.listItemHtml({ label: 'a', deleteLabel: '✕ 3', deleteTitle: 'x' });
     expect(html).not.toContain('✕ 3');
-    expect(html).not.toContain('title=');
+    expect(html).not.toContain('<button');
+    // 行のラベルには全文を読むための title が付くので、`title=` の有無ではなく
+    // ボタンが出ていないことを見る。
+    expect(html).not.toContain('aria-label=');
   });
 
   test('data 属性は編集ボタンと削除ボタンの両方に付く', function() {
@@ -286,5 +289,22 @@ describe('listItemHtml: 削除の警告表示', function() {
   test('W6: ラベルと入力欄が for で結び付く', function() {
     expect(P.fieldHtml('ラベル', 'x-label', '')).toContain('for="x-label"');
     expect(P.selectFieldHtml('親境界', 'x-parent', [])).toContain('for="x-parent"');
+  });
+});
+
+describe('一覧行の全文を title で読めるようにする', function() {
+  test('W7: ラベルと補足が title に入る', function() {
+    var html = P.listItemHtml({ label: 'core0 ("メインCPUコア")', sublabel: '(in cpu_group)', deleteClass: 'x' });
+    var m = html.match(/<div title="([^"]*)"/);
+    expect(m).not.toBeNull();
+    expect(m[1]).toContain('core0');
+    expect(m[1]).toContain('cpu_group');
+  });
+
+  test('W8: 補足が無くてもラベルは title に入る', function() {
+    var html = P.listItemHtml({ label: 'ext', deleteClass: 'x' });
+    var m = html.match(/<div title="([^"]*)"/);
+    expect(m).not.toBeNull();
+    expect(m[1]).toContain('ext');
   });
 });
