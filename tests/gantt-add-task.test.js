@@ -48,17 +48,30 @@ describe('nextStartDate: 日程の自動送り', function() {
     expect(G.nextStartDate(base, 0)).toBeNull();
   });
 
-  test('AT-8: 終了日が duration なら null', function() {
-    // 解決値を推測して静かに誤った日付を入れるより、空で出す
+  // 以前はここを null にしていた（「解決値を推測して静かに誤った日付を入れるより、
+  // 空で出す」）。前提を変えた: 推測ではなく、**チャートを描くのと同じ resolveSpan**
+  // で解く。図に描かれている終わりの日と、フォームが提案する開始日が一致する。
+  //
+  // 空で出す方針は、期間指定 (`10d`) が最も普通の書き方であるうえにマイルストーンが
+  // 必ず `0d` を持つため、**マイルストーンを1本足しただけで以後の追加が全部
+  // 「開始日を入れてください」で弾かれる**という形で現れていた（日付を手打ちする
+  // まで復帰しない）。判断を変えたので ADR ドラフトを起票してある。
+  test('AT-8: 終了日が duration でも、チャートと同じ解決で送る', function() {
     var t = base + '    設計 :t1, 2026-03-01, 5d\n';
-    expect(G.nextStartDate(t, 0)).toBeNull();
+    expect(G.nextStartDate(t, 0)).toBe('2026-03-06');
   });
 
-  test('AT-9: 開始日が after なら null', function() {
+  test('AT-8b: マイルストーンの後も送れる（0d で止まらない）', function() {
+    var t = base + '    設計 :t1, 2026-03-01, 5d\n' +
+                   '    DR1 :milestone, m1, 2026-03-20, 0d\n';
+    expect(G.nextStartDate(t, 0)).toBe('2026-03-20');
+  });
+
+  test('AT-9: 開始日が after でも、その連鎖を解いて送る', function() {
     var t = base + '    設計 :t1, 2026-03-01, 2026-03-10\n' +
                    '    実装 :t2, after t1, 2026-03-20\n';
-    // 最終タスクの開始が after なので送れない
-    expect(G.nextStartDate(t, 0)).toBeNull();
+    // after は resolveSpan が解ける。最終タスクの終了日は明示されている。
+    expect(G.nextStartDate(t, 0)).toBe('2026-03-20');
   });
 
   test('AT-10: セクション内の最終タスクを見る', function() {
@@ -99,9 +112,22 @@ describe('nextDurationDays: 期間の維持', function() {
     expect(G.nextDurationDays(t, 0)).toBe(9);
   });
 
-  test('AT-15: 解決できなければ null', function() {
-    expect(G.nextDurationDays(base + '    設計 :t1, 2026-03-01, 5d\n', 0)).toBeNull();
+  test('AT-15: duration 指定も解決して日数を返す / タスクが無ければ null', function() {
+    expect(G.nextDurationDays(base + '    設計 :t1, 2026-03-01, 5d\n', 0)).toBe(5);
     expect(G.nextDurationDays(base, 0)).toBeNull();
+  });
+
+  test('AT-15c: 期間の既定はマイルストーンから取らない', function() {
+    // マイルストーンは点なので長さが 0。それを次の既定にすると
+    // 「開始日 = 終了日」の空タスクが提案される。直前の通常タスクを見る。
+    var t = base + '    設計 :t1, 2026-03-01, 5d\n' +
+                   '    DR1 :milestone, m1, 2026-03-20, 0d\n';
+    expect(G.nextDurationDays(t, 0)).toBe(5);
+  });
+
+  test('AT-15d: マイルストーンしか無ければ null', function() {
+    var t = base + '    DR1 :milestone, m1, 2026-03-20, 0d\n';
+    expect(G.nextDurationDays(t, 0)).toBeNull();
   });
 
   test('AT-15b: 形は日付でも実在しない日なら null', function() {
@@ -228,5 +254,49 @@ describe('removeGlobalSetting: 自動に戻す', function() {
     var off = G.removeGlobalSetting(withAf, 'axisFormat');
     var on = G.updateGlobalSetting(off, 'axisFormat', '%Y/%m');
     expect(G.parseGantt(on).axisFormat).toBe('%Y/%m');
+  });
+});
+
+describe('打ち間違いの日付をテキストに書かない', function() {
+  // `<input type="date">` の表示は yyyy/mm/dd で年が先頭セグメント。クリックすると
+  // 年に焦点が入るので、月日から打つ癖があると年に数字が入る。実測:
+  //   年に「26」   → `0026-05-30`。parse は OK、期間表示が逆転する
+  //   年に「0620…」→ `62020-02-06`。parse は OK、期間計算がこの行を無視し
+  //                   バーは幅ゼロ
+  // どちらもその後、日付欄が空のまま固定されてパネルから何も追加できなくなる。
+  // 手でテキストを直せば復帰するが、気づく手がかりが画面に無い。
+  //
+  // `min` / `max` 属性は入力を止めない（値は入るし change も飛ぶ）ので、
+  // テキストを書く側で弾く。
+  var T = ['gantt', '    dateFormat YYYY-MM-DD', '    section 設計',
+    '    実装 :t1, 2026-04-15, 2026-05-30', ''].join('\n');
+  var LINE = 4;
+
+  test('DV-1: 4桁でも範囲外の年は書かない', function() {
+    expect(G.updateTaskDates(T, LINE, null, '0026-05-30')).toBe(T);
+    expect(G.updateTaskDates(T, LINE, '0026-05-30', null)).toBe(T);
+  });
+
+  test('DV-2: 5桁の年は書かない', function() {
+    expect(G.updateTaskDates(T, LINE, null, '62020-02-06')).toBe(T);
+  });
+
+  test('DV-3: 形は日付でも実在しない日は書かない', function() {
+    // DATE_RE は \d{4}-\d{2}-\d{2} なので 9999-99-99 も通ってしまう。
+    expect(G.updateTaskDates(T, LINE, null, '9999-99-99')).toBe(T);
+    expect(G.updateTaskDates(T, LINE, null, '2026-02-30')).toBe(T);
+  });
+
+  test('DV-4: 正常な日付・期間・after・空は通す（弾きすぎない）', function() {
+    expect(G.updateTaskDates(T, LINE, null, '2026-06-30')).toContain('2026-06-30');
+    expect(G.updateTaskDates(T, LINE, '2026-04-20', null)).toContain('2026-04-20');
+    expect(G.updateTaskDates(T, LINE, null, '10d')).toContain('10d');
+    // 空文字は「消す」意味なので通す
+    expect(G.updateTaskDates(T, LINE, null, '')).not.toBe(T);
+  });
+
+  test('DV-5: 端の年は通す', function() {
+    expect(G.updateTaskDates(T, LINE, null, '1970-01-01')).toContain('1970-01-01');
+    expect(G.updateTaskDates(T, LINE, null, '2999-12-31')).toContain('2999-12-31');
   });
 });

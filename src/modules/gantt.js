@@ -215,7 +215,33 @@ window.MA.modules.gantt = (function() {
   // updateTaskDates — replaces dates on the line at 1-based lineNum.
   // Pass null for newStart or newEnd to leave that value unchanged.
   // When newStart is provided, any 'after' dependency is cleared.
+  // 打ち間違いの年をテキストに書かない。
+  //
+  // `<input type="date">` の表示は `yyyy/mm/dd` で年が先頭セグメント。クリックすると
+  // 年に焦点が入るので、月日から打つ癖があると年に数字が入る。実測:
+  //   年に「26」  → `実装 :t1, 2026-04-15, 0026-05-30`
+  //     parse は **OK**、ステータスバーは `期間: 0026-05-30 ~ 2026-04-15`（逆転）
+  //   年に「0620…」→ `コーディング :t1, 2026-04-15, 62020-02-06`
+  //     parse は **OK**、期間の計算はこの行を無視、バーは幅ゼロ
+  // どちらもその後 開始日 / 終了日 欄が空のまま固定され、パネルから何も追加でき
+  // なくなる。手でテキストを直せば復帰するが、気づく手がかりが画面に無い。
+  //
+  // `min` / `max` は入力を止めないので（値は入るし change も飛ぶ）、テキストを書く
+  // 側で弾く。c4 の境界端点 Rel と同じ置き方 —— 経路が増えても守られる。
+  var YEAR_MIN = 1970, YEAR_MAX = 2999;
+  function isSaneDate(s) {
+    if (!isDate(s)) return false;
+    var y = parseInt(String(s).slice(0, 4), 10);
+    if (!(y >= YEAR_MIN && y <= YEAR_MAX)) return false;
+    // 形は日付でも実在しない日 (`9999-99-99`) は DATE_RE を通る。
+    var d = new Date(s + 'T00:00:00Z');
+    return !isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+  }
+
   function updateTaskDates(text, lineNum, newStart, newEnd) {
+    // 空文字は「消す」意味なので通す。日付として与えられたものだけ検査する。
+    if (newStart && !isSaneDate(newStart) && !isDuration(newStart) && !isAfter(newStart)) return text;
+    if (newEnd && !isSaneDate(newEnd) && !isDuration(newEnd)) return text;
     var lines = text.split('\n');
     var idx = lineNum - 1;
     if (idx < 0 || idx >= lines.length) return text;
@@ -332,20 +358,41 @@ window.MA.modules.gantt = (function() {
   // and filling it in silently is worse: F9 showed the naive version producing
   // either an exception or a 1970-01-01, and a wrong date that looks right is
   // harder to notice than a blank field.
-  function lastResolvedTask(text, sectionIndex) {
-    if (!text) return null;
+  // 追加フォームの既定値のもとになる「そのセクションで解決済みのタスク」。
+  //
+  // 以前はパーサが持っている生のトークンを見て `DATE_RE` に合わなければ null に
+  // していた。ところがパーサは第2トークンをそのまま `endDate` に入れるので、
+  // 期間指定 (`10d`) も、マイルストーンの `0d` も、`after` 連鎖もここで弾かれる。
+  // 実測: マイルストーンを1本足すと以後の追加が全部「開始日を入れてください」で
+  // 弾かれ、日付を手打ちするまで復帰しなかった。
+  //
+  // 日付の解決は resolveSpan が既に持っている (期間も after も解ける)。
+  // **同じ解決器を使う** —— ここだけ別の見方をすると、チャートに描かれている
+  // 終わりの日と、フォームが提案する開始日が食い違う。
+  function resolvedTasksIn(text, sectionIndex) {
+    if (!text) return [];
     var parsed = parseGantt(text);
+    var span = resolveSpan(parsed);
+    if (!span) return [];
     var sections = parsed.sections || [];
-    var tasks = parsed.tasks || [];
-    var inSection = tasks.filter(function(t) {
-      if (sectionIndex === -1 || sections.length === 0) return true;
-      return t.sectionIndex === sectionIndex;
-    });
-    if (inSection.length === 0) return null;
-    var last = inSection[inSection.length - 1];
-    if (!last.startDate || !last.endDate) return null;
-    if (!DATE_RE.test(last.startDate) || !DATE_RE.test(last.endDate)) return null;
-    return last;
+    var out = [];
+    for (var i = 0; i < parsed.tasks.length; i++) {
+      var t = parsed.tasks[i];
+      if (!(sectionIndex === -1 || sections.length === 0 || t.sectionIndex === sectionIndex)) continue;
+      if (!span.starts[i] || !span.endsByIndex[i]) continue;
+      out.push({ task: t, start: span.starts[i], end: span.endsByIndex[i] });
+    }
+    return out;
+  }
+
+  function lastResolvedTask(text, sectionIndex) {
+    var list = resolvedTasksIn(text, sectionIndex);
+    if (!list.length) return null;
+    var last = list[list.length - 1];
+    // 呼び出し側の後方互換: startDate / endDate は解決済みの日付を返す。
+    return { id: last.task.id, label: last.task.label, status: last.task.status,
+      line: last.task.line, sectionIndex: last.task.sectionIndex,
+      startDate: last.start, endDate: last.end };
   }
 
   function nextStartDate(text, sectionIndex) {
@@ -353,11 +400,22 @@ window.MA.modules.gantt = (function() {
     return last ? last.endDate : null;
   }
 
+  // 期間の既定値は「長さのあるタスク」から取る。
+  //
+  // マイルストーンは点なので長さが 0。それを次のタスクの既定にすると
+  // 「開始日 = 終了日」の空タスクが提案される。直前の長さのあるタスクまで遡る。
+  //
+  // 判定は長さそのもの (`days > 0`) 一本にしてある。`status === 'milestone'` を
+  // 併記していたが、`0d` を持つ以上どのみち長さ 0 で弾かれるため、テストで
+  // 区別できない重複だった (除外を消すミューテーションが SURVIVED した)。
+  // 長さで見ておけば、`0d` を手で書いた通常タスクも同じ扱いになる。
   function nextDurationDays(text, sectionIndex) {
-    var last = lastResolvedTask(text, sectionIndex);
-    if (!last) return null;
-    var days = window.MA.dateUtils.daysBetween(last.startDate, last.endDate);
-    return (typeof days === 'number' && isFinite(days)) ? days : null;
+    var list = resolvedTasksIn(text, sectionIndex);
+    for (var i = list.length - 1; i >= 0; i--) {
+      var days = window.MA.dateUtils.daysBetween(list[i].start, list[i].end);
+      if (typeof days === 'number' && isFinite(days) && days > 0) return days;
+    }
+    return null;
   }
 
   // `0d` is not optional: without it mermaid cannot resolve the milestone's
@@ -515,6 +573,7 @@ window.MA.modules.gantt = (function() {
     var addDays = window.MA.dateUtils.addDays;
     var ends = {};   // task id -> resolved end date
     var starts = []; // task index -> resolved start date
+    var endsByIndex = []; // task index -> resolved end date
     var prevEnd = null;
     var min = null, max = null;
 
@@ -549,6 +608,7 @@ window.MA.modules.gantt = (function() {
 
       ends[t.id] = end;
       starts[i] = start;   // 較正の原点に使う。after で解決した分もここに入る
+      endsByIndex[i] = end; // 追加フォームの既定値もここから取る (同じ解決器を使う)
       prevEnd = end;
       if (!min || start < min) min = start;
       if (!max || end > max) max = end;
@@ -557,7 +617,7 @@ window.MA.modules.gantt = (function() {
     if (!min || !max) return null;
     var days = window.MA.dateUtils.daysBetween(min, max);
     if (!isFinite(days) || days < 0) return null;
-    return { min: min, max: max, days: Math.max(1, days), starts: starts };
+    return { min: min, max: max, days: Math.max(1, days), starts: starts, endsByIndex: endsByIndex };
   }
 
   // The lines a section owns: its own `section` line through the line before the
@@ -1243,15 +1303,15 @@ window.MA.modules.gantt = (function() {
         (isMilestone
           ? '<div style="margin-bottom:8px;">' +
               '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">日付</label>' +
-              '<input id="prop-add-start" type="date" value="' + esc(fStart) + '" style="' + inputStyle + '">' +
+              '<input id="prop-add-start" type="date" min="1970-01-01" max="2999-12-31" value="' + esc(fStart) + '" style="' + inputStyle + '">' +
             '</div>'
           : '<div style="margin-bottom:8px;">' +
               '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
-              '<input id="prop-add-start" type="date" value="' + esc(fStart) + '" style="' + inputStyle + '">' +
+              '<input id="prop-add-start" type="date" min="1970-01-01" max="2999-12-31" value="' + esc(fStart) + '" style="' + inputStyle + '">' +
             '</div>' +
             '<div style="margin-bottom:8px;">' +
               '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
-              '<input id="prop-add-end" type="date" value="' + esc(fEnd) + '" style="' + inputStyle + '">' +
+              '<input id="prop-add-end" type="date" min="1970-01-01" max="2999-12-31" value="' + esc(fEnd) + '" style="' + inputStyle + '">' +
             '</div>') +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">セクション</label>' +
@@ -1323,15 +1383,24 @@ window.MA.modules.gantt = (function() {
         secSel.addEventListener('change', function() { addForm.section = this.value; });
       }
 
+      // 引数なしで `renderProps()` を呼んでいた。この関数の第3引数は propsEl なので
+      // undefined になり、先頭の `if (!propsEl) return;` で**何も起きずに抜けていた**。
+      //
+      // 種別を切り替えても画面が変わらず、次にアプリ側の再描画が走ったときに初めて
+      // 反映される。実測: マイルストーンを1本追加したあと「タスク」を押しても
+      // 種別トグルはマイルストーンのまま、終了日の欄も出てこない
+      // (`prop-add-end` が DOM に無い)。
+      function rerenderAddForm() { renderProps(selData, parsedData, propsEl, ctx); }
+
       window.MA.properties.bindEvent('prop-add-kind-task', 'click', function() {
         addForm.kind = 'task';
         setAddFormFocus('label');
-        renderProps();
+        rerenderAddForm();
       });
       window.MA.properties.bindEvent('prop-add-kind-milestone', 'click', function() {
         addForm.kind = 'milestone';
         setAddFormFocus('label');
-        renderProps();
+        rerenderAddForm();
       });
 
       function doAddTask() {
@@ -1613,15 +1682,15 @@ window.MA.modules.gantt = (function() {
         (task.status === 'milestone'
           ? '<div style="margin-bottom:8px;">' +
               '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">日付</label>' +
-              '<input id="prop-start" type="date" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+              '<input id="prop-start" type="date" min="1970-01-01" max="2999-12-31" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
             '</div>'
           : '<div style="margin-bottom:8px;">' +
               '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">開始日</label>' +
-              '<input id="prop-start" type="date" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+              '<input id="prop-start" type="date" min="1970-01-01" max="2999-12-31" value="' + window.MA.htmlUtils.escHtml(task.startDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
             '</div>' +
             '<div style="margin-bottom:8px;">' +
               '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">終了日</label>' +
-              '<input id="prop-end" type="date" value="' + window.MA.htmlUtils.escHtml(task.endDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
+              '<input id="prop-end" type="date" min="1970-01-01" max="2999-12-31" value="' + window.MA.htmlUtils.escHtml(task.endDate || '') + '" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
             '</div>') +
         '<div style="margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">ステータス</label>' +
