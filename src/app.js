@@ -1339,6 +1339,12 @@ function setZoomFromUser(z) {
     // Step off 100% in the direction asked for, rather than landing on it — the
     // first click after leaving overview should visibly do something.
     setZoom(z > zoom ? 1.1 : 0.9);
+    // 詳細モードはチャートを自然幅で描き直す (ADR-025)。概観から「－」で抜けると、
+    // 90% を掛けてもなお元より広くなる —— 実測で SVG 幅 788px → 1560px。
+    // 「縮小を押したのに広がった」と見えるので、何が起きたかを一言出す。
+    // 戻り方も添える (以前は Fit しか無く、それが画面に書かれていなかった)。
+    showTransient('詳細表示に切り替えました（全期間を実寸で描きます）。' +
+      '倍率表示を押すと概観に戻ります', 3500);
     scheduleRefresh();
     return;
   }
@@ -1453,9 +1459,40 @@ function applyMermaidConfig(parsedData) {
 function updateZoomLabel() {
   if (!zoomDisplayEl) return;
   var isGantt = currentModule && currentModule.type === 'gantt';
-  zoomDisplayEl.textContent = (isGantt && ganttViewMode === 'overview')
-    ? '概観'
+  // 詳細モードでも「詳細」と分かるようにする。以前は概観だけが名前を持ち、
+  // 詳細は「90%」としか出なかったので、**いまどちらにいるのか読み取れなかった**
+  // (「詳細」という語が画面のどこにも出ない)。
+  zoomDisplayEl.textContent = isGantt
+    ? (ganttViewMode === 'overview' ? '概観' : '詳細 ' + Math.round(zoom * 100) + '%')
     : Math.round(zoom * 100) + '%';
+  if (zoomDisplayEl.setAttribute) {
+    zoomDisplayEl.setAttribute('aria-label', isGantt
+      ? (ganttViewMode === 'overview'
+        ? '表示は概観。押すと詳細に切り替わります'
+        : '表示は詳細 ' + Math.round(zoom * 100) + '%。押すと概観に戻ります')
+      : '拡大率 ' + Math.round(zoom * 100) + '%');
+    zoomDisplayEl.disabled = !isGantt;
+    zoomDisplayEl.style.cursor = isGantt ? 'pointer' : 'default';
+  }
+}
+
+// 概観 ⇄ 詳細 の往復。
+//
+// 概観からは ＋ / － のどちらを押しても詳細へ抜けるが、詳細から概観へ戻る道は
+// Fit しか無かった。しかも詳細モードはチャートを自然幅で描き直すので、
+// **「－（縮小）」を押すと図はかえって広がる** (実測: SVG 幅 788px → 1560px、
+// 5タスク中2本が画面外)。「縮小」を押して大きくなり、戻り方も分からない、という
+// 状態だったので、倍率表示そのものを往復のスイッチにする。
+function toggleGanttViewMode() {
+  if (!currentModule || currentModule.type !== 'gantt') return;
+  if (ganttViewMode === 'overview') {
+    setGanttViewMode('detail');
+    setZoom(1.0);
+  } else {
+    setGanttViewMode('overview');
+    setZoom(1.0);
+  }
+  scheduleRefresh();
 }
 
 function setGanttViewMode(mode) {
@@ -2127,6 +2164,12 @@ function init() {
   document.getElementById('btn-zoom-fit').addEventListener('click', function() {
     zoomToFit();
   });
+  // 倍率表示そのものが概観 ⇄ 詳細のスイッチ。ツールバーを横に伸ばさずに
+  // 往復させるため、既にそこにある表示を再利用する。
+  var zoomToggleEl = document.getElementById('zoom-display');
+  if (zoomToggleEl) {
+    zoomToggleEl.addEventListener('click', function() { toggleGanttViewMode(); });
+  }
 
   // ── File input handler ───────────────────────────────────────────────────
   document.getElementById('file-input').addEventListener('change', function(e) {

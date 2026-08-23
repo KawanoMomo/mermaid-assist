@@ -124,13 +124,17 @@ html, body {
   border-color: transparent;
 }
 
+/* 倍率の表示はボタンでもある (概観 ⇄ 詳細)。42px 固定だと「詳細 90%」が入らない
+   ので下限だけ決めて中身に合わせる。ガント以外では disabled にしているので、
+   .tb-btn:disabled の色がそのまま「押せない」を表す。 */
 #zoom-display {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-secondary);
-  width: 42px;
+  min-width: 42px;
   text-align: center;
   user-select: none;
+  white-space: nowrap;
 }
 
 /* Export menu wrapper */
@@ -659,7 +663,13 @@ html, body {
     <div class="tb-sep"></div>
 
     <button class="tb-btn" id="btn-zoom-out" title="縮小">－</button>
-    <span id="zoom-display">100%</span>
+    <!-- 倍率の表示そのものをボタンにする。ガントの「概観 / 詳細」は
+         概観 → (＋ か －) → 詳細 の一方通行で、**戻る手段が Fit だけ**だった。
+         しかも表示は「詳細」ではなく「90%」なので、いま何モードなのかも
+         読み取れない。ツールバーを横に伸ばさずに往復させるため、既にそこにある
+         表示を押せるようにする。ガント以外では押しても何も起きない (既定倍率へ
+         戻す動作は Fit が持っている)。 -->
+    <button id="zoom-display" class="tb-btn" title="概観と詳細を切り替え（ガントのみ）">100%</button>
     <button class="tb-btn" id="btn-zoom-in"  title="拡大">＋</button>
     <button class="tb-btn" id="btn-zoom-fit" title="幅に合わせる">Fit</button>
 
