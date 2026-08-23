@@ -839,6 +839,58 @@ describe('Q7: deletionImpactFrom は exact と一致する', function() {
   });
 });
 
+describe('境界を畳むときの後始末', function() {
+  test('T1: 畳みと刈りが2周必要な形でも収束する', function() {
+    // x を消す → b1 が空になって畳まれる → b1 の id が消える
+    // → `Rel(a, b1)` がダングリングになって刈られる → b2 が空になって畳まれる
+    // 1周で止めると、b2 の中にダングリングな Rel が残ったままになる。
+    //
+    // ミューテーション検査で「不動点をやめて1周だけにする」が生き残ったため追加した。
+    // 既存の E1 / Q7c はどれも1周で片付く形だった。
+    var t = [
+      'C4Context', '    title T', '    System(a, "A")',
+      '    System_Boundary(b1, "B1") {', '        System(x, "X")', '    }',
+      '    System_Boundary(b2, "B2") {', '        Rel(a, b1, "r")', '    }', ''
+    ].join('\n');
+    var x = c4.parseC4(t).elements.filter(function(e) { return e.id === 'x'; })[0];
+    var out = c4.deleteElementLine(t, x.line);
+    expect(out.indexOf('System_Boundary(b1')).toBe(-1);
+    expect(out.indexOf('Rel(a, b1')).toBe(-1);
+    expect(out.indexOf('System_Boundary(b2')).toBe(-1);
+    expect(out.indexOf('{')).toBe(-1);            // 空の境界が1つも残らない
+    expect(out.indexOf('System(a, "A")')).toBeGreaterThan(-1);
+  });
+
+  test('T2: 畳むときも利用者が書いたコメントは捨てない', function() {
+    // 畳む理由は mermaid が空の境界を受理しないことであって、本文を消すことでは
+    // ない。境界があった位置へ繰り上げる (block 側の EG7 と同じ扱い)。
+    var t = [
+      'C4Context', '    title T',
+      '    System_Boundary(b, "B") {', '        %% ECU 側の内訳', '        System(s, "S")', '    }', ''
+    ].join('\n');
+    var s = c4.parseC4(t).elements.filter(function(e) { return e.id === 's'; })[0];
+    var out = c4.deleteElementLine(t, s.line);
+    expect(out.indexOf('System_Boundary(b')).toBe(-1);
+    expect(out.indexOf('%% ECU 側の内訳')).toBeGreaterThan(-1);
+  });
+
+  test('T3: 入れ子が二段まとめて畳まれてもコメントは順序どおり残る', function() {
+    var t = [
+      'C4Context', '    title T',
+      '    System_Boundary(b1, "B1") {', '        %% 外',
+      '        System_Boundary(b2, "B2") {', '            %% 内', '            System(s, "S")', '        }',
+      '    }', ''
+    ].join('\n');
+    var s = c4.parseC4(t).elements.filter(function(e) { return e.id === 's'; })[0];
+    var out = c4.deleteElementLine(t, s.line);
+    var outer = out.indexOf('%% 外');
+    var inner = out.indexOf('%% 内');
+    expect(outer).toBeGreaterThan(-1);
+    expect(inner).toBeGreaterThan(-1);
+    expect(inner > outer).toBe(true);
+  });
+});
+
 describe('境界内にリレーションがある場合の削除', function() {
   // collapse を先に走らせると、その時点で境界は Rel 行を含むので「空でない」と
   // 判定され、あとから prune が Rel を落として空の境界が残る。mermaid は空境界を

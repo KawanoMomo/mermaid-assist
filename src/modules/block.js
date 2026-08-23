@@ -107,6 +107,34 @@ window.MA.modules.blockBeta = (function() {
     return lines.join('\n');
   }
 
+  // mermaid は中身の無い `block … end` を受理しない。空のまま作ると「+ グループ追加」
+  // を1回押しただけで parse が Error になり、しかもプレビューは直前の図を出したまま
+  // なので、壊れたことが画面から分からない (実機で確認: 押下後 parse=Error、svg は
+  // 前の内容のまま)。c4 の addElement が境界に対してやっているのと同じく、必ず子を
+  // 1つ添えて作る。
+  //
+  // id は衝突させない。mermaid は重複した id を黙って受理するのに renderProps は
+  // 最初の一致で選択を解決するため、重複するとその後の編集・削除が別のブロックに
+  // 当たる (c4 の uniqueId と同じ理由)。
+  function addGroup(text, gid) {
+    var taken = collectIds(text);
+    function free(want) {
+      if (taken.indexOf(want) === -1) { taken.push(want); return want; }
+      for (var n = 2; n < 1000; n++) {
+        var cand = want + '_' + n;
+        if (taken.indexOf(cand) === -1) { taken.push(cand); return cand; }
+      }
+      return want;
+    }
+    var id = free(gid);
+    var childId = free(id + '_1');
+    var lines = text.split('\n');
+    var insertAt = lines.length;
+    while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
+    lines.splice(insertAt, 0, '  block:' + id, '    ' + childId + '["新規ブロック"]', '  end');
+    return { text: lines.join('\n'), id: id, childId: childId };
+  }
+
   // Index of the 'end' that closes the group opened at startIdx. Counts nesting
   // depth: the first 'end' after a group start belongs to the innermost group,
   // not necessarily to this one. Returns -1 when the group is left unclosed.
@@ -258,26 +286,93 @@ window.MA.modules.blockBeta = (function() {
         lines[idx] = indent + kept.join(' ');
       }
     }
-    // Cascade: drop links whose endpoint no longer exists. Comparing the id sets
-    // before and after keeps two cases honest — an id that also lives outside the
-    // deleted range survives, so its links stay; and a link that was already
-    // dangling before this edit is left exactly as the user wrote it.
-    var result = lines.join('\n');
-    var idsAfter = collectIds(result);
+    return tidyAfterDelete(idsBefore, lines.join('\n'));
+  }
+
+  // Cascade: drop links whose endpoint no longer exists. Comparing the id sets
+  // before and after keeps two cases honest — an id that also lives outside the
+  // deleted range survives, so its links stay; and a link that was already
+  // dangling before this edit is left exactly as the user wrote it.
+  function pruneDanglingLinks(idsBefore, text) {
+    var idsAfter = collectIds(text);
     var removedIds = idsBefore.filter(function(id) { return idsAfter.indexOf(id) === -1; });
-    if (removedIds.length === 0) return result;
+    if (removedIds.length === 0) return text;
 
     var linkRe = new RegExp('^(\\s*)(' + ID + ')\\s*(?:--\\s*"?[^"]*?"?\\s*)?-->\\s*(' + ID + ')\\s*$');
-    lines = result.split('\n').filter(function(ln) {
+    return text.split('\n').filter(function(ln) {
       var m = ln.match(linkRe);
       if (!m) return true;
       return removedIds.indexOf(m[2]) === -1 && removedIds.indexOf(m[3]) === -1;
-    });
-    return lines.join('\n');
+    }).join('\n');
   }
 
+  // 中身が無くなったグループを畳む。mermaid は空の `block … end` を受理しない ——
+  // 名前付き (`block:g1`)、無名 (`block`)、コメントだけ、いずれも Parse error に
+  // なる (v11.13.0 で実測)。一方 `columns N` だけのグループとリンクだけのグループは
+  // 受理されるので、これらは中身とみなして畳まない。
+  //
+  // 最後の子ブロックを消しただけで図が描画不能になっていた:
+  //   block:g1
+  //     n10["N10"]     ← これを削除
+  //   end
+  // → `block:g1` / `end` が残り Parse error。ファズで、元が描画できる文書30件中
+  //    1件がこの形で壊れた。
+  function collapseEmptyGroups(lines) {
+    var out = lines.slice();
+    // 上から見つけた順に畳む。外側は内側の行を中身として数えるので、外側が空に
+    // なるのは内側が畳まれた後。不動点まで回すことで内側から順に片付く。
+    for (var guard = 0; guard < 500; guard++) {
+      var openIdx = -1, endIdx = -1;
+      for (var i = 0; i < out.length && openIdx === -1; i++) {
+        if (!GROUP_START_RE.test(out[i].trim())) continue;
+        var e = findMatchingEnd(out, i);
+        if (e === -1) continue;             // 閉じていないグループには触らない
+        var empty = true;
+        for (var j = i + 1; j < e; j++) {
+          var s = out[j].trim();
+          if (!s || s.indexOf('%%') === 0) continue;   // 空行とコメントは中身ではない
+          empty = false;
+          break;
+        }
+        if (empty) { openIdx = i; endIdx = e; }
+      }
+      if (openIdx === -1) break;
+      // 中に残っているコメントは利用者が書いた文。畳む理由は mermaid が空グループを
+      // 受理しないことであって、本文を捨てることではないので、グループがあった位置へ
+      // 繰り上げる。畳むたびに最低でも header と end の2行が減るので不動点に落ちる。
+      var kept = [];
+      var headIndent = out[openIdx].match(/^(\s*)/)[1];
+      for (var k = openIdx + 1; k < endIdx; k++) {
+        var c = out[k].trim();
+        if (c.indexOf('%%') === 0) kept.push(headIndent + c);
+      }
+      out.splice.apply(out, [openIdx, endIdx - openIdx + 1].concat(kept));
+    }
+    return out;
+  }
+
+  // 削除の後始末。「消えた id を指すリンクを刈る」と「空になったグループを畳む」を
+  // 不動点まで交互に適用する。一方通行だとどちらかが必ず残る:
+  //   畳むのが先 → 中のリンクごと消え、それが別のグループを空にした分を取り逃がす
+  //   刈るのが先 → リンクだけだったグループが空のまま残り mermaid が受理しない
+  // c4 の tidyAfterDelete と同じ理由・同じ形。C4 では順序を一方通行にしたせいで
+  // 空の境界が残る Critical になっており、block は畳む処理自体が無かった。
+  function tidyAfterDelete(idsBefore, afterText) {
+    var prev = afterText;
+    for (var guard = 0; guard < 50; guard++) {
+      var pruned = pruneDanglingLinks(idsBefore, prev);
+      var collapsed = collapseEmptyGroups(pruned.split('\n')).join('\n');
+      if (collapsed === prev) return collapsed;
+      prev = collapsed;
+    }
+    return prev;
+  }
+
+  // リンクだけを持つグループは mermaid が受理するので、そのリンクを消すと
+  // グループが空になって描画不能になる。削除経路はここも通す。
   function deleteLink(text, lineNum) {
-    return window.MA.textUpdater.deleteLine(text, lineNum);
+    var idsBefore = collectIds(text);
+    return tidyAfterDelete(idsBefore, window.MA.textUpdater.deleteLine(text, lineNum));
   }
 
   // Rewrite one block token on a line, leaving every other token byte-identical.
@@ -607,13 +702,13 @@ window.MA.modules.blockBeta = (function() {
         P.bindEvent('block-add-group-btn', 'click', function() {
           var gid = document.getElementById('block-add-group-id').value.trim();
           if (!gid) { alert('グループ ID は必須です'); return; }
+          var added = addGroup(ctx.getMmdText(), gid);
+          // 重複を黙って改名すると、設計書と id を揃えている利用者が取り違える。
+          if (added.id !== gid) {
+            alert('グループ ID "' + gid + '" は既に使われているため "' + added.id + '" で追加します');
+          }
           window.MA.history.pushHistory();
-          var t = ctx.getMmdText();
-          var lines = t.split('\n');
-          var insertAt = lines.length;
-          while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
-          lines.splice(insertAt, 0, '  block:' + gid, '  end');
-          ctx.setMmdText(lines.join('\n'));
+          ctx.setMmdText(added.text);
           ctx.onUpdate();
         });
         P.bindEvent('block-add-link-btn', 'click', function() {
@@ -784,6 +879,7 @@ window.MA.modules.blockBeta = (function() {
     },
     addBlock: addBlock, addNestedBlock: addNestedBlock, addLink: addLink,
     deleteBlock: deleteBlock, deleteLink: deleteLink, deletionImpact: deletionImpact,
+    addGroup: addGroup,
     updateBlockLabel: updateBlockLabel, updateBlockId: updateBlockId, updateLink: updateLink, setColumns: setColumns,
   };
 })();

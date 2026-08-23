@@ -507,7 +507,16 @@ window.MA.modules.c4 = (function() {
           if (stripComment(lines[j])) { empty = false; break; }
         }
         if (empty) {
-          lines.splice(o, closeIdx - o + 1);
+          // 中に残っているコメントは利用者が書いた文。畳む理由は mermaid が空の境界を
+          // 受理しないことであって、本文を捨てることではないので、境界があった位置へ
+          // 繰り上げる。畳むたびに最低でも開き行と閉じ行の2行が減るので終わる。
+          var kept = [];
+          var headIndent = String(lines[o]).match(/^(\s*)/)[1];
+          for (var k = o + 1; k < closeIdx; k++) {
+            var ct = String(lines[k]).trim();
+            if (ct.indexOf('%%') === 0) kept.push(headIndent + ct);
+          }
+          lines.splice.apply(lines, [o, closeIdx - o + 1].concat(kept));
           collapsed = true;
           break; // indices shifted; recompute
         }
