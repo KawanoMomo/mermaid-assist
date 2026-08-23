@@ -293,6 +293,100 @@ window.MA.modules.c4 = (function() {
     return n;
   }
 
+  // enclosingBoundary: その要素を直接囲んでいる境界 (最も内側)。無ければ null。
+  function enclosingBoundary(parsed, el) {
+    var found = null;
+    for (var i = 0; i < parsed.elements.length; i++) {
+      var b = parsed.elements[i];
+      if (!b.isBoundary || b.id === el.id) continue;
+      if (el.line > b.line && el.line < b.endLine) {
+        if (!found || b.line > found.line) found = b;
+      }
+    }
+    return found;
+  }
+
+  // moveElementToBoundary: 既にある要素を、別の境界の中へ (または一番外へ) 移す。
+  //
+  // FEAT-903。c4 は **`Boundary(...) { }` の中に置く位置**で親を表すので
+  // (addElement が `insertAt = parent.endLine - 1` で入れている)、
+  // 付け替えは値の書き換えでは成立せず、**行を動かす**ことになる。
+  // architecture だけは `in <親>` という行の属性なので書き換えで済んでいた。
+  //
+  // 動かす範囲:
+  //   ふつうの要素 = その1行
+  //   境界        = `{` の行から `}` の行まで (中身ごと)
+  // どちらも**直上の説明コメントを一緒に運ぶ** (UI-083 と同じ約束)。
+  function moveElementToBoundary(text, lineNum, targetId) {
+    var parsed = parseC4(text);
+    var el = null;
+    for (var i = 0; i < parsed.elements.length; i++) {
+      if (parsed.elements[i].line === lineNum) { el = parsed.elements[i]; break; }
+    }
+    if (!el) return text;
+
+    var cur = enclosingBoundary(parsed, el);
+    var curId = cur ? cur.id : '';
+    if (String(targetId || '') === String(curId)) return text;   // 変わらないなら触らない
+
+    var target = null;
+    if (targetId) {
+      for (var j = 0; j < parsed.elements.length; j++) {
+        var b = parsed.elements[j];
+        if (b.isBoundary && b.id === targetId) { target = b; break; }
+      }
+      if (!target) return text;
+      // 自分自身、または自分の中へは入れられない (循環)。
+      // 境界を自分の子孫の中に入れると `{ }` の対応が壊れ、図が出なくなる。
+      if (el.isBoundary && target.line >= el.line && target.line <= el.endLine) return text;
+    }
+
+    var lines = text.split('\n');
+    var notes = window.MA.textUpdater.notesAbove(text, el.line);
+    var from = notes.start;                                  // 説明の先頭
+    var to = el.isBoundary ? el.endLine : el.line;           // 動かす最後の行
+    if (to < from) return text;
+
+    var block = lines.slice(from - 1, to);
+    var oldIndent = (lines[el.line - 1].match(/^(\s*)/)[1] || '');
+    var newIndent;
+    var insertAt;                                            // 0-based の挿入位置
+
+    if (target) {
+      newIndent = ((lines[target.line - 1].match(/^(\s*)/)[1] || '') + '    ');
+      insertAt = target.endLine - 1;                         // 閉じ括弧の直前
+    } else {
+      newIndent = '    ';
+      insertAt = lines.length;
+      while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
+    }
+
+    // 先に抜いてから入れる。抜いた分だけ挿入位置が繰り上がる。
+    lines.splice(from - 1, to - from + 1);
+    if (insertAt > from - 1) insertAt -= (to - from + 1);
+    if (insertAt < 0) insertAt = 0;
+
+    // 字下げを付け直す。**中身の相対的な深さは保つ** (境界を動かすと中も動く)。
+    var shifted = block.map(function(l) {
+      if (!l.trim()) return l;
+      var ind = l.match(/^(\s*)/)[1] || '';
+      var rest = l.slice(ind.length);
+      var extra = ind.length > oldIndent.length ? ind.slice(oldIndent.length) : '';
+      return newIndent + extra + rest;
+    });
+    lines.splice.apply(lines, [insertAt, 0].concat(shifted));
+    // 中身が全部出て行って**空になった境界は畳む**。
+    //
+    // 実測: 空の `System_Boundary(b1, "A") { }` を残すと mermaid が描けず
+    // 「Error」になる。自前の解析は通るので、単体テストでは見えなかった
+    // (e2e で描画の状態を見て初めて出た)。
+    //
+    // 畳むのは削除経路 (deleteElementLine / deleteBoundary) と同じ約束。
+    // 境界が消えるのは利用者にとって損失だが、**描けない図を残すよりはまし**で、
+    // 同じ図種の中で扱いが割れるほうが分かりにくい。
+    return collapseEmptyBoundaries(lines).join('\n');
+  }
+
   // The boundary element occupying `lineNum`, or null when that line is not one.
   function boundaryAt(text, lineNum) {
     var parsed = parseC4(text);
@@ -765,6 +859,19 @@ window.MA.modules.c4 = (function() {
         // a boundary can only stay a boundary, and a plain element cannot become
         // one. Boundaries are created from the add form instead.
         var kOpts = kindOptionsFor(el.kind, el.isBoundary);
+        // FEAT-903: いま属している境界を出し、別の境界へ移せるようにする。
+        //
+        // 選べるのは**自分自身と自分の中を除いた**境界だけ。境界を自分の子孫の
+        // 中へ入れると `{ }` の対応が壊れ、図が出なくなる。選択肢の時点で
+        // 外しておけば、選んでから断るより手数が減る。
+        var here = enclosingBoundary(parsedData, el);
+        var parentOpts = [{ value: '', label: '（なし・一番外）', selected: !here }];
+        parsedData.elements.forEach(function(b) {
+          if (!b.isBoundary || b.id === el.id) return;
+          if (el.isBoundary && b.line >= el.line && b.line <= el.endLine) return;
+          parentOpts.push({ value: b.id, label: b.label || b.id,
+            selected: !!here && here.id === b.id });
+        });
         propsEl.innerHTML =
           P.panelHeaderHtml(el.id) +
           P.selectFieldHtml('Kind', 'c4-edit-kind', kOpts) +
@@ -772,6 +879,7 @@ window.MA.modules.c4 = (function() {
           P.fieldHtml('ラベル', 'c4-edit-label', el.label) +
           P.fieldHtml('Tech', 'c4-edit-tech', el.tech || '') +
           P.fieldHtml('Description', 'c4-edit-descr', el.descr || '') +
+          P.selectFieldHtml('親境界', 'c4-edit-parent', parentOpts) +
           P.dangerButtonHtml('c4-edit-delete', el.isBoundary ? '削除（中の要素ごと）' : '削除');
         var ln = el.line;
         var endLn = el.endLine;
@@ -783,6 +891,11 @@ window.MA.modules.c4 = (function() {
             ctx.setMmdText(updateElement(ctx.getMmdText(), ln, f, this.value));
             ctx.onUpdate();
           });
+        });
+        P.bindEvent('c4-edit-parent', 'change', function() {
+          window.MA.history.pushHistory();
+          ctx.setMmdText(moveElementToBoundary(ctx.getMmdText(), ln, this.value));
+          ctx.onUpdate();
         });
         P.bindEvent('c4-edit-delete', 'click', function() {
           window.MA.history.pushHistory();
@@ -842,6 +955,8 @@ window.MA.modules.c4 = (function() {
     detect: function(text) { return window.MA.parserUtils.detectDiagramType(text) === 'C4Context'; },
     parse: parseC4,
     parseC4: parseC4,
+    moveElementToBoundary: moveElementToBoundary,
+    enclosingBoundary: enclosingBoundary,
     template: function() {
       return [
         'C4Context',

@@ -120,6 +120,132 @@ window.MA.modules.blockBeta = (function() {
     return !!m && m[1] === id;
   }
 
+  // collapseEmptyGroups: 中身が無くなった `block:<id> ... end` を取り除く。
+  //
+  // UI-084: 空のグループを残すと **mermaid が描けず「Error」になる**。
+  // 実測 (直す前): グループの最後の1件を消すと `block:g1` / `end` だけが残り、
+  // 図が消えた。**自前の解析は通る**ので単体テストでは見えず、描画の状態を
+  // 見て初めて出た。付け替え (FEAT-903) でも中身が全部出て行くと同じ形になる。
+  //
+  // c4 の collapseEmptyBoundaries と同じ約束。グループが消えるのは損失だが、
+  // **描けない図を残すよりはまし**で、図種ごとに扱いが割れるほうが分かりにくい。
+  function collapseEmptyGroups(lines) {
+    var changed = true, guard = 0;
+    while (changed && guard++ < 64) {
+      changed = false;
+      for (var i = 0; i < lines.length; i++) {
+        if (!/^\s*block:/.test(lines[i])) continue;
+        var endIdx = findMatchingEnd(lines, i);
+        if (endIdx === -1) continue;
+        var empty = true;
+        for (var j = i + 1; j < endIdx; j++) {
+          if (lines[j].trim()) { empty = false; break; }
+        }
+        if (empty) { lines.splice(i, endIdx - i + 1); changed = true; break; }
+      }
+    }
+    return lines;
+  }
+
+  // isDescendantGroup: g が ancestorId の中 (何段でも下) にいるか。
+  // 親グループの選択肢から自分の子孫を外すために使う。
+  function isDescendantGroup(parsed, g, ancestorId) {
+    var cur = g, guard = 0;
+    while (cur && cur.parentId && guard++ < 64) {
+      if (cur.parentId === ancestorId) return true;
+      var next = null;
+      for (var i = 0; i < parsed.elements.length; i++) {
+        if (parsed.elements[i].id === cur.parentId) { next = parsed.elements[i]; break; }
+      }
+      cur = next;
+    }
+    return false;
+  }
+
+  // moveBlockToGroup: 既にあるブロックを、別のグループの中へ (または一番外へ) 移す。
+  //
+  // FEAT-903。block は `block:<id> ... end` の**中に置く位置**で親を表すので
+  // (addNestedBlock が `lines.splice(endIdx, 0, ...)` で入れている)、付け替えは
+  // 値の書き換えでは成立せず**行を動かす**。architecture だけが `in <親>` という
+  // 行の属性で、書き換えで済んでいた。
+  //
+  // 1行に複数のブロックが並ぶ書き方 (`a["A"] b["B"]`) では**断る**。
+  // 行ごと動かすと隣のブロックまで連れて行くので、押した1つだけを動かせない。
+  // 黙って隣を巻き込むより、動かさないほうがまし。
+  function moveBlockToGroup(text, lineNum, targetId) {
+    var parsed = parseBlock(text);
+    var el = null, onSameLine = 0;
+    for (var i = 0; i < parsed.elements.length; i++) {
+      var e = parsed.elements[i];
+      if (e.line === lineNum) { onSameLine++; if (!el) el = e; }
+    }
+    if (!el) return text;
+    if (onSameLine > 1 && el.kind !== 'group') return text;   // 隣を巻き込まない
+    if (String(targetId || '') === String(el.parentId || '')) return text;
+
+    var lines = text.split('\n');
+    var from0 = lineNum - 1;                       // 0-based の開始
+    var to0 = from0;                               // 0-based の終了 (含む)
+    if (el.kind === 'group') {
+      var endIdx = findMatchingEnd(lines, from0);
+      if (endIdx === -1) return text;
+      to0 = endIdx;                                // `end` の行まで
+    }
+
+    var targetStart = -1;
+    if (targetId) {
+      for (var j = 0; j < lines.length; j++) {
+        if (isGroupStart(lines[j].trim(), targetId)) { targetStart = j; break; }
+      }
+      if (targetStart === -1) return text;
+      // 自分の中へは入れられない (循環)。`end` の対応が壊れて図が出なくなる。
+      if (targetStart >= from0 && targetStart <= to0) return text;
+    }
+
+    var block = lines.slice(from0, to0 + 1);
+    var oldIndent = lines[from0].match(/^(\s*)/)[1] || '';
+    var newIndent, insertAt;
+
+    if (targetStart !== -1) {
+      var tEnd = findMatchingEnd(lines, targetStart);
+      if (tEnd === -1) return text;
+      var pIndent = lines[targetStart].match(/^(\s*)/)[1] || '';
+      var step = pIndent.indexOf('	') !== -1 ? '	' : '  ';
+      newIndent = pIndent + step;
+      // すでに子がいるならその字下げに合わせる (addNestedBlock と同じ約束)
+      for (var ci = targetStart + 1; ci < tEnd; ci++) {
+        if (lines[ci].trim()) { newIndent = lines[ci].match(/^(\s*)/)[1] || newIndent; break; }
+      }
+      insertAt = tEnd;
+    } else {
+      newIndent = '  ';
+      insertAt = lines.length;
+      while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
+    }
+
+    // 説明コメントも一緒に運ぶ (UI-083 と同じ約束)
+    var notes = window.MA.textUpdater.notesAbove(text, lineNum);
+    if (notes.count > 0) {
+      from0 = notes.start - 1;
+      block = lines.slice(from0, to0 + 1);
+    }
+
+    lines.splice(from0, to0 - from0 + 1);
+    if (insertAt > from0) insertAt -= (to0 - from0 + 1);
+    if (insertAt < 0) insertAt = 0;
+
+    var shifted = block.map(function(l) {
+      if (!l.trim()) return l;
+      var ind = l.match(/^(\s*)/)[1] || '';
+      var rest = l.slice(ind.length);
+      var extra = ind.length > oldIndent.length ? ind.slice(oldIndent.length) : '';
+      return newIndent + extra + rest;
+    });
+    lines.splice.apply(lines, [insertAt, 0].concat(shifted));
+    // 中身が全部出て行って空になったグループは畳む (UI-084 と同じ理由)
+    return collapseEmptyGroups(lines).join('\n');
+  }
+
   function addNestedBlock(text, parentId, id, label) {
     var token = label && label !== id ? id + '["' + encodeLabel(label) + '"]' : id;
     var lines = text.split('\n');
@@ -220,7 +346,7 @@ window.MA.modules.blockBeta = (function() {
     // before and after keeps two cases honest — an id that also lives outside the
     // deleted range survives, so its links stay; and a link that was already
     // dangling before this edit is left exactly as the user wrote it.
-    var result = lines.join('\n');
+    var result = collapseEmptyGroups(lines).join('\n');
     var idsAfter = collectIds(result);
     var removedIds = idsBefore.filter(function(id) { return idsAfter.indexOf(id) === -1; });
     if (removedIds.length === 0) return result;
@@ -231,7 +357,7 @@ window.MA.modules.blockBeta = (function() {
       if (!m) return true;
       return removedIds.indexOf(m[2]) === -1 && removedIds.indexOf(m[3]) === -1;
     });
-    return lines.join('\n');
+    return collapseEmptyGroups(lines).join('\n');
   }
 
   function deleteLink(text, lineNum) {
@@ -614,6 +740,17 @@ window.MA.modules.blockBeta = (function() {
             '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">種別: ' + escHtml(el.kind) + (el.parentId ? ' (親: ' + escHtml(el.parentId) + ')' : '') + '</div>' +
             P.fieldHtml('ID', 'block-edit-id', el.id) +
             (el.kind === 'block' ? P.fieldHtml('ラベル', 'block-edit-label', el.label !== el.id ? el.label : '') : '') +
+            // FEAT-903: いま属しているグループを出し、別のグループへ移せるようにする。
+            // 自分自身と自分の中は選択肢から外す (循環すると `end` の対応が壊れる)。
+            P.selectFieldHtml('親グループ', 'block-edit-parent', (function() {
+              var opts = [{ value: '', label: '（なし・一番外）', selected: !el.parentId }];
+              parsedData.elements.forEach(function(g) {
+                if (g.kind !== 'group' || g.id === el.id) return;
+                if (el.kind === 'group' && isDescendantGroup(parsedData, g, el.id)) return;
+                opts.push({ value: g.id, label: 'block:' + g.id, selected: el.parentId === g.id });
+              });
+              return opts;
+            })()) +
             P.connectButtonHtml('block-edit-connect') +
             P.dangerButtonHtml('block-edit-delete', '削除');
 
@@ -648,6 +785,11 @@ window.MA.modules.blockBeta = (function() {
               ctx.onUpdate();
             });
           }
+          P.bindEvent('block-edit-parent', 'change', function() {
+            window.MA.history.pushHistory();
+            ctx.setMmdText(moveBlockToGroup(ctx.getMmdText(), elLine, this.value));
+            ctx.onUpdate();
+          });
           P.bindEvent('block-edit-delete', 'click', function() {
             window.MA.history.pushHistory();
             ctx.setMmdText(deleteBlock(ctx.getMmdText(), elLine, elId));
@@ -741,6 +883,7 @@ window.MA.modules.blockBeta = (function() {
       },
     },
     addBlock: addBlock, addNestedBlock: addNestedBlock, addLink: addLink,
+    moveBlockToGroup: moveBlockToGroup,
     deleteBlock: deleteBlock, deleteLink: deleteLink, deletionImpact: deletionImpact,
     updateBlockLabel: updateBlockLabel, updateBlockId: updateBlockId, updateLink: updateLink, setColumns: setColumns,
   };

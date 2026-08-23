@@ -40,6 +40,16 @@ window.MA.textUpdater = (function() {
     return result.split(CR + LF).join(LF).split(LF).join(CR + LF);
   }
 
+  // notesAbove: lineNum に付いた説明 (直上のコメント) の範囲を返す。
+  // 付け替えは行を動かす操作なので、**説明も一緒に運ぶ**には範囲が要る
+  // (消すだけなら stripNotesAbove で足りる)。
+  function notesAbove(text, lineNum) {
+    var lines = text.split('\n');
+    if (lineNum < 1 || lineNum > lines.length) return { start: lineNum, count: 0 };
+    var st = noteBlockStart(lines, lineNum);
+    return { start: st, count: lineNum - st };
+  }
+
   // stripNotesAbove: lineNum の説明であるコメントを本文から外し、
   // ずれた行番号と一緒に返す。コメントは対象行の**上**にあるので、
   // 先に外して行番号を繰り上げれば、そのあとどんな削除の実装に委ねても成立する。
@@ -228,6 +238,7 @@ window.MA.textUpdater = (function() {
     insertBefore: insertBefore,
     deleteLine: deleteLine,
     stripNotesAbove: stripNotesAbove,
+    notesAbove: notesAbove,
     matchEol: matchEol,
     swapLines: swapLines,
     swapLinesWithNotes: swapLinesWithNotes,
