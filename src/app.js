@@ -501,7 +501,52 @@ function statusInfoText(parsedData, moduleType) {
   if (groups > 0) parts.push('グループ: ' + groups);
   if (parsedData.meta && parsedData.meta.title) parts.push(parsedData.meta.title);
   if (els === 0 && rels === 0) return '要素: 0 | プロパティパネルから追加してください';
-  return parts.join(' | ');
+  return parts.join(' | ') + isolatedText(parsedData);
+}
+
+// どこにも繋がっていない要素を拾う (UI-080)。
+//
+// 消し忘れた要素が図に残ったままレビューに出る。図を目で追って数えるしかなく、
+// 手数は要素数に比例する。gantt の danglingAfter (宙に浮いた依存) と同じ考え方で、
+// **件数ではなく名前**を出す — 「1件あります」では探す手間が残る。
+//
+// **図種ごとの対応表を作らない。** 実測 (21図種) で分かったこと:
+//   - 関係を持たない図種が11ある (mindmap / kanban / timeline …)。
+//     そこでは全要素が孤立に見えるので、**関係が1つも無ければ何も言わない**
+//   - 関係の端点が要素の `id` と一致しない図種がある —
+//     requirementDiagram は関係が `name` (sample_req) を使い、`id` は
+//     内側のフィールド (REQ-001)。stateDiagram の `[*]` は要素ではない
+//   → **要素が持つ「いずれかの文字列」が端点に現れるか**で判定する。
+//     対応表を持つと図種が増えるたびにずれる (FEAT-903 で同じ罠を予告済み)。
+//
+// 21図種のひな形で**誤検知が 0 件**であることを実測して規則を決めた。
+function isolatedElements(parsedData) {
+  if (!parsedData) return [];
+  var els = parsedData.elements || [];
+  var rels = parsedData.relations || [];
+  if (!rels.length || !els.length) return [];   // 関係が無い図種では言わない
+  var ends = {};
+  rels.forEach(function(r) {
+    if (r.from !== undefined && r.from !== null) ends[String(r.from)] = 1;
+    if (r.to !== undefined && r.to !== null) ends[String(r.to)] = 1;
+  });
+  return els.filter(function(e) {
+    for (var k in e) {
+      var v = e[k];
+      if (typeof v === 'string' && v && ends[v]) return false;
+    }
+    return true;
+  });
+}
+
+// 孤立要素の見出し。danglingAfter と同じ形 (先頭2件 + 残りは数)。
+function isolatedText(parsedData) {
+  var iso = isolatedElements(parsedData);
+  if (!iso.length) return '';
+  var name = function(e) { return e.label || e.name || e.text || e.id || '?'; };
+  var head = iso.slice(0, 2).map(name).join(', ');
+  return ' | どこにも繋がっていない: ' + head +
+    (iso.length > 2 ? ' ほか' + (iso.length - 2) + '件' : '');
 }
 
 function ganttStatusText(parsedData) {
