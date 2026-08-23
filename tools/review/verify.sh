@@ -50,15 +50,29 @@ cd "$DIR" || exit 1
 srchash() { find src mermaid-assist.html tests tools -type f   \( -name '*.js' -o -name '*.html' \) -not -path '*/node_modules/*'   -exec md5sum {} + 2>/dev/null | sort | md5sum | cut -d' ' -f1; }
 HASH_BEFORE=$(srchash)
 
+# **終了コードを握り潰さない。**
+#
+# 元は `out=$(...)` のあとに `echo` を走らせていたので、**step は常に 0 を
+# 返していた**。`|| exit 1` が一度も発火せず、e2e が2件落ちても
+# 観点レビューとゲートへ進んでいた (ゲートだけが気付いた)。
+#
+# **失敗の行も出す。** tail -3 だけだと "N failed" の一覧が切れて、
+# どのテストが落ちたのか分からない。
 step() {
   n="$1"; shift
   echo "=== $n ==="
   out=$("$@" 2>&1)
+  rc=$?
   if [ -z "$out" ]; then
     echo "**$n の出力が空。段階が実行されていない**"
     return 1
   fi
   echo "$out" | tail -3
+  if [ "$rc" != "0" ]; then
+    echo "**$n が失敗した (終了コード $rc)**"
+    echo "$out" | grep -iE "failed|✘|✗|Error:" | head -12 | sed "s|^|  |"
+  fi
+  return $rc
 }
 
 step "unit"   npm test           || exit 1

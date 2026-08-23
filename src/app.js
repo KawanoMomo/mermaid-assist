@@ -1942,6 +1942,8 @@ function init() {
   // Properties initialization
   window.MA.properties.init({
     onStatus: function() { renderStatus(); },
+    // 接続の拒否などをその場で告げる (UI-078)。
+    onStatusMessage: function(msg) { showTransient(msg, 3500); },
     // 選択の生存判定と同じ集合を使う。別の判定を持つと「選択は消えるのに
     // 接続はできる」のような食い違いが生まれる
     elementExists: function(id) { return !!knownSelectionIds(parsed)[String(id)]; },
