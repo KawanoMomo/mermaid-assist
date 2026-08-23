@@ -636,7 +636,18 @@ function deleteSelectedElements(sel) {
       for (var j = 0; j < rels.length; j++) { if (rels[j].id === s.id) { target = rels[j]; break; } }
     }
     if (!target) return;
-    var next = currentModule.operations['delete'](text, target.line, {
+    // UI-083: 消す要素の説明であるコメントも一緒に消す。
+    //
+    // 残すと**説明対象が消えたコメント**が残り、その下に来た別の要素の説明として
+    // 読まれる。実測では削除した4図種すべてで付き先が狂った。**件数は変わらない**
+    // ため、件数を見る検査はすべて通っていた。
+    //
+    // ここで外すのは、id で全文を書き直す削除 (flowchart / class / state /
+    // sequence) が行番号を見ないため。行番号を見る削除は deleteLine 側で外れる。
+    var stripped = window.MA.textUpdater.stripNotesAbove(text, target.line);
+    text = stripped.text;
+    var targetLine = stripped.lineNum;
+    var next = currentModule.operations['delete'](text, targetLine, {
       kind: target.kind || s.type, id: target.id, blockId: target.id, name: target.name,
     });
     if (next && next !== text) { text = next; removed++; }

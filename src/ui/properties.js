@@ -392,9 +392,16 @@ window.MA.properties = (function() {
       // so a line number alone cannot say which one the user pressed — resolving by
       // line picks the first every time, and pressing b's ✕ deletes a.
       var elId = btn.getAttribute('data-element-id');
+      // UI-083: 消す要素の説明であるコメントも一緒に消す。
+      //
+      // 一覧の ✕ は id で消す実装 (`deleteNode(t, ln, elId)` 等) に委ねており、
+      // **行番号を見ない**ため textUpdater.deleteLine 側の処理が効かない。
+      // コメントは対象行の上にあるので、ここで先に外して行番号を繰り上げる。
+      var src = window.MA.textUpdater.stripNotesAbove(ctx.getMmdText(), ln);
+      var shift = ln - src.lineNum;   // 外した行数。終端行も同じだけ繰り上がる
       var newText = useEndLine
-        ? deleteFn(ctx.getMmdText(), ln, endLn)
-        : deleteFn(ctx.getMmdText(), ln, elId);
+        ? deleteFn(src.text, src.lineNum, endLn - shift)
+        : deleteFn(src.text, src.lineNum, elId);
       ctx.setMmdText(newText);
       ctx.onUpdate();
     });

@@ -258,7 +258,7 @@ window.MA.modules.sequence = (function() {
     var idx = -1;
     for (var i = 0; i < participants.length; i++) if (participants[i].line === lineNum) { idx = i; break; }
     if (idx <= 0) return text;
-    return window.MA.textUpdater.swapLines(text, lineNum, participants[idx - 1].line);
+    return window.MA.textUpdater.swapLinesWithNotes(text, lineNum, participants[idx - 1].line);
   }
 
   function moveParticipantDown(text, lineNum) {
@@ -267,7 +267,7 @@ window.MA.modules.sequence = (function() {
     var idx = -1;
     for (var i = 0; i < participants.length; i++) if (participants[i].line === lineNum) { idx = i; break; }
     if (idx < 0 || idx >= participants.length - 1) return text;
-    return window.MA.textUpdater.swapLines(text, lineNum, participants[idx + 1].line);
+    return window.MA.textUpdater.swapLinesWithNotes(text, lineNum, participants[idx + 1].line);
   }
 
   // moveParticipant: drag-to-reorder via gap index.
@@ -627,7 +627,7 @@ window.MA.modules.sequence = (function() {
       var t = lines[target].trim();
       if (!t || t.indexOf('%%') === 0) { target += direction; continue; }
       if (_isMessageLine(t)) {
-        return window.MA.textUpdater.swapLines(text, lineNum, target + 1);
+        return window.MA.textUpdater.swapLinesWithNotes(text, lineNum, target + 1);
       }
       return text;  // hit non-message (note / block kwd / participant): bail
     }

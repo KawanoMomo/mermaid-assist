@@ -687,7 +687,7 @@ window.MA.modules.gantt = (function() {
     var swapIdx = idx + direction;
     if (swapIdx < 0 || swapIdx >= siblings.length) return text; // boundary
 
-    return window.MA.textUpdater.swapLines(text, lineNum, siblings[swapIdx].line);
+    return window.MA.textUpdater.swapLinesWithNotes(text, lineNum, siblings[swapIdx].line);
   }
 
   // moveTaskToSection — moves the task at 1-based lineNum to the end of the
