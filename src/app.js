@@ -637,6 +637,43 @@ function deleteSelectedElements(sel) {
 //
 // 一番下まで見えているときは出さない。常に出すと「まだ下がある」の合図が
 // 意味を失い、無視されるようになる。
+// `✕3` の 3 が何の数なのか、画面のどこにも書いていなかった。
+//
+// 詳細は削除ボタンの `title`（マウスのホバー）と `aria-label` / `aria-describedby`
+// （支援技術）にしかない。Chrome は `title` をキーボードのフォーカスでは出さないので、
+// **マウスを使わない晴眼者はカスケード削除の警告を一切取得できない**。
+// 「唯一の警告」がこの層に届いていなかった (WCAG 3.3.2)。
+//
+// 数字付きの ✕ が実際に出ているときだけ、一覧の手前に一度だけ凡例を出す。
+// 常設しないのは、パネルを縦に太らせないため。
+function updateCascadeLegend() {
+  var host = document.getElementById('props-content');
+  if (!host) return;
+  var old = document.getElementById('props-cascade-legend');
+  var hasCount = false;
+  var btns = host.querySelectorAll('button[class*="delete"]');
+  for (var i = 0; i < btns.length; i++) {
+    if (/^✕\s*\d+$/.test((btns[i].textContent || '').trim())) { hasCount = true; break; }
+  }
+  if (!hasCount) {
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    return;
+  }
+  if (old) return;   // 既に出ている
+  var el = document.createElement('div');
+  el.id = 'props-cascade-legend';
+  // aria-hidden — 同じ内容は各ボタンの aria-describedby から既に読まれる。
+  // ここで二重に読ませない。届いていなかったのは「見えている経路」だけ。
+  el.setAttribute('aria-hidden', 'true');
+  el.style.cssText = 'margin-bottom:6px;font-size:10px;color:var(--text-secondary);line-height:1.5;';
+  el.textContent = '✕ の数字は、そのボタンを押したとき一緒に消える件数です。';
+  var filter = document.getElementById('ma-list-filter');
+  var anchor = filter && filter.parentNode && filter.parentNode.parentNode === host ? filter.parentNode : null;
+  if (anchor && anchor.nextSibling) host.insertBefore(el, anchor.nextSibling);
+  else if (anchor) host.appendChild(el);
+  else host.insertBefore(el, host.firstChild);
+}
+
 function updatePropsOverflowHint() {
   var el = document.getElementById('props-content');
   var hint = document.getElementById('props-more');
@@ -1214,6 +1251,7 @@ function renderProps() {
     applyListFilter();
   });
   if (snap) restoreAddForm(snap);
+  updateCascadeLegend();
   showSelectedLine();
   // パネルの中身が入れ替わると高さも変わる。帯の出し入れはここで見る。
   updatePropsOverflowHint();

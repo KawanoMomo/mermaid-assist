@@ -426,11 +426,34 @@ window.MA.properties = (function() {
       // so a line number alone cannot say which one the user pressed — resolving by
       // line picks the first every time, and pressing b's ✕ deletes a.
       var elId = btn.getAttribute('data-element-id');
+      // 押した行が一覧の何番目だったかを覚えておく。パネルは innerHTML で作り直され、
+      // 押したボタンごと DOM から消えるので、そのままだとフォーカスが body へ落ちる。
+      // 実測: 100要素の図で `c50` の ✕ を押すと、隣の `c51` の ✕ へ戻るまで **Tab 120回**。
+      // 「支援技術のボタン一覧から選べるようにする」ためにこの関数へ名前を入れたのに、
+      // 選んだ直後に居場所を失っていた。
+      var siblings = Array.prototype.slice.call(propsEl.querySelectorAll('.' + deleteClass));
+      var pressedAt = siblings.indexOf(btn);
+
       var newText = useEndLine
         ? deleteFn(ctx.getMmdText(), ln, endLn)
         : deleteFn(ctx.getMmdText(), ln, elId);
       ctx.setMmdText(newText);
       ctx.onUpdate();
+
+      // 作り直された後の一覧で、消した位置の次 → 無ければ前 → それも無ければ
+      // 一覧そのもの、の順に置く。ctx.onUpdate() が同期でパネルを作り直す実装と
+      // 非同期の実装の両方があるので、次のタスクで拾う。
+      if (pressedAt >= 0 && typeof window.setTimeout === 'function') {
+        window.setTimeout(function() {
+          var host = (typeof document !== 'undefined' && document.getElementById)
+            ? (document.getElementById('props-content') || propsEl) : propsEl;
+          if (!host || !host.querySelectorAll) return;
+          var after = host.querySelectorAll('.' + deleteClass);
+          if (!after.length) return;
+          var target = after[Math.min(pressedAt, after.length - 1)];
+          if (target && target.focus) target.focus();
+        }, 0);
+      }
     });
   }
 
