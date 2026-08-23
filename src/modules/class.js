@@ -559,7 +559,7 @@ window.MA.modules.classDiagram = (function() {
 
       bindEvent('cl-add-class-btn', 'click', function() {
         var id = document.getElementById('cl-add-class-id').value.trim();
-        if (!id) { alert('IDは必須です'); return; }
+        if (!id) { alert('ID は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addClass(ctx.getMmdText(), id));
         ctx.onUpdate();
@@ -570,7 +570,7 @@ window.MA.modules.classDiagram = (function() {
         var name = document.getElementById('cl-add-mem-name').value.trim();
         var type = document.getElementById('cl-add-mem-type').value.trim();
         var isMethod = document.getElementById('cl-add-mem-method').checked;
-        if (!clsId || !name) { alert('クラスと名前は必須です'); return; }
+        if (!clsId || !name) { alert('クラス と 名前 は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addMember(ctx.getMmdText(), clsId, vis, name, type, isMethod));
         ctx.onUpdate();
@@ -587,7 +587,7 @@ window.MA.modules.classDiagram = (function() {
       });
       bindEvent('cl-add-ns-btn', 'click', function() {
         var id = document.getElementById('cl-add-ns-id').value.trim();
-        if (!id) { alert('IDは必須です'); return; }
+        if (!id) { alert('ID は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addNamespace(ctx.getMmdText(), id));
         ctx.onUpdate();

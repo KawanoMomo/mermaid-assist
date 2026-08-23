@@ -199,6 +199,14 @@ window.MA.properties = (function() {
     // 読む手段が本文テキストを見に行くことしか無かったので、全文を title に置く。
     var rowFull = String(opts.label) + (opts.sublabel ? ' ' + String(opts.sublabel) : '');
     return '<div class="ma-list-row" style="display:flex;align-items:center;gap:4px;margin-bottom:3px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;font-size:11px;">' +
+      // 名前欄は 123px しかなく、長い名前は ellipsis で切れる。実測では
+      // "ComM_ChannelStateManager_MainFunction" が "ComM_ChannelStat" までしか
+      // 読めず、**先頭が共通で末尾だけ違う名前を見分けられない** (組込みの
+      // BSW 名は先頭共通が普通)。gantt.js は自前の行に title を付けていたが、
+      // 41か所が通るこの共有関数には無かった。切れたときの唯一の手がかりを足す。
+      //
+      // 補足 (`(in 親ID)` など) も入れる。補足は行末にあるので真っ先に切れるが、
+      // 「どの親の中か」は名前と同じくらい効く手がかりになる。
       '<div title="' + escHtml(rowFull) + '" style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + fontStyle + '">' + escHtml(opts.label) + sub + '</div>' +
       selectBtn + deleteBtn +
     '</div>';

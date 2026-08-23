@@ -16,6 +16,19 @@ const path = require('path');
 const { chromium } = require('E:/00_Git/05_MermaidAssist/node_modules/playwright');
 const { report } = require('./lib');
 const ROOT = process.argv[2];
+
+// 利用者と同じ経路で戻す/進める。
+// 入力欄に焦点があると打鍵が本文に入るので、図に焦点を移してから押す。
+async function pressUndo(p) {
+  await p.evaluate(() => { var el = document.getElementById("preview-pane");
+    if (el) { el.setAttribute("tabindex", "-1"); el.focus(); } });
+  await p.keyboard.press('Control+z');
+}
+async function pressRedo(p) {
+  await p.evaluate(() => { var el = document.getElementById("preview-pane");
+    if (el) { el.setAttribute("tabindex", "-1"); el.focus(); } });
+  await p.keyboard.press('Control+y');
+}
 // 測定条件も検査対象。
 //
 // これまで 1400x900 で測っていた。実利用は 13インチのノートPC (1366x768) が
@@ -110,7 +123,11 @@ const ALL_TYPES = ['gantt', 'sequenceDiagram', 'flowchart', 'stateDiagram', 'cla
 
     // 戻す: states[n-1] → … → states[0]
     for (let i = states.length - 1; i >= 1; i--) {
-      await p.evaluate(() => window.MA.history.undo());
+      // **Ctrl+Z を押す。** ここは内部の `history.undo()` を直接呼んでいた。
+      // Undo を検査する観点が、**Undo のキー経路を一度も通していなかった** —
+      // C95 (検査器が製品に無い能力を自分に与える) と同じ形。
+      // キーが壊れても内部関数が生きていれば通ってしまう。
+      await pressUndo(p);
       await p.waitForTimeout(500);
       const now = await p.locator('#editor').inputValue();
       if (now !== states[i - 1]) {
@@ -123,7 +140,7 @@ const ALL_TYPES = ['gantt', 'sequenceDiagram', 'flowchart', 'stateDiagram', 'cla
 
     // 進める: states[0] → … → states[n-1]
     for (let i = 1; i < states.length; i++) {
-      await p.evaluate(() => window.MA.history.redo());
+      await pressRedo(p);
       await p.waitForTimeout(500);
       const now = await p.locator('#editor').inputValue();
       if (now !== states[i]) {
@@ -209,7 +226,11 @@ const ALL_TYPES = ['gantt', 'sequenceDiagram', 'flowchart', 'stateDiagram', 'cla
     // 戻す
     let broke = false;
     for (let i = states.length - 1; i >= 1; i--) {
-      await p.evaluate(() => window.MA.history.undo());
+      // **Ctrl+Z を押す。** ここは内部の `history.undo()` を直接呼んでいた。
+      // Undo を検査する観点が、**Undo のキー経路を一度も通していなかった** —
+      // C95 (検査器が製品に無い能力を自分に与える) と同じ形。
+      // キーが壊れても内部関数が生きていれば通ってしまう。
+      await pressUndo(p);
       await p.waitForTimeout(350);
       const now = await p.locator('#editor').inputValue();
       if (now !== states[i - 1]) {
@@ -222,7 +243,7 @@ const ALL_TYPES = ['gantt', 'sequenceDiagram', 'flowchart', 'stateDiagram', 'cla
     // 進める
     if (!broke) {
       for (let i = 1; i < states.length; i++) {
-        await p.evaluate(() => window.MA.history.redo());
+        await pressRedo(p);
         await p.waitForTimeout(350);
         const now = await p.locator('#editor').inputValue();
         if (now !== states[i]) {

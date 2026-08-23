@@ -208,7 +208,7 @@ window.MA.modules.xychartBeta = (function() {
       P.bindEvent('xy-set-xcats', 'click', function() {
         var lbl = document.getElementById('xy-xlabel').value.trim();
         var cats = document.getElementById('xy-xcats').value.trim();
-        if (!cats) { alert('カテゴリ必須'); return; }
+        if (!cats) { alert('カテゴリ は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(setXAxisCategories(ctx.getMmdText(), lbl, cats));
         ctx.onUpdate();
@@ -217,7 +217,7 @@ window.MA.modules.xychartBeta = (function() {
         var lbl = document.getElementById('xy-xlabel').value.trim();
         var mn = document.getElementById('xy-xmin').value.trim();
         var mx = document.getElementById('xy-xmax').value.trim();
-        if (!mn || !mx) { alert('min/max 必須'); return; }
+        if (!mn || !mx) { alert('min と max は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(setXAxisRange(ctx.getMmdText(), lbl, mn, mx));
         ctx.onUpdate();
@@ -226,7 +226,7 @@ window.MA.modules.xychartBeta = (function() {
         var lbl = document.getElementById('xy-ylabel').value.trim();
         var mn = document.getElementById('xy-ymin').value.trim();
         var mx = document.getElementById('xy-ymax').value.trim();
-        if (!mn || !mx) { alert('min/max 必須'); return; }
+        if (!mn || !mx) { alert('min と max は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(setYAxis(ctx.getMmdText(), lbl, mn, mx));
         ctx.onUpdate();
@@ -234,7 +234,7 @@ window.MA.modules.xychartBeta = (function() {
       P.bindEvent('xy-add-btn', 'click', function() {
         var kind = document.getElementById('xy-add-kind').value;
         var vals = document.getElementById('xy-add-values').value.trim();
-        if (!vals) { alert('値必須'); return; }
+        if (!vals) { alert('値 は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addSeries(ctx.getMmdText(), kind, vals));
         ctx.onUpdate();

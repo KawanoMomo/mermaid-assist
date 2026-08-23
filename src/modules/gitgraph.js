@@ -365,7 +365,7 @@ window.MA.modules.gitGraph = (function() {
       });
       P.bindEvent('gg-add-cp-btn', 'click', function() {
         var id = document.getElementById('gg-add-cp-id').value.trim();
-        if (!id) { alert('Commit id が必要です'); return; }
+        if (!id) { alert('Commit id は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addCherryPick(ctx.getMmdText(), id));
         ctx.onUpdate();

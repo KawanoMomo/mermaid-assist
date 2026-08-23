@@ -217,6 +217,29 @@ try {
 check('PREMISE', 'バックログの前提', premiseFail.length === 0,
   premiseFail.length ? premiseFail.join(' / ') : '全項目の前提が成り立っている');
 
+// VERSION: 版が中身を識別できているか。
+//
+// 画面に版を出した (B30) が、**それが何を識別しているか**は測っていなかった。
+// 測ったら `v1.2.0` のまま **258 コミット / 実装変更 151 回**が積まれており、
+// その間に欠陥117件を直し機能36件を足していた。**版は何も識別していなかった。**
+//
+// 直し方の候補は測って落とした: ビルド時の埋め込み (**ビルド工程が無い**) /
+// 実行時に自分を読む (**file:// では fetch できない** — 実測で TypeError) /
+// 人が手で上げる (B30 で避けた「2箇所を人が揃える」失敗形)。
+//
+// 残るのは「**上げ忘れを機械が言う**」。いつ上げるかは人が決める。
+let verFail = [];
+try {
+  const f = path.join(outDir, 'version-freshness.json');
+  if (!fs.existsSync(f)) verFail.push('未実行');
+  else {
+    const items = JSON.parse(fs.readFileSync(f, 'utf8'));
+    items.forEach((x) => verFail.push(x.what));
+  }
+} catch (e) { verFail.push('読めない: ' + e.message); }
+check('VERSION', '版の鮮度', verFail.length === 0,
+  verFail.length ? verFail.join(' / ') : '版が実装の変化に追いついている');
+
 // ── ABSENCE は撤去した (T3 の再評価による) ─────────────────────────
 //
 // 「無い」と書いた指摘に根拠の引用を要求する門を足したが、**効かなかった**。

@@ -181,7 +181,7 @@ window.MA.modules.sankeyBeta = (function() {
         var src = document.getElementById('sk-add-src').value.trim();
         var tgt = document.getElementById('sk-add-tgt').value.trim();
         var val = document.getElementById('sk-add-val').value.trim();
-        if (!src || !tgt || !val) { alert('全項目必須'); return; }
+        if (!src || !tgt || !val) { alert('全項目 は必須です'); return; }
         if (isNaN(parseFloat(val))) { alert('Value は数値'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addFlow(ctx.getMmdText(), src, tgt, val));

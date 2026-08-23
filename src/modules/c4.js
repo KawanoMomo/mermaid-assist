@@ -792,7 +792,7 @@ window.MA.modules.c4 = (function() {
         var to = document.getElementById('c4-add-rel-to').value;
         var label = document.getElementById('c4-add-rel-label').value.trim();
         var tech = document.getElementById('c4-add-rel-tech').value.trim();
-        if (!from || !to) { alert('From と To を選択してください'); return; }
+        if (!from || !to) { alert('From / To は必須です'); return; }
         window.MA.history.pushHistory();
         ctx.setMmdText(addRel(ctx.getMmdText(), kind, from, to, label, tech));
         ctx.onUpdate();

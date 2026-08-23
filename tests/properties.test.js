@@ -231,9 +231,13 @@ describe('listItemHtml: 削除ボタンの警告表示', function() {
   test('deleteClass が無ければ削除ボタンごと出ない', function() {
     var html = P.listItemHtml({ label: 'a', deleteLabel: '✕ 3', deleteTitle: 'x' });
     expect(html).not.toContain('✕ 3');
+    // 元は `not.toContain('title=')` だったが、**行のどこにも title が無いこと**を
+    // 見ていた。UI-069 で名前欄に title を足した (切れた名前をホバーで読むため)
+    // ので、この書き方では意図しない所に反応する。
+    // 見たいのは「**削除ボタンの** title が漏れないこと」なので、値で見る。
+    expect(html).not.toContain('title="x"');
     expect(html).not.toContain('<button');
-    // 行のラベルには全文を読むための title が付くので、`title=` の有無ではなく
-    // ボタンが出ていないことを見る。
+    // aria-label はボタンにしか付かないので、ボタンが出ていないことの裏付けになる。
     expect(html).not.toContain('aria-label=');
   });
 
@@ -254,23 +258,12 @@ describe('listItemHtml: 削除ボタンの警告表示', function() {
 // deletionImpact 自体は手厚くテストされているのに、その結果を UI に出す経路には
 // テストが無く、ミューテーション検査で delLabel / delTitle を無効化しても全通過
 // していた (SURVIVED)。カスケード削除の唯一の警告なので固定する。
-describe('listItemHtml: 削除の警告表示', function() {
-  test('W1: deleteLabel がボタンの表示になる', function() {
-    var html = P.listItemHtml({ label: 'foo', deleteClass: 'x-del', deleteLabel: '✕5' });
-    expect(html).toContain('>✕5</button>');
-  });
-
-  test('W2: deleteLabel を渡さなければ従来どおり ✕', function() {
-    var html = P.listItemHtml({ label: 'foo', deleteClass: 'x-del' });
-    expect(html).toContain('>✕</button>');
-  });
-
-  test('W3: deleteTitle が title に出る', function() {
-    var html = P.listItemHtml({ label: 'foo', deleteClass: 'x-del', deleteTitle: '3 要素が消えます' });
-    expect(html).toContain('title="3 要素が消えます"');
-  });
-
-  test('W4: 件数は aria-label にも入る (title は支援技術に届かない)', function() {
+describe('listItemHtml: 支援技術に届く名前', function() {
+  // master 側の describe が deleteLabel / deleteTitle の中身を固定しているので、
+  // ここは「支援技術から見た名前」だけを見る。title は button の名前にならず
+  // (中身のテキスト `✕5` が名前になる)、カスケード削除の件数が読み上げに
+  // 一切現れなかったので、aria-label 側を固定する。
+  test('W4: 件数は aria-label にも入る', function() {
     var html = P.listItemHtml({ label: 'foo', deleteClass: 'x-del', deleteLabel: '✕5', deleteTitle: '3 要素が消えます' });
     var m = html.match(/aria-label="([^"]*)"[^>]*>✕5</);
     expect(m).not.toBeNull();
@@ -279,6 +272,7 @@ describe('listItemHtml: 削除の警告表示', function() {
   });
 
   test('W5: 編集ボタンも行ごとに違う名前を持つ', function() {
+    // 「編集」が12個すべて同名だと、支援技術のボタン一覧では選べない。
     var a = P.listItemHtml({ label: '受注', selectClass: 'x-sel' });
     var b = P.listItemHtml({ label: '在庫', selectClass: 'x-sel' });
     expect(a).toContain('受注');
@@ -287,8 +281,19 @@ describe('listItemHtml: 削除の警告表示', function() {
   });
 
   test('W6: ラベルと入力欄が for で結び付く', function() {
+    // 付けないと placeholder が名前に流用され、Tech と Description がどちらも
+    // 「省略可」という同じ名前になる。
     expect(P.fieldHtml('ラベル', 'x-label', '')).toContain('for="x-label"');
     expect(P.selectFieldHtml('親境界', 'x-parent', [])).toContain('for="x-parent"');
+  });
+
+  test('W7: 行の title には補足も入る', function() {
+    // `(in 親ID)` は行末にあるので真っ先に切れる。名前だけでは足りない。
+    var html = P.listItemHtml({ label: 'core0 ("メインCPUコア")', sublabel: '(in cpu_group)', deleteClass: 'x' });
+    var m = html.match(/<div title="([^"]*)"/);
+    expect(m).not.toBeNull();
+    expect(m[1]).toContain('core0');
+    expect(m[1]).toContain('cpu_group');
   });
 });
 

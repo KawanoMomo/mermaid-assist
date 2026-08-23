@@ -1132,7 +1132,7 @@ window.MA.modules.sequence = (function() {
           var id = document.getElementById('seq-add-part-id').value.trim();
           var label = document.getElementById('seq-add-part-label').value.trim();
           var kind = document.getElementById('seq-add-part-kind').value;
-          if (!id) { alert('IDは必須です'); return; }
+          if (!id) { alert('ID は必須です'); return; }
           window.MA.history.pushHistory();
           ctx.setMmdText(addParticipant(ctx.getMmdText(), kind, id, label || id));
           ctx.onUpdate();
