@@ -711,6 +711,71 @@ function focusPreview() {
   if (pane && pane.focus) { pane.setAttribute('tabindex', '-1'); pane.focus(); }
 }
 
+// ── 用語の置き換え (FEAT-001) ─────────────────────────────────────────────
+//
+// レビュー指摘で用語を統一するとき、5要素の改名に **15操作**かかっていた
+// (編集ボタン5回 + 入力5回 + 確定5回)。実測。
+// 本文がソースなので、GUI に一括改名の欄を作るより**本文の置換**が筋が良い。
+//
+// **正規表現は入れない。** 誤った式で本文全体を壊す事故は Ctrl+Z 1回では
+// 気付けない。ここが扱うのは「そのままの文字列」だけ。
+function replaceBarEl() { return document.getElementById('replace-bar'); }
+
+// 何箇所あるかを数える。**押す前に結果が分かる**ようにするため。
+// 空の検索語で 0 を返す (split の性質で本文長を返してしまうのを避ける)。
+function countOccurrences(text, needle) {
+  if (!needle) return 0;
+  return String(text).split(needle).length - 1;
+}
+
+function updateReplaceCount() {
+  var out = document.getElementById('replace-count');
+  var find = document.getElementById('replace-find');
+  if (!out || !find) return;
+  var n = countOccurrences(mmdText, find.value);
+  out.textContent = find.value ? (n ? n + ' 件' : '見つかりません') : '';
+}
+
+function openReplaceBar() {
+  var bar = replaceBarEl();
+  if (!bar) return;
+  bar.hidden = false;
+  updateReplaceCount();
+  var find = document.getElementById('replace-find');
+  if (find) { find.focus(); find.select(); }
+}
+
+function closeReplaceBar() {
+  var bar = replaceBarEl();
+  if (!bar || bar.hidden) return;
+  bar.hidden = true;
+  focusEditor();   // 開いた場所へ戻す。マウスへ持ち替えさせない
+}
+
+// すべて置き換える。
+//
+// **pushHistory を1回だけ呼ぶ。** pushHistoryCoalesced は打鍵の束ねに使う
+// もので、一括置換と混ざると戻る単位がぶれる。一括置換は影響が大きいので
+// **Ctrl+Z 1回で戻せることが必須**。
+function replaceAllInEditor() {
+  var find = document.getElementById('replace-find');
+  var to = document.getElementById('replace-to');
+  if (!find || !to) return;
+  var needle = find.value;
+  if (!needle) { showTransient('探す語 は必須です', 2500); return; }
+  var n = countOccurrences(mmdText, needle);
+  if (!n) { showTransient(JSON.stringify(needle) + ' は本文にありません', 2500); return; }
+  window.MA.history.pushHistory();
+  mmdText = mmdText.split(needle).join(to.value);
+  suppressSync = true;
+  editorEl.value = mmdText;
+  suppressSync = false;
+  syncLineNumbers();
+  scheduleRefresh();
+  updateReplaceCount();
+  showTransient(n + ' 件を置き換えました — Ctrl+Z で戻せます', 3000);
+}
+
 function toggleShortcutHelp(force) {
   var box = document.getElementById('shortcut-help');
   if (!box) return;
@@ -2011,6 +2076,27 @@ function init() {
   window.addEventListener('resize', updatePropsOverflowHint);
 
   // Tab / Shift+Tab: indent / outdent with 2 spaces (see workspace ADR-011)
+  // 置換の欄。Ctrl+H で開く (実測で Ctrl+H は無反応だったので奪う操作が無い)。
+  (function() {
+    var find = document.getElementById('replace-find');
+    var to = document.getElementById('replace-to');
+    var all = document.getElementById('replace-all');
+    var close = document.getElementById('replace-close');
+    if (find) find.addEventListener('input', updateReplaceCount);
+    if (all) all.addEventListener('click', replaceAllInEditor);
+    if (close) close.addEventListener('click', closeReplaceBar);
+    [find, to].forEach(function(el) {
+      if (!el) return;
+      el.addEventListener('keydown', function(e) {
+        // Escape で閉じる。**欄の中の Escape は「図へ移る」を奪わない** —
+        // 欄を開いている間はここが手前にある。
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeReplaceBar(); return; }
+        // Enter で実行。入力してから押すまでにマウスへ持ち替えさせない。
+        if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); replaceAllInEditor(); }
+      });
+    });
+  })();
+
   editorEl.addEventListener('keydown', function(e) {
     if (e.key !== 'Tab' || e.isComposing) return;
     e.preventDefault();
@@ -2936,6 +3022,12 @@ function init() {
     } else if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
       e.preventDefault();
       saveFileAs();
+    } else if (e.ctrlKey && (e.key === 'h' || e.key === 'H')) {
+      // 用語の置き換え (FEAT-001)。**エディタの中でも外でも開く。**
+      // 実測で Ctrl+H は無反応だったので、奪う操作が無い。
+      // 多くのエディタで置換の入口なので、覚え直しが要らない。
+      e.preventDefault();
+      openReplaceBar();
     } else if (e.ctrlKey && e.key === 's') {
       e.preventDefault(); saveFile();
     } else if (e.ctrlKey && (e.key === '0' || e.key === '9' || e.key === '+' ||
