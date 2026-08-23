@@ -473,10 +473,28 @@ window.MA.modules.classDiagram = (function() {
     return lines.join('\n');
   }
 
+  // mermaid は空の namespace を受理しない (`Parse error`)。空のまま作ると
+  // 「+ namespace 追加」を1回押しただけで図が描画不能になる。block の addGroup /
+  // c4 の addElement と同じく、必ず子を1つ添えて作る。
+  //
+  // `+ クラス追加` には namespace の指定が無いため、空 namespace を自分で埋める
+  // 手段が UI に無かった。プレースホルダを置くことで、名前を書き換えて使い始められる。
+  function freeClassId(text, want) {
+    var parsed = parseClass(text);
+    var taken = parsed.elements.map(function(e) { return e.id; })
+      .concat((parsed.groups || []).map(function(g) { return g.id; }));
+    if (taken.indexOf(want) === -1) return want;
+    for (var n = 2; n < 1000; n++) {
+      if (taken.indexOf(want + '_' + n) === -1) return want + '_' + n;
+    }
+    return want;
+  }
+
   function addNamespace(text, id) {
+    id = freeClassId(text, id);
     var block = [
       '    namespace ' + id + ' {',
-      '        ',
+      '        class ' + freeClassId(text, id + '_1'),
       '    }',
     ];
     var lines = text.split('\n');
@@ -581,10 +599,10 @@ window.MA.modules.classDiagram = (function() {
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">名前空間を追加</label>' +
-          '<div style="display:flex;gap:4px;">' +
-            '<input id="cl-add-ns-id" type="text" placeholder="NamespaceName" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' +
-            '<button id="cl-add-ns-btn" title="名前空間を追加" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">+</button>' +
-          '</div>' +
+          // state の「複合状態を追加」と同じく横並びでパネル幅を超えていた。
+          // 他の追加フォームと同じ縦積みにする。
+          props.fieldHtml('ID', 'cl-add-ns-id', '', '例: Ctrl') +
+          props.primaryButtonHtml('cl-add-ns-btn', '+ namespace 追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">クラス一覧</label>' +
@@ -630,6 +648,11 @@ window.MA.modules.classDiagram = (function() {
       bindEvent('cl-add-ns-btn', 'click', function() {
         var id = document.getElementById('cl-add-ns-id').value.trim();
         if (!id) { alert('ID は必須です'); return; }
+        // 重複を黙って改名すると、設計書と id を揃えている利用者が取り違える。
+        var finalNsId = freeClassId(ctx.getMmdText(), id);
+        if (finalNsId !== id) {
+          alert('ID "' + id + '" は既に使われているため "' + finalNsId + '" で追加します');
+        }
         window.MA.history.pushHistory();
         ctx.setMmdText(addNamespace(ctx.getMmdText(), id));
         ctx.onUpdate();

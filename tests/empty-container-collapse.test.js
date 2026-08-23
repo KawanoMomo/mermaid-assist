@@ -87,6 +87,49 @@ describe('state: 空になった合成状態を残さない', function() {
   });
 });
 
+describe('コンテナの追加は空のコンテナを作らない', function() {
+  // 「+ 複合状態を追加」/「+ namespace 追加」は中身が空白1行だけのブロックを
+  // 挿入していた。1クリックで図が描画不能になる。state は parse を通してしまうので
+  // ステータスバーは OK のまま図だけが消え、手がかりが画面に無い。
+  // block の addGroup / c4 の addElement は同じ問題を既に解いていた。
+  function hasEmptyBraceBlockLocal(text) { return hasEmptyBraceBlock(text); }
+
+  test('AC1: state — 追加した複合状態には必ず子が入る', function() {
+    var out = S.addComposite('stateDiagram-v2\n    [*] --> A\n', 'Running', '走行中');
+    expect(hasEmptyBraceBlockLocal(out)).toBe(false);
+    expect(out.indexOf('state "走行中" as Running {')).toBeGreaterThan(-1);
+    // 子は `[*] --> <id>_1`。`state <id>_1` は mermaid が受理しない
+    // (No such shape: roundedWithTitle。実機 v11.13.0 で確認)。
+    expect(out.indexOf('[*] --> Running_1')).toBeGreaterThan(-1);
+  });
+
+  test('AC2: class — 追加した namespace には必ずクラスが入る', function() {
+    var out = C.addNamespace('classDiagram\n    class B\n', 'Ctrl');
+    expect(hasEmptyBraceBlockLocal(out)).toBe(false);
+    expect(out.indexOf('namespace Ctrl {')).toBeGreaterThan(-1);
+    expect(out.indexOf('class Ctrl_1')).toBeGreaterThan(-1);
+  });
+
+  test('AC3: 同じ id で二度追加しても衝突させない', function() {
+    // mermaid は重複した別名を黙って受理するのに、プロパティパネルは最初の一致で
+    // 選択を解決するので、重複するとその後の編集・削除が別のものに当たる。
+    var s1 = S.addComposite('stateDiagram-v2\n    [*] --> A\n', 'Running', '走行中');
+    var s2 = S.addComposite(s1, 'Running', '走行中');
+    var ids = S.parse(s2).groups.map(function(g) { return g.id; });
+    expect(ids.length).toBe(2);
+    expect(ids[0] === ids[1]).toBe(false);
+    var c1 = C.addNamespace('classDiagram\n    class B\n', 'Ctrl');
+    var c2 = C.addNamespace(c1, 'Ctrl');
+    var ns = C.parse(c2).groups.map(function(g) { return g.id; });
+    expect(ns.length).toBe(2);
+    expect(ns[0] === ns[1]).toBe(false);
+    // 子の id も重ならない
+    var cls = C.parse(c2).elements.map(function(e) { return e.id; });
+    var dup = cls.filter(function(x, i) { return cls.indexOf(x) !== i; });
+    expect(dup.length).toBe(0);
+  });
+});
+
 describe('畳み込みの上限は文書の大きさに追従する', function() {
   // 上限を固定値 (200) にしていたとき、それより深い入れ子では畳み残しが出た。
   // 1回畳むごとに必ず2行以上減るので、行数を上限にすれば取りこぼさない。

@@ -428,10 +428,35 @@ window.MA.modules.state = (function() {
     return lines.join('\n');
   }
 
+  // mermaid は中身の無い合成状態を **parse は通す** のに描画で落ちる
+  // (`No such shape: roundedWithTitle`)。空のまま作ると「+ 複合状態を追加」を1回
+  // 押しただけで図が消えるのに、ステータスバーは OK のままで手がかりが無い。
+  // block の addGroup / c4 の addElement と同じく、必ず子を1つ添えて作る。
+  //
+  // 子は `[*] --> <id>_1` にする。`state <id>_1` は mermaid が受理しない
+  // (同じ roundedWithTitle で落ちる。実機 v11.13.0 で確認)。裸の id 宣言も描けるが、
+  // 合成状態の子はプロパティパネルの一覧に出ないため、遷移として置いたほうが
+  // 「遷移一覧」から編集・削除できる。合成は初期状態を持つのが普通でもある。
+  function freeStateId(text, want) {
+    var parsed = parseState(text);
+    var taken = parsed.elements.map(function(e) { return e.id; })
+      .concat((parsed.groups || []).map(function(g) { return g.id; }));
+    if (taken.indexOf(want) === -1) return want;
+    for (var n = 2; n < 1000; n++) {
+      if (taken.indexOf(want + '_' + n) === -1) return want + '_' + n;
+    }
+    return want;
+  }
+
   function addComposite(text, id, label) {
+    // コンテナ id 自体も重複させない。mermaid は重複した別名を黙って受理するのに、
+    // プロパティパネルは最初の一致で選択を解決するので、その後の編集・削除が
+    // 別の合成状態に当たる (c4 の uniqueId と同じ理由)。
+    id = freeStateId(text, id);
+    var childId = freeStateId(text + '\n    state ' + id, id + '_1');
     var block = [
       '    state "' + (label || id) + '" as ' + id + ' {',
-      '        ',
+      '        [*] --> ' + childId,
       '    }',
     ];
     var lines = text.split('\n');
@@ -528,11 +553,15 @@ window.MA.modules.state = (function() {
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--accent);margin-bottom:4px;font-weight:bold;">複合状態を追加</label>' +
-          '<div style="display:flex;gap:4px;">' +
-            '<input id="st-add-comp-id" type="text" placeholder="ID" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' +
-            '<input id="st-add-comp-label" type="text" placeholder="label" style="flex:1;background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:11px;">' +
-            '<button id="st-add-comp-btn" title="複合状態を追加" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:11px;">+</button>' +
-          '</div>' +
+          // ここだけ横並びだった。パネルは 220px 固定で、この行は約 330px 要る。
+          // 実測では 1366 / 1500 / 1920 / 2560px のいずれでも `+` がパネルの外に
+          // はみ出し、**どの画面幅でもマウスで押せなかった**。さらに横あふれで
+          // パネル自体に横スクロールが生まれ、Tab で `+` へ到達すると 139px 右へ
+          // ずれて戻らず、一覧行のラベルが隠れて「編集」「✕」だけが並ぶ。
+          // 他の追加フォームと同じ縦積みにする。
+          P.fieldHtml('ID', 'st-add-comp-id', '', '例: Running') +
+          P.fieldHtml('ラベル', 'st-add-comp-label', '', '省略可、IDと同じ') +
+          P.primaryButtonHtml('st-add-comp-btn', '+ 複合状態追加') +
         '</div>' +
         '<div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px;">' +
           '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:6px;">状態一覧</label>' +
@@ -569,6 +598,11 @@ window.MA.modules.state = (function() {
         var id = document.getElementById('st-add-comp-id').value.trim();
         var label = document.getElementById('st-add-comp-label').value.trim();
         if (!id) { alert('ID は必須です'); return; }
+        // 重複を黙って改名すると、設計書と id を揃えている利用者が取り違える。
+        var finalId = freeStateId(ctx.getMmdText(), id);
+        if (finalId !== id) {
+          alert('ID "' + id + '" は既に使われているため "' + finalId + '" で追加します');
+        }
         window.MA.history.pushHistory();
         ctx.setMmdText(addComposite(ctx.getMmdText(), id, label));
         ctx.onUpdate();
