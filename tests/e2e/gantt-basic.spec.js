@@ -31,6 +31,14 @@ async function getBarBox(page, taskId) {
 //  Rendering Tests
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ガントの詳細モードは「詳細 150%」と出る。モードが画面に出ないと、いま概観と
+// 詳細のどちらにいるのか読み取れないため表示に名前を入れた (UI-088)。
+// 倍率を見たいテストは、その中の数字だけを取る。
+function zoomPercent(text) {
+  var m = String(text).match(/(\d+)\s*%/);
+  return m ? parseInt(m[1], 10) : NaN;
+}
+
 test.describe('Initial rendering', () => {
   test('mermaid SVG renders in preview', async ({ page }) => {
     await page.goto(HTML_PATH);
@@ -291,10 +299,10 @@ test.describe('Zoom', () => {
     // そこから倍率が上がる
     await expect(page.locator('#zoom-display')).toHaveText('概観');
     await page.locator('#btn-zoom-in').click();
-    const first = parseInt(await page.locator('#zoom-display').textContent());
+    const first = zoomPercent(await page.locator('#zoom-display').textContent());
     expect(first).toBeGreaterThan(100);
     await page.locator('#btn-zoom-in').click();
-    expect(parseInt(await page.locator('#zoom-display').textContent())).toBeGreaterThan(first);
+    expect(zoomPercent(await page.locator('#zoom-display').textContent())).toBeGreaterThan(first);
   });
 
   // Fit no longer means "scale the drawing down to a percentage" for gantt.
@@ -364,7 +372,7 @@ test.describe('概観/詳細モードのリセット契機', () => {
     // 詳細モードへ
     for (let i = 0; i < 3; i++) await page.locator('#btn-zoom-in').click();
     await page.waitForTimeout(600);
-    expect(parseInt(await page.locator('#zoom-display').textContent())).toBeGreaterThan(100);
+    expect(zoomPercent(await page.locator('#zoom-display').textContent())).toBeGreaterThan(100);
 
     await page.locator('#diagram-type').selectOption('flowchart');
     await page.waitForTimeout(1200);

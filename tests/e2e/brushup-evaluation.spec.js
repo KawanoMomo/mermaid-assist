@@ -26,6 +26,14 @@ async function escapeSelection(page) {
 // ─────────────────────────────────────────────────────────────────────────
 //  E01: コピペIDバグ
 // ─────────────────────────────────────────────────────────────────────────
+// ガントの詳細モードは「詳細 150%」と出る。モードが画面に出ないと、いま概観と
+// 詳細のどちらにいるのか読み取れないため表示に名前を入れた (UI-088)。
+// 倍率を見たいテストは、その中の数字だけを取る。
+function zoomPercent(text) {
+  var m = String(text).match(/(\d+)\s*%/);
+  return m ? parseInt(m[1], 10) : NaN;
+}
+
 test.describe('E01: コピペID', () => {
   test('ペーストしたタスクのIDが__new_ではなくt{N}形式になる', async ({ page }) => {
     await page.goto(HTML_URL);
@@ -53,7 +61,7 @@ test.describe('E02-E03: ズーム範囲', () => {
     for (let i = 0; i < 20; i++) {
       await page.locator('#btn-zoom-out').click();
     }
-    const zoom = parseInt(await page.locator('#zoom-display').textContent());
+    const zoom = zoomPercent(await page.locator('#zoom-display').textContent());
     expect(zoom).toBeGreaterThanOrEqual(25);
   });
 
@@ -64,7 +72,7 @@ test.describe('E02-E03: ズーム範囲', () => {
     for (let i = 0; i < 30; i++) {
       await page.locator('#btn-zoom-in').click();
     }
-    const zoom = parseInt(await page.locator('#zoom-display').textContent());
+    const zoom = zoomPercent(await page.locator('#zoom-display').textContent());
     expect(zoom).toBeLessThanOrEqual(300);
   });
 });
