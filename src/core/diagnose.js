@@ -155,6 +155,54 @@
     return null;
   }
 
+  // C4 では境界を Rel の端点にできない。
+  //
+  // `mermaid.parse` は通るのに `mermaid.render` が
+  // `Cannot read properties of undefined (reading 'x')` で落ちる ——
+  // **存在しない id を指したときとまったく同じ壊れ方**なので、メッセージからは
+  // どちらなのか区別がつかない。実機 (v11.13.0) で確認した5形状
+  // (囲む境界 / 兄弟の境界 / 境界から境界 / トップレベルから境界 /
+  // Container_Boundary) すべてで NG で、通る書き方は無い。
+  //
+  // UI の追加フォームと編集パネルからは作れないようにしたが、**本文を直接
+  // 書けば作れる**。そのとき帯に出るのは上記の JS の内部メッセージだけで、
+  // C4 の分岐が1つも無いため日本語にもならなかった。選択肢から外したぶん、
+  // 利用者は手書きに追いやられる。
+  //
+  // 波括弧を開いている行の id を境界とみなす。ELEMENT_KINDS に無い種別
+  // (素の `Boundary` / `Deployment_Node`) も同じ制限を受けるので、種別名では
+  // なくテキストの波括弧で見る (削除側と同じ述語)。
+  function firstBoundaryEndpointRel(text) {
+    var lines = text.split('\n');
+    var boundaryIds = {};
+    var pendingId = null;   // `Kind(...)` の次の行に `{` が来る形
+    for (var i = 0; i < lines.length; i++) {
+      var t = lines[i].trim();
+      if (!t) continue;
+      if (t === '{') {
+        if (pendingId) boundaryIds[pendingId] = true;
+        pendingId = null;
+        continue;
+      }
+      var m = t.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*([^,)\s]+)/);
+      pendingId = null;
+      if (!m) continue;
+      if (/\{\s*$/.test(t)) boundaryIds[m[2]] = true;
+      else pendingId = m[2];
+    }
+    if (!Object.keys(boundaryIds).length) return null;
+
+    for (var j = 0; j < lines.length; j++) {
+      var line = lines[j].trim();
+      var rm = line.match(/^(Rel|Rel_R|Rel_L|Rel_U|Rel_D|BiRel)\s*\(\s*([^,)\s]+)\s*,\s*([^,)\s]+)/);
+      if (!rm) continue;
+      if (boundaryIds[rm[2]] || boundaryIds[rm[3]]) {
+        return line.slice(0, 60);
+      }
+    }
+    return null;
+  }
+
   // mermaid の上限に当たった場合。本文からは判定できないので例外の文言で見る。
   //
   // 上限は設定で引き上げてあるが、引き上げた値をさらに超えることはある。
@@ -199,6 +247,16 @@
         return 'この図種のラベルには " を含められません' +
           '(mermaid 側の制限。&quot; と書いてもそのまま文字として出ます)。' +
           '「' + q + '」が該当します。';
+      }
+    }
+
+    if (/^C4(Context|Container|Component|Dynamic|Deployment)/.test(head)) {
+      var ber = firstBoundaryEndpointRel(text);
+      if (ber !== null) {
+        return 'C4 では境界（System_Boundary / Container_Boundary / Boundary / ' +
+          'Deployment_Node など）を Rel の端点にできません' +
+          '（mermaid 側の制限。構文検査は通りますが描画で落ちます）。' +
+          '「' + ber + '」が該当します。境界の中の要素を端点にしてください。';
       }
     }
 

@@ -83,3 +83,57 @@ describe('diagnose: 描き上がりが本物か', function() {
     expect(D.isOversizePlaceholder(null)).toBe(false);
   });
 });
+
+// C4 では境界を Rel の端点にできない。`mermaid.parse` は通るのに
+// `mermaid.render` が `Cannot read properties of undefined (reading 'x')` で
+// 落ちる —— **存在しない id を指したときとまったく同じ壊れ方**なので、
+// メッセージからはどちらなのか区別がつかない。
+//
+// UI の追加フォームと編集パネルからは作れないようにしたが、本文を直接書けば
+// 作れる。選択肢から外したぶん利用者は手書きに追いやられるのに、そのとき帯に
+// 出るのは JS の内部メッセージだけで、C4 の分岐が1つも無いため日本語にも
+// ならなかった。
+describe('BR: C4 の境界を Rel の端点にしたとき', function() {
+  var RENDER_ERR = new Error("Cannot read properties of undefined (reading 'x')");
+  function d(text) { return window.MA.diagnose.diagnose(text, RENDER_ERR); }
+
+  test('BR-1: 境界を指す Rel を名指しする', function() {
+    var t = 'C4Context\n    System_Boundary(b, "B") {\n        System(a, "A")\n    }\n    Rel(a, b, "r")\n';
+    var msg = d(t);
+    expect(msg).toContain('境界');
+    expect(msg).toContain('Rel(a, b');
+  });
+
+  test('BR-2: 波括弧が次の行にある形でも見つける', function() {
+    // `Kind(...)` と `{` を別の行に書くのは mermaid の正規構文。
+    var t = 'C4Context\n    System_Boundary(b, "B")\n    {\n        System(a, "A")\n    }\n    Rel(b, a, "r")\n';
+    expect(d(t)).toContain('Rel(b, a');
+  });
+
+  test('BR-3: ELEMENT_KINDS に無い境界種別も見る', function() {
+    // 素の `Boundary` / `Deployment_Node` も同じ制限を受ける。種別名ではなく
+    // テキストの波括弧で見ているので、名前の一覧を持たなくてよい。
+    var t = 'C4Context\n    Boundary(b9, "B", "g") {\n        Person(p, "P")\n    }\n    Rel(p, b9, "r")\n';
+    expect(d(t)).toContain('Rel(p, b9');
+    var t2 = 'C4Deployment\n    Deployment_Node(dc, "DC") {\n        Container(app, "App", "Go")\n    }\n    Rel(app, dc, "r")\n';
+    expect(d(t2)).toContain('Rel(app, dc');
+  });
+
+  test('BR-4: 該当が実在しないときは何も言わない', function() {
+    // 「推測はしない。規則に当てはまる入力が本文に実在するときだけ言う」
+    var ok = 'C4Context\n    System_Boundary(b, "B") {\n        System(a, "A")\n    }\n    System(z, "Z")\n    Rel(a, z, "r")\n';
+    expect(d(ok)).toBe('');
+    var noBoundary = 'C4Context\n    System(a, "A")\n    System(z, "Z")\n    Rel(a, z, "r")\n';
+    expect(d(noBoundary)).toBe('');
+  });
+
+  test('BR-5: C4 以外の図種には当てはめない', function() {
+    var fc = 'flowchart TD\n  subgraph S\n    a[A]\n  end\n  a --> S\n';
+    expect(d(fc)).toBe('');
+  });
+
+  test('BR-6: BiRel や Rel_R も端点を見る', function() {
+    var t = 'C4Context\n    System_Boundary(b, "B") {\n        System(a, "A")\n    }\n    BiRel(a, b, "r")\n';
+    expect(d(t)).toContain('BiRel(a, b');
+  });
+});

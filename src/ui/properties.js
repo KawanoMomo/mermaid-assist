@@ -207,7 +207,12 @@ window.MA.properties = (function() {
     // 識別部分は削らない —— 100要素で名前を「削除」に縮めると 199 個の同名ボタンが
     // 並び、支援技術のボタン一覧で選べなくなる (この関数が解こうとした問題そのもの)。
     var rowLabel = String(opts.label).trim();   // mindmap は階層を表す先頭空白を持つ
-    var delIdent = '「' + rowLabel + '」を削除';
+    // 同じものが2つの一覧に並ぶことがある (state の合成状態は「状態一覧」と
+    // 「複合状態一覧」の両方に出る)。ラベルが同じだと支援技術のボタン一覧に
+    // **同じ名前が2つ**並ぶのに、押した結果はまったく違う —— 片方は状態と参照する
+    // 遷移を消し、もう片方はブロックごと消す。どちらなのかを名前で分ける手段。
+    // `deleteTitle` は description に回るので、名前の衝突はこれでは解けない。
+    var delIdent = '「' + rowLabel + '」を削除' + (opts.deleteNameSuffix ? opts.deleteNameSuffix : '');
     var deleteBtn = '';
     var descSpan = '';
     if (opts.deleteClass) {

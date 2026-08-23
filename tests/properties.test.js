@@ -384,3 +384,29 @@ describe('一覧行の全文を title で読めるようにする', function() {
     expect(m[1]).toContain('ext');
   });
 });
+
+describe('同じラベルの行が2つの一覧に並ぶとき', function() {
+  // state の合成状態は「状態一覧」と「複合状態一覧」の両方に出る。ラベルが同じだと
+  // 支援技術のボタン一覧に**同じ名前が2つ**並ぶのに、押した結果はまったく違う ——
+  // 片方は状態と参照する遷移を消し、もう片方はブロックごと (中の状態も遷移も
+  // 全部) 消す。実測: `stateDiagram` で `aria-label` の重複が1件あった。
+  //
+  // `deleteTitle` は description に回るので、名前の衝突はそれでは解けない。
+  test('W9: deleteNameSuffix で削除ボタンの名前を区別できる', function() {
+    var plain = P.listItemHtml({ label: '走行', deleteClass: 'x-del' });
+    var comp = P.listItemHtml({ label: '走行', deleteClass: 'x-del',
+      deleteNameSuffix: '（中の状態と遷移も一緒に）' });
+    function nameOf(html) {
+      var m = html.match(/aria-label="([^"]*)"[^>]*>✕/);
+      return m && m[1];
+    }
+    expect(nameOf(plain)).toBe('「走行」を削除');
+    expect(nameOf(comp)).toBe('「走行」を削除（中の状態と遷移も一緒に）');
+    expect(nameOf(plain) === nameOf(comp)).toBe(false);
+  });
+
+  test('W9b: 渡さなければ従来どおり', function() {
+    var m = P.listItemHtml({ label: 'a', deleteClass: 'x-del' }).match(/aria-label="([^"]*)"[^>]*>✕/);
+    expect(m[1]).toBe('「a」を削除');
+  });
+});

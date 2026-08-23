@@ -529,7 +529,17 @@ window.MA.modules.state = (function() {
       var compList = '';
       for (var lci = 0; lci < composites.length; lci++) {
         var c = composites[lci];
-        compList += P.listItemHtml({ label: c.label, deleteClass: 'st-delete-comp', dataLine: c.line, dataEndLine: c.endLine });
+        // 合成状態は「状態一覧」にも並ぶ（状態でもあるため）。ラベルが同じだと
+        // 支援技術のボタン一覧に**同じ名前が2つ**並ぶのに、押した結果はまったく
+        // 違う —— 状態一覧の ✕ は状態と参照する遷移を消し、こちらは
+        // **ブロックごと（中の状態も遷移も全部）**消す。
+        // どちらを押しているのかが名前から分かるようにする。
+        compList += P.listItemHtml({
+          label: c.label,
+          sublabel: '(' + c.id + ', 中身ごと)',
+          deleteNameSuffix: '（中の状態と遷移も一緒に）',
+          deleteClass: 'st-delete-comp', dataLine: c.line, dataEndLine: c.endLine,
+        });
       }
       if (!compList) compList = P.emptyListHtml('（なし）');
 
