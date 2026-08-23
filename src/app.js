@@ -1056,7 +1056,17 @@ function focusFirstVisibleRow(tries) {
     var rows = propsEl.querySelectorAll('.ma-list-row');
     for (var k = 0; k < rows.length; k++) {
       if (rows[k].style.display === 'none') continue;
-      var btn = rows[k].querySelector('button');
+      // **押せる**ボタンを選ぶ。`querySelector('button')` は行の先頭ボタンを返すが、
+      // それが disabled だと `focus()` は効かず、`activeElement === target` の
+      // 判定が必ず外れて「作り直しの最中」と誤認し、6回リトライして諦めていた。
+      // gantt の先頭セクションは ↑ が disabled なので、**絞り込み欄で Enter を
+      // 押しても行へ飛べない**状態になっていた (実測: 焦点は追加フォームの
+      // ラベル欄に残る)。
+      var btn = null;
+      var cands = rows[k].querySelectorAll('button');
+      for (var c = 0; c < cands.length; c++) {
+        if (!cands[c].disabled) { btn = cands[c]; break; }
+      }
       var target = btn || rows[k];
       if (!btn) target.setAttribute('tabindex', '-1');
       target.focus();

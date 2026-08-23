@@ -33,6 +33,14 @@ async function escapeSelection(page) {
 //  シナリオ1: ゼロからスケジュールを作る
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ガントの詳細モードは「詳細 150%」と出る。モードが画面に出ないと、いま概観と
+// 詳細のどちらにいるのか読み取れないため表示に名前を入れた (UI-088)。
+// 倍率を見たいテストは、その中の数字だけを取る。
+function zoomPercent(text) {
+  var m = String(text).match(/(\d+)\s*%/);
+  return m ? parseInt(m[1], 10) : NaN;
+}
+
 test.describe('シナリオ1: 新規スケジュール作成', () => {
   test('空のガントから3セクション・6タスクのスケジュールを構築する', async ({ page }) => {
     await page.goto(HTML_URL);
@@ -447,7 +455,7 @@ test.describe('シナリオ8: 表示の調整', () => {
       await page.locator('#btn-zoom-in').click();
     }
     await page.waitForTimeout(500);
-    const zoomedIn = parseInt(await page.locator('#zoom-display').textContent());
+    const zoomedIn = zoomPercent(await page.locator('#zoom-display').textContent());
     expect(zoomedIn).toBeGreaterThan(100);
     expect(await widthOf()).toBeGreaterThan(fitWidth);
 

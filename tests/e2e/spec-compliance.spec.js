@@ -30,6 +30,14 @@ async function propsText(page) {
 //  仕様 2.1: データフロー — Mermaidテキストがソースオブトゥルース
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ガントの詳細モードは「詳細 150%」と出る。モードが画面に出ないと、いま概観と
+// 詳細のどちらにいるのか読み取れないため表示に名前を入れた (UI-088)。
+// 倍率を見たいテストは、その中の数字だけを取る。
+function zoomPercent(text) {
+  var m = String(text).match(/(\d+)\s*%/);
+  return m ? parseInt(m[1], 10) : NaN;
+}
+
 test.describe('Spec 2.1: ソースオブトゥルース', () => {
   test('エディタのテキスト変更がプレビューに反映される', async ({ page }) => {
     await page.goto(HTML_URL);
@@ -414,10 +422,10 @@ test.describe('Spec 4.4: ズーム', () => {
     // 最初のズームインで詳細モードへ抜け、そこからは倍率が上がっていく。
     await expect(page.locator('#zoom-display')).toHaveText('概観');
     await page.locator('#btn-zoom-in').click();
-    const first = parseInt(await page.locator('#zoom-display').textContent());
+    const first = zoomPercent(await page.locator('#zoom-display').textContent());
     expect(first).toBeGreaterThan(100);
     await page.locator('#btn-zoom-in').click();
-    const second = parseInt(await page.locator('#zoom-display').textContent());
+    const second = zoomPercent(await page.locator('#zoom-display').textContent());
     expect(second).toBeGreaterThan(first);
   });
 
@@ -457,13 +465,13 @@ test.describe('Spec 4.4: ズーム', () => {
       deltaY: -100, ctrlKey: true,
     });
     await page.waitForTimeout(100);
-    const first = parseInt(await page.locator('#zoom-display').textContent());
+    const first = zoomPercent(await page.locator('#zoom-display').textContent());
     expect(first).toBeGreaterThan(100);
     await page.locator('#preview-container').dispatchEvent('wheel', {
       deltaY: -100, ctrlKey: true,
     });
     await page.waitForTimeout(100);
-    const after = parseInt(await page.locator('#zoom-display').textContent());
+    const after = zoomPercent(await page.locator('#zoom-display').textContent());
     expect(after).toBeGreaterThan(first);
   });
 });
