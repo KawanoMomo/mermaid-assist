@@ -822,6 +822,74 @@ describe('Q7: deletionImpactFrom は exact と一致する', function() {
     expect(after.indexOf('System(out')).toBeGreaterThan(-1);
   });
 
+  // 深さ50を超える入れ子。ここまでのフィクスチャはすべて深さ数段だったので、
+  // 「内側から外側へ (降順) 見る」ことと周回上限の組み合わせが正しさの条件に
+  // なっていることを1本も守っていなかった。昇順に戻すミューテーションは
+  // 1134 件すべてを通してしまい (SURVIVED)、実際には深さ55で fast=56→51、
+  // 深さ100で fast=101→51 と過少申告する。
+  [55, 120].forEach(function(depth) {
+    test('Q7h-' + depth + ': 深さ' + depth + 'の入れ子でも exact と一致する', function() {
+      var lines = ['C4Context', '    title T'];
+      for (var i = 0; i < depth; i++) {
+        lines.push(new Array(i + 2).join('    ') + '    System_Boundary(d' + i + ', "D' + i + '") {');
+      }
+      lines.push(new Array(depth + 2).join('    ') + 'Person(leaf, "L")');
+      for (var j = depth - 1; j >= 0; j--) {
+        lines.push(new Array(j + 2).join('    ') + '    }');
+      }
+      var doc = lines.join('\n') + '\n';
+      var p = c4.parseC4(doc);
+      var leaf = p.elements.filter(function(e) { return e.id === 'leaf'; })[0];
+      expect(leaf).not.toBe(undefined);
+      var exact = c4.deletionImpact(doc, leaf);
+      var fast = c4.deletionImpactFrom(p, leaf, doc);
+      // leaf + 畳まれる境界 depth 個
+      expect(exact.elements).toBe(depth + 1);
+      expect(fast.elements).toBe(exact.elements);
+      expect(fast.relations).toBe(exact.relations);
+    });
+  });
+
+  // 境界の中身がコメントだけになる形。`hasContent` から stripComment を外すと
+  // コメント行が「中身」に見えて畳まれなくなり、件数が食い違う。
+  test('Q7i: 中身がコメントだけになる境界も畳まれた前提で数える', function() {
+    var doc = [
+      'C4Context', '    title T',
+      '    System_Boundary(b1, "B1") {', '        Person(p1, "P1")', '        %% ただのメモ', '    }', ''
+    ].join('\n');
+    var p = c4.parseC4(doc);
+    var p1 = p.elements.filter(function(e) { return e.id === 'p1'; })[0];
+    var exact = c4.deletionImpact(doc, p1);
+    var fast = c4.deletionImpactFrom(p, p1, doc);
+    expect(exact.elements).toBe(2);          // p1 と b1
+    expect(fast.elements).toBe(exact.elements);
+    expect(fast.relations).toBe(exact.relations);
+  });
+
+  // `deletionImpactFrom` は renderProps が一覧の行ごとに呼ぶので、毎キーストロークの
+  // 経路に乗っている。答えは変わらないが桁で遅くなる変更 —— 「既に消えた境界を
+  // 飛ばす」を外す (実測 27.7ms → 17,329ms) や、走査を昇順に戻す (27.7ms → 211.7ms)
+  // —— を、答えだけ見るテストは1本も検出できなかった (どちらもミューテーションで
+  // SURVIVED)。
+  //
+  // しきい値は実測値から2桁ぶん離してある。現状 28ms 前後・退行時 17 秒なので、
+  // 遅いマシンや GC のばらつきで揺れる幅ではない。
+  test('Q7j: 深い入れ子でも一覧1回ぶんの再計算が現実的な時間で終わる', function() {
+    var depth = 200;
+    var lines = ['C4Context', '    title T'];
+    for (var i = 0; i < depth; i++) {
+      lines.push(new Array(i + 2).join('  ') + 'System_Boundary(d' + i + ', "D") {');
+    }
+    lines.push(new Array(depth + 2).join('  ') + 'Person(leaf, "L")');
+    for (var j = depth - 1; j >= 0; j--) lines.push(new Array(j + 2).join('  ') + '}');
+    var doc = lines.join('\n') + '\n';
+    var p = c4.parseC4(doc);
+    var started = Date.now();
+    for (var k = 0; k < p.elements.length; k++) c4.deletionImpactFrom(p, p.elements[k], doc);
+    var elapsed = Date.now() - started;
+    expect(elapsed < 2000).toBe(true);
+  });
+
   test('Q7g: Deployment_Node を跨ぐ連鎖でも件数が実際の削除と合う', function() {
     var p = c4.parseC4(DEPLOY_NODE);
     var app = p.elements.filter(function(e) { return e.id === 'app'; })[0];
@@ -836,6 +904,47 @@ describe('Q7: deletionImpactFrom は exact と一致する', function() {
     expect(after.indexOf('Deployment_Node(dc')).toBe(-1);
     expect(after.indexOf('Rel(app')).toBe(-1);
     expect(after.indexOf('System(ext')).toBeGreaterThan(-1);
+  });
+});
+
+describe('リレーションの削除も後始末を通る', function() {
+  // 要素と境界の削除は tidyAfterDelete を通っていたのに、リレーションだけが素の
+  // deleteLine のまま残っていた。境界の中身がリレーションだけだと、✕ を1回押した
+  // 時点で空の境界が残り、mermaid が受理しない ——
+  // **GUI 操作1回で、GUI では直せない状態**になる (本文を手で編集するしかない)。
+  test('RD1: 境界の中身がリレーションだけなら、消すと境界ごと畳まれる', function() {
+    var t = [
+      'C4Context', '    title 受発注', '    System(z, "外部システム")',
+      '    System_Boundary(b, "社内") {', '        Rel(z, z, "自己参照")', '    }', ''
+    ].join('\n');
+    var rel = c4.parseC4(t).relations[0];
+    var out = c4.deleteRelLine(t, rel.line);
+    expect(out.indexOf('System_Boundary(b')).toBe(-1);
+    expect(out.indexOf('{')).toBe(-1);
+    expect(out.indexOf('System(z, "外部システム")')).toBeGreaterThan(-1);
+  });
+
+  test('RD2: 中身が残っていれば境界は畳まない', function() {
+    var t = [
+      'C4Context', '    title T', '    System(z, "外部")',
+      '    System_Boundary(b, "社内") {', '        System(a, "受注")', '        Rel(a, z, "連携")', '    }', ''
+    ].join('\n');
+    var rel = c4.parseC4(t).relations[0];
+    var out = c4.deleteRelLine(t, rel.line);
+    expect(out.indexOf('System_Boundary(b')).toBeGreaterThan(-1);
+    expect(out.indexOf('System(a, "受注")')).toBeGreaterThan(-1);
+    expect(out.indexOf('Rel(a, z')).toBe(-1);
+  });
+
+  test('RD3: 畳むときコメントは残す', function() {
+    var t = [
+      'C4Context', '    title T', '    System(z, "外部")',
+      '    System_Boundary(b, "社内") {', '        %% 連携の根拠', '        Rel(z, z, "自己")', '    }', ''
+    ].join('\n');
+    var rel = c4.parseC4(t).relations[0];
+    var out = c4.deleteRelLine(t, rel.line);
+    expect(out.indexOf('System_Boundary(b')).toBe(-1);
+    expect(out.indexOf('%% 連携の根拠')).toBeGreaterThan(-1);
   });
 });
 

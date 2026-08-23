@@ -81,7 +81,9 @@ describe('リレーションの端点に境界を出さない', function() {
     expect(parent.indexOf('inner')).toBeGreaterThan(-1);
   });
 
-  test('R4: 境界しか無い図では「要素を先に追加」だけが出る', function() {
+  // 文言は「境界でない要素を先に追加」。「要素を先に追加」だと嘘になる —— この分岐に
+  // 入るのは境界しか無い図で、要素一覧には境界が並んでいるからである。
+  test('R4: 境界しか無い図では「境界でない要素を先に追加」だけが出る', function() {
     var host = document.getElementById('props-content');
     host.innerHTML = '';
     var onlyBoundaries = 'C4Context\n    title T\n    System_Boundary(b, "B") {\n    }\n';

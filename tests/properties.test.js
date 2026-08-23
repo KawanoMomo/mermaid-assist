@@ -282,12 +282,61 @@ describe('listItemHtml: 支援技術に届く名前', function() {
   // ここは「支援技術から見た名前」だけを見る。title は button の名前にならず
   // (中身のテキスト `✕5` が名前になる)、カスケード削除の件数が読み上げに
   // 一切現れなかったので、aria-label 側を固定する。
-  test('W4: 件数は aria-label にも入る', function() {
-    var html = P.listItemHtml({ label: 'foo', deleteClass: 'x-del', deleteLabel: '✕5', deleteTitle: '3 要素が消えます' });
-    var m = html.match(/aria-label="([^"]*)"[^>]*>✕5</);
-    expect(m).not.toBeNull();
-    expect(m[1]).toContain('3 要素が消えます');
-    expect(m[1]).toContain('foo');
+  test('W4: 件数は説明 (aria-describedby) に入り、名前は識別だけを持つ', function() {
+    // title と aria-label を同一文字列にしていたとき、Chromium は「名前に採用されな
+    // かった title」を description に回すため name と description がバイト一致し、
+    // 支援技術が同じ全文を2回読んでいた (20要素の C4 で削除ボタン39個すべてが
+    // description === name。実測)。
+    // 名前 = 識別、説明 = 件数、に分ける。
+    var html = P.listItemHtml({ label: 'foo', deleteClass: 'x-del', deleteLabel: '✕5', deleteTitle: '削除すると 3 要素が消えます' });
+    var aria = html.match(/aria-label="([^"]*)"[^>]*>✕5</);
+    expect(aria).not.toBeNull();
+    expect(aria[1]).toBe('「foo」を削除');
+    // 件数は消えていない。describedby の指す先に入っている。
+    var by = html.match(/aria-describedby="([^"]*)"/);
+    expect(by).not.toBeNull();
+    var span = html.match(new RegExp('<span id="' + by[1] + '"[^>]*>([^<]*)</span>'));
+    expect(span).not.toBeNull();
+    expect(span[1]).toContain('3 要素が消えます');
+  });
+
+  test('W4b: 名前と説明が同じ文字列にならない', function() {
+    // これが起きると支援技術が同じ全文を2回読む。
+    function nameAndDesc(opts) {
+      var html = P.listItemHtml(opts);
+      var aria = html.match(/aria-label="([^"]*)"[^>]*>✕/);
+      var by = html.match(/aria-describedby="([^"]*)"/);
+      var title = html.match(/<button [^>]*class="x-del"[^>]*title="([^"]*)"/) ||
+        html.match(/title="([^"]*)"[^>]*class="x-del"/);
+      var desc = null;
+      if (by) {
+        var span = html.match(new RegExp('<span id="' + by[1] + '"[^>]*>([^<]*)</span>'));
+        desc = span && span[1];
+      } else if (title) {
+        // describedby が無い場合、Chromium は title を description に回す。
+        desc = title[1];
+      }
+      return { name: aria && aria[1], desc: desc };
+    }
+    // 警告あり
+    var a = nameAndDesc({ label: 'foo', deleteClass: 'x-del', deleteLabel: '✕5', deleteTitle: '削除すると 3 要素が消えます' });
+    expect(a.name).not.toBeNull();
+    expect(a.name === a.desc).toBe(false);
+    // 警告なし (この関数を通る 41 か所のうち 36 か所)。title を付けないので
+    // description そのものが生まれない。
+    var b = nameAndDesc({ label: 'foo', deleteClass: 'x-del' });
+    expect(b.name).toBe('「foo」を削除');
+    expect(b.desc).toBe(null);
+  });
+
+  test('W4c: 行ラベルの先頭空白は名前に持ち込まない', function() {
+    // mindmap は階層を表すために行ラベルの先頭に空白を積む。そのまま名前にすると
+    // 「␣␣␣␣子ノード」を削除 と読み上げられる。
+    var html = P.listItemHtml({ label: '    子ノード', deleteClass: 'x-del', selectClass: 'x-sel' });
+    var del = html.match(/aria-label="([^"]*)"[^>]*>✕/);
+    var sel = html.match(/aria-label="([^"]*)"[^>]*>編集</);
+    expect(del[1]).toBe('「子ノード」を削除');
+    expect(sel[1]).toBe('「子ノード」を編集');
   });
 
   test('W5: 編集ボタンも行ごとに違う名前を持つ', function() {

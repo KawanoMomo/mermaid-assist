@@ -748,7 +748,13 @@ window.MA.modules.state = (function() {
         // mermaid は参照だけで状態を作るので、**一覧から消えても図には残る**。
         // A10 で UI の経路は直したが、契約の経路が古いままだった (r2 を契約ベースにして発覚)。
         if (opts.id) return deleteState(text, lineNum, opts.id);
-        return window.MA.textUpdater.deleteLine(text, lineNum);
+        // id 無しの経路も畳み込みを通す。ここだけ素の deleteLine のままだと、
+        // 合成状態の中身が1行しか無い図で `state S { }` が残り mermaid が render で
+        // 落ちる。class の operations.delete は classId が undefined でも
+        // collapseEmptyNamespaces を通っており、**同じコミットの中で state と class の
+        // 判断が割れていた**。今は app.js が必ず id を渡すので到達しないが、
+        // 契約テストと将来の呼び手が踏む。
+        return collapseEmptyComposites(window.MA.textUpdater.deleteLine(text, lineNum));
       },
       update: function(text, lineNum, field, value, opts) {
         opts = opts || {};

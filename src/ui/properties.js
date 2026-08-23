@@ -162,6 +162,10 @@ window.MA.properties = (function() {
     return '</div>';
   }
 
+  // 説明用の隠し span に振る id の連番。パネルは innerHTML で作り直されるので、
+  // 増え続けても DOM に残るのは今表示している行ぶんだけ。
+  var descSeq = 0;
+
   // listItemHtml: row with label + select-edit and delete buttons
   // opts: { label, sublabel?, selectClass, deleteClass, dataElementId?, dataLine?, dataEndLine?, mono? }
   function listItemHtml(opts) {
@@ -173,7 +177,7 @@ window.MA.properties = (function() {
     if (opts.dataEndLine !== undefined) dataAttrs += ' data-end-line="' + opts.dataEndLine + '"';
     // 「編集」も「✕」も、どの行のものかがボタン名から分からない。支援技術の
     // ボタン一覧では同名が並ぶだけで選べないので、行のラベルを名前に入れる。
-    var selAria = ' aria-label="' + escHtml('「' + String(opts.label) + '」を編集') + '"';
+    var selAria = ' aria-label="' + escHtml('「' + String(opts.label).trim() + '」を編集') + '"';
     var selectBtn = opts.selectClass ?
       '<button class="' + opts.selectClass + '"' + dataAttrs + selAria + ' style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;min-height:24px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' : '';
     // deleteLabel / deleteTitle let a module warn about a cascading delete on the
@@ -183,21 +187,51 @@ window.MA.properties = (function() {
     // 記号だけのボタンは、何を消すのか読み取れない。ホバーとスクリーンリーダの
     // 両方でここが唯一の手がかりになる。
     //
-    // deleteTitle が受け取るのは「削除」「削除すると 3 要素 / 2 リレーションが
-    // 消えます」のような**動作の説明だけ**で、どの行のものかは付けない。行の識別は
-    // ここで一度だけ足す。以前は deleteTitle を渡していない経路 (この関数を通る
-    // 41 か所のうち 36 か所) で既定値に行ラベルが入り、そこへさらに前置していたため
+    // deleteTitle が受け取るのは「削除すると 3 要素 / 2 リレーションが消えます」の
+    // ような**動作の説明だけ**で、どの行のものかは付けない。行の識別はここで一度だけ
+    // 足す。以前は deleteTitle を渡していない経路 (この関数を通る 41 か所のうち
+    // 36 か所) で既定値に行ラベルが入り、そこへさらに前置していたため
     // 「A」「A」を削除 と二重に読み上げられていた。
-    var delPhrase = opts.deleteTitle || '削除';
-    var delDesc = '「' + String(opts.label) + '」を' + delPhrase;
-    var delTitle = ' title="' + escHtml(delDesc) + '"';
-    // title は支援技術に届かない。button は中身のテキスト (`✕5` 等) が名前になり、
-    // title はその後方互換のフォールバックでしかないため、`✕5` がある限り読み上げ
-    // には現れない。カスケード削除の件数はここでしか警告していないので、
-    // aria-label で名前そのものに入れる。
-    var delAria = ' aria-label="' + escHtml(delDesc) + '"';
-    var deleteBtn = opts.deleteClass ?
-      '<button class="' + opts.deleteClass + '"' + dataAttrs + delTitle + delAria + ' style="background:var(--accent-red);color:#fff;border:none;padding:4px 8px;min-width:24px;min-height:24px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">' + delLabel + '</button>' : '';
+    //
+    // 名前 (aria-label) と説明 (aria-describedby) を分ける。
+    //
+    // title と aria-label を同一文字列にしていたとき、Chromium は
+    // 「名前に採用されなかった title」を description に回すため、
+    // **name と description がバイト一致**していた (20要素の C4 で削除ボタン 39個
+    // すべてが description === name。実測)。NVDA は「オブジェクトの説明を報告」が
+    // 既定 ON、JAWS / VoiceOver も description を読むので、同じ全文が2回読まれる。
+    // 20要素で読み上げ 3,522 文字、name 最長 74 文字。
+    //
+    // aria-describedby は description の計算で title より優先されるので、
+    // マウス用ツールチップ (title) を残したまま重複だけ消える。
+    // 識別部分は削らない —— 100要素で名前を「削除」に縮めると 199 個の同名ボタンが
+    // 並び、支援技術のボタン一覧で選べなくなる (この関数が解こうとした問題そのもの)。
+    var rowLabel = String(opts.label).trim();   // mindmap は階層を表す先頭空白を持つ
+    var delIdent = '「' + rowLabel + '」を削除';
+    var deleteBtn = '';
+    var descSpan = '';
+    if (opts.deleteClass) {
+      var delAria = ' aria-label="' + escHtml(delIdent) + '"';
+      var delTitle = '', delDescribedBy = '';
+      // 名前が既に言っていることは説明しない。c4 / block / flowchart は
+      // カスケードが無い行に `deleteTitle: '削除'` を渡すので、そのまま説明にすると
+      // 名前「「X」を削除」の後ろで「削除」ともう一度読まれる (実測で41個中22個)。
+      var hasExtraInfo = opts.deleteTitle && ('「' + rowLabel + '」を' + opts.deleteTitle) !== delIdent;
+      if (hasExtraInfo) {
+        // カスケードの警告がある場合だけ、詳細を description に回す。
+        var descId = 'ma-del-desc-' + (descSeq++);
+        descSpan = '<span id="' + descId + '" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;">' +
+          escHtml(opts.deleteTitle) + '</span>';
+        delDescribedBy = ' aria-describedby="' + descId + '"';
+        delTitle = ' title="' + escHtml('「' + rowLabel + '」を' + opts.deleteTitle) + '"';
+      }
+      // 警告が無い場合は title を付けない。付けると内容が aria-label と一致し、
+      // Chromium がそれを description に回して同じ文字列を2回読ませる。
+      // ホバーで失うのは「✕ は削除」という自明な説明だけで、行の全文は行そのものの
+      // title から今までどおり読める。
+      deleteBtn = '<button class="' + opts.deleteClass + '"' + dataAttrs + delTitle + delAria + delDescribedBy +
+        ' style="background:var(--accent-red);color:#fff;border:none;padding:4px 8px;min-width:24px;min-height:24px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">' + delLabel + '</button>';
+    }
     // 行に印を付ける。一覧の絞り込みはこの印を見て行を選ぶので、
     // 各モジュールは何もしなくてよい (41か所がこの関数を通る)。
     // 行の文字はパネル幅で切り落とされる。既定幅でも半数以上の行が省略され、
@@ -214,7 +248,7 @@ window.MA.properties = (function() {
       // 補足 (`(in 親ID)` など) も入れる。補足は行末にあるので真っ先に切れるが、
       // 「どの親の中か」は名前と同じくらい効く手がかりになる。
       '<div title="' + escHtml(rowFull) + '" style="flex:1;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + fontStyle + '">' + escHtml(opts.label) + sub + '</div>' +
-      selectBtn + deleteBtn +
+      selectBtn + deleteBtn + descSpan +
     '</div>';
   }
 
