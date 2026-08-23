@@ -203,7 +203,13 @@ html, body {
 }
 
 /* 置換の欄 (FEAT-001)。狭い画面でも溢れないよう、入力欄を縮める。 */
-#replace-bar {
+#restore-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px; background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border); font-size: 12px;
+}
+    #restore-msg { font-size: 11px; color: var(--text-primary); flex: 1; }
+    #replace-bar {
   display: flex; align-items: center; gap: 6px;
   padding: 5px 8px; background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border); font-size: 12px;
@@ -718,6 +724,14 @@ html, body {
            Ctrl+H で開く — 実測で Ctrl+H は無反応だったので奪う操作が無い。
            レビュー指摘で用語を統一するとき、5要素の改名に 15操作かかっていた
            (編集ボタン5回 + 入力5回 + 確定5回)。目標は2操作。 -->
+      <!-- UI-064: 前回の未保存の続きを、確認してから復元する。
+           黙って書き戻すと「別の図を開いたつもりの人が前の図を見る」
+           A113 / A114 と同じ事故になるので、どの文書の続きかを名前で示す。 -->
+      <div id="restore-bar" hidden>
+        <span id="restore-msg"></span>
+        <button id="restore-open" class="tb-btn">開く</button>
+        <button id="restore-discard" class="tb-btn" title="この退避を捨てる">捨てる</button>
+      </div>
       <div id="replace-bar" hidden>
         <input id="replace-find" type="text" placeholder="探す語" autocomplete="off" spellcheck="false">
         <span id="replace-arrow">→</span>

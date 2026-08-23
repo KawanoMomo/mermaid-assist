@@ -57,6 +57,21 @@ const eFail = /(\d+)\s+failed/.exec(e2eOut);
 const ePass = em ? +em[1] : 0;
 check('G4/G5', 'e2e', (!eFail || +eFail[1] === 0) && ePass >= MIN_E2E,
   ePass + ' passed' + (eFail ? ' / ' + eFail[1] + ' failed' : '') + ' (下限 ' + MIN_E2E + ')');
+// **どれが落ちたかを捨てない。**
+//
+// 1度「1 failed」とだけ出て、どのテストか分からず再現もしなかったことがある
+// (2026-08-23)。ゲートは verify.sh とは別に e2e を回すので、**ここでしか
+// 起きない失敗はここでしか見えない**。件数だけ出すのは、検査器で3回出た
+// 「失敗が見えない書き方」と同じ型。
+if (eFail && +eFail[1] > 0) {
+  const lines = e2eOut.split('\n');
+  const detail = lines.filter(function(l) { return /Error:|expect\(|\u2718|\u2717/.test(l); }).slice(0, 20);
+  console.log('\n  --- e2e で落ちたもの ---');
+  detail.forEach(function(l) {
+    console.log('  ' + l.replace(/\u001b\[[0-9;]*m/g, '').trim().slice(0, 160));
+  });
+  console.log('  ------------------------');
+}
 
 // 並行レビュー。4観点すべてで指摘ゼロ。
 // 実行済みの結果を読む (gate から起動すると2重に走って遅い)。

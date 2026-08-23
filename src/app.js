@@ -956,11 +956,169 @@ function showRenderWarningBanner(cause) {
 // 保存名は保存時に4秒だけ出て消えていたので、複数の図を並行して直す運用で
 // 「どこに上書きされるか」を確かめる手段がなかった。上書き保存を入れた以上、
 // これは安全に関わる情報になる。
+// 退避と復元 (UI-064)
+//
+// 保存はダウンロード操作しか無く、こまめに保存する習慣が付きにくい。
+// 離脱確認 (beforeunload) は入っているが、**ブラウザが落ちた / タブを誤って
+// 閉じた場合は何も残らない**。数十〜数百枚を扱う運用では、失うのは1枚でも痛い。
+//
+// **決めたこと (案B)**: 黙って書き戻さず、「前回の続きがあります。開きますか」と
+// 確認してから復元する。黙って戻すと、**別の図を開いたつもりの人が前の図を見る**
+// という A113 / A114 と同じ事故になる。だからどの文書の続きかを名前で示す。
+//
+// 退避するのは**未保存のときだけ**。保存済み・ひな形・起動時の見本は
+// `hasUnsavedWork` が false を返すので退避されず、触っていない画面を
+// 「続きがあります」と言われることがない (起動時の見本は markSaved 済み)。
+var DRAFT_KEY = 'ma.draft.v1';
+
+// 起動時に**先に**読み取っておく退避。
+//
+// 最初の描画で updateDocumentTitle → syncDraft(false) が走る (起動時の見本は
+// markSaved 済みなので未保存ではない)。**訊く前に消えてしまう**ので、
+// 画面を組む前に読み出して持っておく。実際この順序を踏み外して一度消した。
+var pendingDraft = null;
+
+// 訊いている最中は退避を消さない。
+//
+// 最初の描画で syncDraft(false) が走る (起動時の見本は未保存ではない) ため、
+// 素直に書くと**利用者が選ぶ前に退避が消える**。開いて確認バーを見たまま
+// タブを閉じた人は、次に開くと何も残っていない — 「捨てる時機を決める」と
+// いう約束を実装が破っていた。変異検査で「捨てるが消さない」を入れても
+// 検査が落ちず、そこで気付いた。
+var draftOfferPending = false;
+
+// このタブの印。**同じタブを再読み込みしただけのときは訊かない**。
+//
+// 再読み込みでは離脱確認 (beforeunload) が先に出て、利用者は「破棄」を選んで
+// いる。その直後に「前回の続きがあります」と訊くのは、**答えたばかりの人に
+// もう一度訊く**ことで、「捨てる」を押した退避を残すのと同じ筋の悪さになる。
+//
+// sessionStorage はタブ単位で、再読み込みでは残り、新しいタブでは空になる。
+// この性質がそのまま「同じタブか」の判定になる。
+// 実測: この区別が無いと、編集してから再読み込みする e2e に確認バーが割り込み、
+// 全体の e2e が**3回に1回ほど落ちる**状態になっていた (退避を書く間引きと
+// 再読み込みの競争)。
+function tabToken() {
+  try {
+    var t = sessionStorage.getItem('ma.tab');
+    if (!t) { t = String(Math.floor(Math.random() * 1e9)) + '.' + String(new Date().getTime()); sessionStorage.setItem('ma.tab', t); }
+    return t;
+  } catch (e) { return ''; }   // 使えない環境では区別しない (訊く側に倒す)
+}
+
+function writeDraft(text, name, type) {
+  // 容量超過や localStorage が使えない環境では黙って諦める。
+  // 退避は補助であって、これが理由で編集が止まってはいけない。
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({
+      text: text, name: name, type: type, tab: tabToken(),
+    }));
+  } catch (e) { /* 使えないなら退避しない */ }
+}
+
+function readDraft() {
+  try {
+    var raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    var d = JSON.parse(raw);
+    if (!d || typeof d.text !== 'string' || !d.text.trim()) return null;
+    return d;
+  } catch (e) { return null; }
+}
+
+// **捨てる時機を決めておく** (決めないと溜まり続ける):
+//   1. 保存した       → 未保存でなくなるので syncDraft が消す
+//   2. 復元を断った   → その場で消す。断ったものを次回また訊かない
+//   3. 復元した       → 消さない。復元した中身が新しい未保存の作業になる
+function clearDraft() {
+  try { localStorage.removeItem(DRAFT_KEY); } catch (e) { /* 使えないなら何もしない */ }
+}
+
+// syncDraft: 未保存なら退避し、未保存でなくなったら消す。
+// 未保存の印を出す処理と同じ判定を使う (2つの判定が食い違うと、印は出ないのに
+// 退避だけ残る / その逆が起きる)。
+// 名前は**引数で受け取る**。呼び出し側のローカル変数を関数の中から参照した形に
+// なっており、実際には `window.name` (空文字) を拾っていた。実測で退避の名前が
+// 「名前なし」になって気付いた — 名前は「どの文書の続きか」を示す唯一の手掛かり
+// なので、空になると案内が意味を失う。
+var everDirty = false;   // このタブで一度でも未保存になったか
+
+function syncDraft(dirty, name) {
+  if (dirty) {
+    everDirty = true;
+    draftOfferPending = false;
+    writeDraft(mmdText, name, currentModule && currentModule.type);
+    return;
+  }
+  // **起動直後の綺麗な状態では退避に触らない。**
+  //
+  // 「未保存でない = 退避は不要」と単純に書くと、起動するたびに消える。
+  // 退避は**失った作業の唯一の写し**で、同じタブを再読み込みした場合は
+  // 本文の側が失われているのだから、消してよいのは利用者の操作の結果だけ:
+  //   保存した / 断った / 新しく編集して上書きした
+  // 実測: この区別が無いと、同じタブで開き直した瞬間に退避が消えていた。
+  if (!everDirty) return;
+  if (draftOfferPending) return;   // まだ訊いている最中。答えを待つ
+  clearDraft();
+}
+
+// offerDraftRestore: 起動時に「前回の続きがあります」と訊く (UI-064)。
+//
+// 訊くだけで、押されるまで本文には触らない。**黙って書き戻さない**のは、
+// 別の図を開いたつもりの人が前の図を見るのが A113 / A114 と同じ事故だから。
+// どの文書の続きかを名前で出すので、見て違うと分かれば捨てられる。
+function offerDraftRestore() {
+  var d = pendingDraft;
+  var bar = document.getElementById('restore-bar');
+  if (!bar) return false;
+  if (!d) { bar.hidden = true; return false; }
+
+  var msg = document.getElementById('restore-msg');
+  if (msg) {
+    msg.textContent = '前回の続きがあります（' + (d.name || '名前なし') + '.mmd）。開きますか';
+  }
+  bar.hidden = false;
+
+  var open = document.getElementById('restore-open');
+  if (open) open.addEventListener('click', function() {
+    bar.hidden = true;
+    draftOfferPending = false;
+    window.MA.history.pushHistory();     // 復元も Ctrl+Z で戻せる
+    mmdText = d.text;
+    suppressSync = true;
+    editorEl.value = mmdText;
+    suppressSync = false;
+    window.MA.selection.setSelected([]);
+    syncLineNumbers();
+    scheduleRefresh();
+    // 退避は消さない。**復元した中身がそのまま新しい未保存の作業**なので、
+    // ここで消すと復元直後にブラウザが落ちた場合にまた失う。
+    showTransient('前回の続きを開きました（保存されていません）', 4000);
+  });
+
+  var discard = document.getElementById('restore-discard');
+  if (discard) discard.addEventListener('click', function() {
+    bar.hidden = true;
+    draftOfferPending = false;
+    // **断ったらその場で捨てる。** 残すと次に開くたび同じことを訊かれる。
+    //
+    // 実際に「二度と訊かれない」ことを保証しているのは上の1行 (保留を解く) と
+    // syncDraft で、この clearDraft() を外しても検査は落ちない — 直後の描画が
+    // どのみち消すため。**変異が挙動を変えないなら効いていない** (測定規約8) が、
+    // ここは「描画が来る前にタブを閉じた場合」だけの差なので残す。
+    // 消す時機を1箇所に寄せると、押した瞬間に消えることが読めなくなる。
+    clearDraft();
+    showTransient('前回の退避を捨てました', 3000);
+  });
+  return true;
+}
+
 function updateDocumentTitle() {
   var name = currentBaseName();
   var dirty = hasUnsavedWork(mmdText, savedText,
     currentModule && currentModule.template ? currentModule.template() : null);
   document.title = (dirty ? '● ' : '') + name + '.mmd — MermaidAssist';
+  syncDraft(dirty, name);
 
   // 未保存の印を**画面の中にも**出す (UI-065)。
   //
@@ -2034,6 +2192,15 @@ function init() {
   ].join('\n');
 
   editorEl.value = mmdText;
+  // UI-064: 退避は**この時点で読み出す**。下の markSaved() のあと最初の描画で
+  // syncDraft(false) が走って消えるため、あとから読むと必ず null になる。
+  pendingDraft = readDraft();
+  // 同じタブの再読み込みなら訊かない (上の tabToken のコメント参照)。
+  // 退避は消さない — 別のタブで開き直したときには渡したい。
+  if (pendingDraft && pendingDraft.tab && pendingDraft.tab === tabToken()) pendingDraft = null;
+  // 保留の印は**読み取った直後**に立てる。確認バーを出すときに立てると、
+  // それより先に走る描画の syncDraft(false) に間に合わず消える (実測で確認)。
+  draftOfferPending = !!pendingDraft;
   // The startup sample is not the gantt module's template(), so without this the
   // very first diagram-type switch would ask to confirm discarding text the user
   // never wrote.
@@ -3321,6 +3488,10 @@ function init() {
 
   // ── Initial render ───────────────────────────────────────────────────────
   scheduleRefresh();
+
+  // UI-064: 前回の未保存の続きがあれば訊く。**本文には触らない** —
+  // 押されるまでは起動時の見本のまま。
+  offerDraftRestore();
 }
 
 
