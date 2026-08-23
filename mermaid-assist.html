@@ -202,6 +202,25 @@ html, body {
   flex-shrink: 0;
 }
 
+/* 置換の欄 (FEAT-001)。狭い画面でも溢れないよう、入力欄を縮める。 */
+#replace-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px; background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border); font-size: 12px;
+}
+#replace-bar[hidden] { display: none; }
+#replace-bar input {
+  flex: 1 1 0; min-width: 0;
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  color: var(--text-primary); padding: 3px 6px; border-radius: 3px;
+  font-family: var(--font-mono); font-size: 12px;
+}
+#replace-bar input:focus { outline: none; border-color: var(--accent); }
+#replace-arrow { color: var(--text-secondary); flex: 0 0 auto; }
+#replace-count {
+  color: var(--text-secondary); font-size: 11px; white-space: nowrap;
+  flex: 0 0 auto; min-width: 56px; text-align: right;
+}
 #editor-pane-header {
   padding: 5px 10px;
   font-size: 11px;
@@ -695,6 +714,18 @@ html, body {
     <!-- Editor pane (30%) -->
     <div id="editor-pane">
       <div id="editor-pane-header">Editor</div>
+      <!-- 用語を置き換える欄 (FEAT-001)。既定では隠す。
+           Ctrl+H で開く — 実測で Ctrl+H は無反応だったので奪う操作が無い。
+           レビュー指摘で用語を統一するとき、5要素の改名に 15操作かかっていた
+           (編集ボタン5回 + 入力5回 + 確定5回)。目標は2操作。 -->
+      <div id="replace-bar" hidden>
+        <input id="replace-find" type="text" placeholder="探す語" autocomplete="off" spellcheck="false">
+        <span id="replace-arrow">→</span>
+        <input id="replace-to" type="text" placeholder="置き換える語" autocomplete="off" spellcheck="false">
+        <span id="replace-count"></span>
+        <button id="replace-all" class="tb-btn">すべて置換</button>
+        <button id="replace-close" class="tb-btn" title="閉じる (Escape)">✕</button>
+      </div>
       <div id="editor-wrap">
         <div id="line-numbers">1</div>
         <textarea id="editor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
@@ -739,6 +770,7 @@ html, body {
         <tr><td>Ctrl+S</td><td>保存</td></tr>
         <tr><td>Ctrl+Shift+S</td><td>保存先を指定して上書き <span class="sc-scope">Chrome / Edge のみ</span></td></tr>
         <tr><td>Ctrl+O</td><td>開く</td></tr>
+        <tr><td>Ctrl+H</td><td>用語を置き換える</td><td class="sc-scope">探す語 → 置き換える語 / Enter で実行 / Escape で閉じる</td></tr>
         <tr><td>Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z</td><td>元に戻す / やり直す</td></tr>
         <tr><td>↑ ↓ ← →</td><td>要素を順に選ぶ (図にフォーカスがあるとき)</td></tr>
         <tr><td>Delete</td><td>選んでいる要素を削除</td></tr>

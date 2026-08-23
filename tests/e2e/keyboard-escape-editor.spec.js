@@ -123,7 +123,14 @@ test.describe('キーボードだけでエディタから出られる', () => {
     await load(page);
     const row = await page.evaluate(() => {
       const rows = [...document.querySelectorAll('#shortcut-help-table tr')];
-      const hit = rows.find((r) => (r.textContent || '').indexOf('Escape') >= 0);
+      // **1列目 (キーの欄) で引く。** 本文のどこかに 'Escape' を含む行は
+      // 他にもある — Ctrl+H の行は説明に「Escape で閉じる」と書いてある。
+      // 「Escape を含む最初の行」で探すと、そちらに当たって誤って落ちる
+      // (実際に落ちた)。**見たいのは Escape 自身の行**なので正確に引く。
+      const hit = rows.find((r) => {
+        const key = (r.cells && r.cells[0] ? r.cells[0].textContent : '').trim();
+        return key === 'Escape';
+      });
       return hit ? hit.textContent.replace(/\s+/g, ' ').trim() : null;
     });
     expect(row).not.toBe(null);

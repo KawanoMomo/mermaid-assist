@@ -39,12 +39,24 @@ window.MA.connectionMode = (function() {
     return active;
   }
 
+  // 相手が決まったことを知らせる。
+  //
+  // **先に解除してはいけない (UI-078)。** 元は cb を呼ぶ前に
+  // cancelConnectionMode() していたので、**コールバックが相手を拒んでも
+  // モードだけは消えた**。押した人から見ると「何も起きず、接続モードも
+  // 消えた」状態で、やり直しに3クリック要る (実測)。
+  //
+  // コールバックが false を返したら受理しなかったということなので、
+  // **モードを続ける**。理由はコールバック側が告げる。
+  // 戻り値を返さない既存の呼び出し (undefined) は受理として扱い、
+  // 従来どおり解除する。
   function notifyTarget(targetType, targetId) {
     if (!active || !onCompleteCallback) return;
     var cb = onCompleteCallback;
     var src = { type: sourceType, id: sourceId };
+    var accepted = cb(src, { type: targetType, id: targetId });
+    if (accepted === false) return;
     cancelConnectionMode();
-    cb(src, { type: targetType, id: targetId });
   }
 
   function getSource() {

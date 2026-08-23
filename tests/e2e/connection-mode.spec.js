@@ -47,7 +47,15 @@ test.describe('接続モード: 図の上でクリック2回でエッジを引�
     });
   }
 
-  test('自分自身へは繋がない', async ({ page }) => {
+  // **仕様変更 (2026-08-23 決定 / UI-078)。**
+  //
+  // 元は「自分自身へは繋がない」ことを確かめていた。実測すると
+  // **8図種すべてで mermaid が自己ループを描ける** (flowchart の A --> A /
+  // stateDiagram の自己遷移 / sequenceDiagram の自己呼び出し …)。
+  // **テキストで書けるものを GUI が黙って拒むのは、この製品が避けてきた
+  // 「経路によって能力が違う」型そのもの**だったので、許す側へ変えた。
+  // 誤クリックで引いても Ctrl+Z で1回戻せる。
+  test('自分自身へも線を引ける', async ({ page }) => {
     page.on('dialog', d => d.accept());
     await page.goto(HTML_URL);
     await page.waitForSelector('#preview-svg svg', { timeout: 10000 });
@@ -63,6 +71,12 @@ test.describe('接続モード: 図の上でクリック2回でエッジを引�
     await page.locator('#overlay-layer [data-element-id="A"]').click({ force: true });
     await page.waitForTimeout(1200);
 
+    const after = await page.locator('#editor').inputValue();
+    expect(after.length, '自分自身への線ができていない').toBeGreaterThan(before.length);
+    expect(await page.locator('#status-parse').textContent()).toBe('OK');
+    // 誤クリックの救済: 1回で戻せる
+    await page.keyboard.press('Control+z');
+    await page.waitForTimeout(1300);
     expect(await page.locator('#editor').inputValue()).toBe(before);
   });
 });
@@ -152,8 +166,13 @@ test.describe('接続モードの抜け道と状態', () => {
     await page.waitForTimeout(1300);
 
     expect(await page.locator('#editor').inputValue()).toBe(mid);
-    // 拒否したあとモードがぶら下がらない
-    expect(await inMode(page)).toBe(false);
+    // **仕様変更 (2026-08-23 / UI-078)。**
+    // 元は「拒否したときはモードも降ろされる」ことを確かめていたが、
+    // 押した人から見ると**何も起きず接続モードも消えた**状態になり、
+    // やり直しに3クリック要った (実測)。理由を告げて**モードは続ける**。
+    expect(await inMode(page), '拒否なのにモードが降りた').toBe(true);
+    expect(await page.locator('#status-info').textContent())
+      .toContain('始点が本文から消えています');
   });
 
   test('引いた線を Undo 1回で取り消せる', async ({ page }) => {

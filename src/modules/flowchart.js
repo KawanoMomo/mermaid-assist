@@ -54,9 +54,43 @@ window.MA.modules.flowchart = (function() {
     return decodeLabel(t);
   }
 
-  function buildShape(shape, label) {
+  // 文書が引用符を付ける流儀かどうかを読む (UI-082)。
+  //
+  // 足した要素は NEW[新規]、既存が A["要件"] だと**同じ文書に表記が
+  // 2通り**並ぶ。図の見た目は変わらないが、**Git 差分で追加行だけ書式が違い**、
+  // 受け取った人が「なぜここだけ」と読む。
+  //
+  // **A115 (入れ子の字下げ) と同じ型。** あのとき「既存の子があればその字下げに
+  // 合わせる」と直したのに、**引用符には同じ判断を適用していなかった**。
+  //
+  // **多数決で決める。** 実測: ひな形は引用符なし (0対4) なので、
+  // 「1つでもあれば付ける」にするとひな形の流儀を壊す。
+  function documentPrefersQuotes(text) {
+    var lines = String(text || '').split('\n');
+    var quoted = 0, plain = 0;
+    for (var i = 0; i < lines.length; i++) {
+      var t = lines[i].trim();
+      if (!t || t.indexOf('%%') === 0) continue;
+      var parts = splitEdgeLine(t);
+      var refs = parts ? [parts.left.trim(), parts.right.trim()]
+        : [t.replace(/;\s*$/, '').trim()];
+      for (var r = 0; r < refs.length; r++) {
+        var ref = splitNodeRef(refs[r]);
+        if (!ref.shape) continue;
+        // 形の記号を剥がした直後が引用符か
+        var inner = ref.shape.replace(/^[\[({>]+/, '');
+        if (inner.charAt(0) === '"') quoted++; else plain++;
+      }
+    }
+    return quoted > plain;
+  }
+
+  function buildShape(shape, label, preferQuotes) {
     label = label || '';
-    if (_labelNeedsQuote(label)) label = '"' + encodeLabel(label) + '"';
+    // 必要なときは必ず付ける。**加えて、文書が引用符を付ける流儀なら合わせる。**
+    if (_labelNeedsQuote(label) || (preferQuotes && label)) {
+      label = '"' + encodeLabel(label) + '"';
+    }
     var map = {
       rect: ['[', ']'], round: ['(', ')'], diamond: ['{', '}'],
       circle: ['((', '))'], parallelogram: ['[/', '/]'],
@@ -367,7 +401,8 @@ window.MA.modules.flowchart = (function() {
 
   function addNode(text, id, label, shape) {
     shape = shape || 'rect';
-    var newLine = '    ' + id + buildShape(shape, label || id);
+    // 足す要素の表記を、**その文書の流儀に合わせる** (UI-082)。
+    var newLine = '    ' + id + buildShape(shape, label || id, documentPrefersQuotes(text));
     // Insert before end of file (excluding trailing empty lines)
     var lines = text.split('\n');
     var insertAt = lines.length;

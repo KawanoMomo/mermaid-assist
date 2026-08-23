@@ -6,6 +6,10 @@ window.MA.properties = (function() {
     setMmdText: function(t) {},
     onUpdate: function() {},
     onStatus: function() {},
+    // 一時メッセージを出す口。**既定を空関数にしたままにしない。**
+    // 配線を忘れると「理由を告げる」つもりのコードが黙って何もしない
+    // (この製品が何度も踏んできた型) ので、init で必ず渡す。
+    onStatusMessage: function(msg) {},
     elementExists: function(id) { return true; },
     moduleUpdater: function(text, lineNum, field, value) { return text; },
   };
@@ -18,6 +22,7 @@ window.MA.properties = (function() {
     // Redraw the status bar. Connection mode is announced there, and the
     // selection callback does not cover it.
     state.onStatus = opts.onStatus || function() {};
+    state.onStatusMessage = opts.onStatusMessage || function() {};
     // 「その id はいま図に存在するか」。接続モードは編集をまたいで生き残るので、
     // 始点が消えていないかを繋ぐ直前に確かめる必要がある。
     state.elementExists = opts.elementExists || function() { return true; };
@@ -66,20 +71,43 @@ window.MA.properties = (function() {
   function bindConnectButton(id, fromType, fromId, connect) {
     bindEvent(id, 'click', function() {
       window.MA.connectionMode.startConnectionMode(fromType, fromId, function(src, target) {
-        if (!target || !target.id || target.id === src.id) return;
+        // **自分自身への線を許す (UI-078、2026-08-23 決定)。**
+        //
+        // 以前は `target.id === src.id` で黙って戻していた。実測すると
+        // **8図種すべてで mermaid が自己ループを描ける**
+        // (flowchart の `A --> A` / stateDiagram の自己遷移 /
+        //  sequenceDiagram の自己呼び出し / erDiagram の自己関連 …)。
+        // **テキストで書けるものを GUI が黙って拒むのは、この製品が
+        // 避けてきた「経路によって能力が違う」型そのもの。**
+        // 誤クリックで引いても Ctrl+Z で1回戻せる。
+        //
+        // 残る拒否条件 (相手が取れない) は**黙って戻らない**。
+        // notifyTarget がコールバックより先にモードを解除していたので、
+        // 押した人から見ると「何も起きず、接続モードも消えた」状態になり、
+        // やり直しに3クリック要った (実測)。
+        // ここは**利用者に見える経路ではない**。notifyTarget を呼ぶのは
+        // app.js の1箇所だけで、そこは `seqKind && seqId` が真のときしか
+        // 呼ばない (app.js:2446)。つまり target.id は常にある。
+        // **到達しないコードに「理由を告げる」と書くと嘘が資産になる**ので、
+        // ここは番人として置くだけにして、文言は持たせない。
+        if (!target || !target.id) return false;
         // The source has to still exist. Connection mode survives editing, so
         // deleting the start element in the editor and then clicking a target
         // drew a line from a node that is no longer in the diagram — mermaid
         // then re-creates it implicitly and a deleted element reappears with no
         // error anywhere.
         if (!state.elementExists(src.id)) {
+          if (state.onStatusMessage) {
+            state.onStatusMessage('線の始点が本文から消えています — 選び直してください (Escape で中止)');
+          }
           state.onStatus();
-          return;
+          return false;   // false = 受理しない (モードは続く)
         }
         window.MA.history.pushHistory();
         state.setMmdText(connect(src.id, target.id));
         window.MA.selection.clearSelection();
         state.onUpdate();
+        return true;    // true = 受理した (モードを解除してよい)
       });
       // Keeping the source selected would make the highlight say "this is what
       // you are editing" while the next click actually means "connect to this".
@@ -364,9 +392,16 @@ window.MA.properties = (function() {
       // so a line number alone cannot say which one the user pressed — resolving by
       // line picks the first every time, and pressing b's ✕ deletes a.
       var elId = btn.getAttribute('data-element-id');
+      // UI-083: 消す要素の説明であるコメントも一緒に消す。
+      //
+      // 一覧の ✕ は id で消す実装 (`deleteNode(t, ln, elId)` 等) に委ねており、
+      // **行番号を見ない**ため textUpdater.deleteLine 側の処理が効かない。
+      // コメントは対象行の上にあるので、ここで先に外して行番号を繰り上げる。
+      var src = window.MA.textUpdater.stripNotesAbove(ctx.getMmdText(), ln);
+      var shift = ln - src.lineNum;   // 外した行数。終端行も同じだけ繰り上がる
       var newText = useEndLine
-        ? deleteFn(ctx.getMmdText(), ln, endLn)
-        : deleteFn(ctx.getMmdText(), ln, elId);
+        ? deleteFn(src.text, src.lineNum, endLn - shift)
+        : deleteFn(src.text, src.lineNum, elId);
       ctx.setMmdText(newText);
       ctx.onUpdate();
     });

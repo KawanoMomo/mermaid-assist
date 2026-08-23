@@ -99,6 +99,15 @@ window.MA.modules.mindmap = (function() {
     return s.replace(/#quot;/g, '"').replace(/#35;/g, '#');
   }
 
+  // **UI-082 (文書の流儀に引用符を合わせる) は、ここには入れない。**
+  //
+  // flowchart では引用符は書式だけの問題なので、文書が引用符を使う流儀なら
+  // 合わせた (A115 の字下げと同じ扱い)。**mindmap は違う。**
+  // default 形状には囲む場所が無く、引用符を付けると下の 112行目のとおり
+  // [...] (四角) になる — **引用符が形状と結びついている。**
+  // 流儀に合わせると**描かれる形が変わる**ので、書式を揃える話ではなくなる。
+  //
+  // 実測: mindmap のひな形は引用符 0 個 (root((組み込み設計)) / 裸のテキスト)。
   function shapeToText(shape, text) {
     var body = _needsQuote(text) ? '"' + _encode(text) + '"' : String(text);
     if (shape === 'square') return '[' + body + ']';

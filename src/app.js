@@ -501,7 +501,52 @@ function statusInfoText(parsedData, moduleType) {
   if (groups > 0) parts.push('グループ: ' + groups);
   if (parsedData.meta && parsedData.meta.title) parts.push(parsedData.meta.title);
   if (els === 0 && rels === 0) return '要素: 0 | プロパティパネルから追加してください';
-  return parts.join(' | ');
+  return parts.join(' | ') + isolatedText(parsedData);
+}
+
+// どこにも繋がっていない要素を拾う (UI-080)。
+//
+// 消し忘れた要素が図に残ったままレビューに出る。図を目で追って数えるしかなく、
+// 手数は要素数に比例する。gantt の danglingAfter (宙に浮いた依存) と同じ考え方で、
+// **件数ではなく名前**を出す — 「1件あります」では探す手間が残る。
+//
+// **図種ごとの対応表を作らない。** 実測 (21図種) で分かったこと:
+//   - 関係を持たない図種が11ある (mindmap / kanban / timeline …)。
+//     そこでは全要素が孤立に見えるので、**関係が1つも無ければ何も言わない**
+//   - 関係の端点が要素の `id` と一致しない図種がある —
+//     requirementDiagram は関係が `name` (sample_req) を使い、`id` は
+//     内側のフィールド (REQ-001)。stateDiagram の `[*]` は要素ではない
+//   → **要素が持つ「いずれかの文字列」が端点に現れるか**で判定する。
+//     対応表を持つと図種が増えるたびにずれる (FEAT-903 で同じ罠を予告済み)。
+//
+// 21図種のひな形で**誤検知が 0 件**であることを実測して規則を決めた。
+function isolatedElements(parsedData) {
+  if (!parsedData) return [];
+  var els = parsedData.elements || [];
+  var rels = parsedData.relations || [];
+  if (!rels.length || !els.length) return [];   // 関係が無い図種では言わない
+  var ends = {};
+  rels.forEach(function(r) {
+    if (r.from !== undefined && r.from !== null) ends[String(r.from)] = 1;
+    if (r.to !== undefined && r.to !== null) ends[String(r.to)] = 1;
+  });
+  return els.filter(function(e) {
+    for (var k in e) {
+      var v = e[k];
+      if (typeof v === 'string' && v && ends[v]) return false;
+    }
+    return true;
+  });
+}
+
+// 孤立要素の見出し。danglingAfter と同じ形 (先頭2件 + 残りは数)。
+function isolatedText(parsedData) {
+  var iso = isolatedElements(parsedData);
+  if (!iso.length) return '';
+  var name = function(e) { return e.label || e.name || e.text || e.id || '?'; };
+  var head = iso.slice(0, 2).map(name).join(', ');
+  return ' | どこにも繋がっていない: ' + head +
+    (iso.length > 2 ? ' ほか' + (iso.length - 2) + '件' : '');
 }
 
 function ganttStatusText(parsedData) {
@@ -591,7 +636,18 @@ function deleteSelectedElements(sel) {
       for (var j = 0; j < rels.length; j++) { if (rels[j].id === s.id) { target = rels[j]; break; } }
     }
     if (!target) return;
-    var next = currentModule.operations['delete'](text, target.line, {
+    // UI-083: 消す要素の説明であるコメントも一緒に消す。
+    //
+    // 残すと**説明対象が消えたコメント**が残り、その下に来た別の要素の説明として
+    // 読まれる。実測では削除した4図種すべてで付き先が狂った。**件数は変わらない**
+    // ため、件数を見る検査はすべて通っていた。
+    //
+    // ここで外すのは、id で全文を書き直す削除 (flowchart / class / state /
+    // sequence) が行番号を見ないため。行番号を見る削除は deleteLine 側で外れる。
+    var stripped = window.MA.textUpdater.stripNotesAbove(text, target.line);
+    text = stripped.text;
+    var targetLine = stripped.lineNum;
+    var next = currentModule.operations['delete'](text, targetLine, {
       kind: target.kind || s.type, id: target.id, blockId: target.id, name: target.name,
     });
     if (next && next !== text) { text = next; removed++; }
@@ -709,6 +765,71 @@ function focusPreview() {
   var box = document.getElementById('preview-container');
   var pane = box || document.getElementById('preview-pane') || previewSvgEl;
   if (pane && pane.focus) { pane.setAttribute('tabindex', '-1'); pane.focus(); }
+}
+
+// ── 用語の置き換え (FEAT-001) ─────────────────────────────────────────────
+//
+// レビュー指摘で用語を統一するとき、5要素の改名に **15操作**かかっていた
+// (編集ボタン5回 + 入力5回 + 確定5回)。実測。
+// 本文がソースなので、GUI に一括改名の欄を作るより**本文の置換**が筋が良い。
+//
+// **正規表現は入れない。** 誤った式で本文全体を壊す事故は Ctrl+Z 1回では
+// 気付けない。ここが扱うのは「そのままの文字列」だけ。
+function replaceBarEl() { return document.getElementById('replace-bar'); }
+
+// 何箇所あるかを数える。**押す前に結果が分かる**ようにするため。
+// 空の検索語で 0 を返す (split の性質で本文長を返してしまうのを避ける)。
+function countOccurrences(text, needle) {
+  if (!needle) return 0;
+  return String(text).split(needle).length - 1;
+}
+
+function updateReplaceCount() {
+  var out = document.getElementById('replace-count');
+  var find = document.getElementById('replace-find');
+  if (!out || !find) return;
+  var n = countOccurrences(mmdText, find.value);
+  out.textContent = find.value ? (n ? n + ' 件' : '見つかりません') : '';
+}
+
+function openReplaceBar() {
+  var bar = replaceBarEl();
+  if (!bar) return;
+  bar.hidden = false;
+  updateReplaceCount();
+  var find = document.getElementById('replace-find');
+  if (find) { find.focus(); find.select(); }
+}
+
+function closeReplaceBar() {
+  var bar = replaceBarEl();
+  if (!bar || bar.hidden) return;
+  bar.hidden = true;
+  focusEditor();   // 開いた場所へ戻す。マウスへ持ち替えさせない
+}
+
+// すべて置き換える。
+//
+// **pushHistory を1回だけ呼ぶ。** pushHistoryCoalesced は打鍵の束ねに使う
+// もので、一括置換と混ざると戻る単位がぶれる。一括置換は影響が大きいので
+// **Ctrl+Z 1回で戻せることが必須**。
+function replaceAllInEditor() {
+  var find = document.getElementById('replace-find');
+  var to = document.getElementById('replace-to');
+  if (!find || !to) return;
+  var needle = find.value;
+  if (!needle) { showTransient('探す語 は必須です', 2500); return; }
+  var n = countOccurrences(mmdText, needle);
+  if (!n) { showTransient(JSON.stringify(needle) + ' は本文にありません', 2500); return; }
+  window.MA.history.pushHistory();
+  mmdText = mmdText.split(needle).join(to.value);
+  suppressSync = true;
+  editorEl.value = mmdText;
+  suppressSync = false;
+  syncLineNumbers();
+  scheduleRefresh();
+  updateReplaceCount();
+  showTransient(n + ' 件を置き換えました — Ctrl+Z で戻せます', 3000);
 }
 
 function toggleShortcutHelp(force) {
@@ -1450,8 +1571,23 @@ function hasUnsavedWork(text, saved, template) {
 //
 // Order: the name the file was opened under, then the diagram's own title, then
 // the diagram type with a date so at least the files sort and identify.
-function downloadBaseName(fileName, title, type, now) {
-  var base = sanitizeFileName(fileName || '') || sanitizeFileName(title || '');
+// 保存する名前を決める。
+//
+// **図のタイトルを名前に使わない (UI-066)。**
+//
+// 以前は `title` を使っていたので、**同じひな形から作った図が全部同じ名前**に
+// なった (実測: gantt のひな形はどれも `プロジェクト計画.mmd`)。
+// 上書きはブラウザが ' (1)' を付けて避けるが、**保存先に同名が並び、
+// 開くまでどれがどれか分からない**。
+//
+// かつ規則が2通りあった: 起動直後は `プロジェクト計画.mmd`、図種を切り替えると
+// `sequenceDiagram-20260823.mmd`。**同じ「新規の図」なのに名前の付き方が違う。**
+// 常に `<図種>-<日付>` に揃える (2026-08-23 決定)。
+//
+// **開いたファイル名は残す。** そちらは保存先の取り違えを防ぐために要る
+// (`設計-A.mmd` を開いたら `設計-A.mmd` に書き戻す)。
+function downloadBaseName(fileName, type, now) {
+  var base = sanitizeFileName(fileName || '');
   if (base) return base;
   var d = now || new Date();
   var stamp = d.getFullYear() +
@@ -1473,8 +1609,7 @@ function sanitizeFileName(s) {
 }
 
 function currentBaseName() {
-  return downloadBaseName(loadedFileName, parsed && parsed.title,
-    currentModule && currentModule.type);
+  return downloadBaseName(loadedFileName, currentModule && currentModule.type);
 }
 
 function openFile() {
@@ -1928,6 +2063,8 @@ function init() {
   // Properties initialization
   window.MA.properties.init({
     onStatus: function() { renderStatus(); },
+    // 接続の拒否などをその場で告げる (UI-078)。
+    onStatusMessage: function(msg) { showTransient(msg, 3500); },
     // 選択の生存判定と同じ集合を使う。別の判定を持つと「選択は消えるのに
     // 接続はできる」のような食い違いが生まれる
     elementExists: function(id) { return !!knownSelectionIds(parsed)[String(id)]; },
@@ -1995,6 +2132,27 @@ function init() {
   window.addEventListener('resize', updatePropsOverflowHint);
 
   // Tab / Shift+Tab: indent / outdent with 2 spaces (see workspace ADR-011)
+  // 置換の欄。Ctrl+H で開く (実測で Ctrl+H は無反応だったので奪う操作が無い)。
+  (function() {
+    var find = document.getElementById('replace-find');
+    var to = document.getElementById('replace-to');
+    var all = document.getElementById('replace-all');
+    var close = document.getElementById('replace-close');
+    if (find) find.addEventListener('input', updateReplaceCount);
+    if (all) all.addEventListener('click', replaceAllInEditor);
+    if (close) close.addEventListener('click', closeReplaceBar);
+    [find, to].forEach(function(el) {
+      if (!el) return;
+      el.addEventListener('keydown', function(e) {
+        // Escape で閉じる。**欄の中の Escape は「図へ移る」を奪わない** —
+        // 欄を開いている間はここが手前にある。
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeReplaceBar(); return; }
+        // Enter で実行。入力してから押すまでにマウスへ持ち替えさせない。
+        if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); replaceAllInEditor(); }
+      });
+    });
+  })();
+
   editorEl.addEventListener('keydown', function(e) {
     if (e.key !== 'Tab' || e.isComposing) return;
     e.preventDefault();
@@ -2920,6 +3078,12 @@ function init() {
     } else if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
       e.preventDefault();
       saveFileAs();
+    } else if (e.ctrlKey && (e.key === 'h' || e.key === 'H')) {
+      // 用語の置き換え (FEAT-001)。**エディタの中でも外でも開く。**
+      // 実測で Ctrl+H は無反応だったので、奪う操作が無い。
+      // 多くのエディタで置換の入口なので、覚え直しが要らない。
+      e.preventDefault();
+      openReplaceBar();
     } else if (e.ctrlKey && e.key === 's') {
       e.preventDefault(); saveFile();
     } else if (e.ctrlKey && (e.key === '0' || e.key === '9' || e.key === '+' ||

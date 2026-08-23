@@ -83,17 +83,26 @@ function newestSourceTime(dir) {
 }
 const srcTime = newestSourceTime(ROOT);
 
-let reviewTotal = 0, reviewMissing = [];
+let reviewTotal = 0, reviewMissing = [], reviewWho = [];
 reviewers.forEach((r) => {
   const f = path.join(outDir, r + '.json');
   if (!fs.existsSync(f)) { reviewMissing.push(r); return; }
   if (fs.statSync(f).mtimeMs < srcTime) { reviewMissing.push(r + '(ソースより古い)'); return; }
-  try { reviewTotal += JSON.parse(fs.readFileSync(f, 'utf8')).length; }
-  catch (e) { reviewMissing.push(r + '(壊れた出力)'); }
+  try {
+    const n = JSON.parse(fs.readFileSync(f, 'utf8')).length;
+    reviewTotal += n;
+    if (n) reviewWho.push(r + ':' + n);
+  } catch (e) { reviewMissing.push(r + '(壊れた出力)'); }
 });
+// **どのレビュアーが出したかまで、ここで言う。**
+//
+// 元は総数だけを出し、内訳は verify.sh 側が別に数えていた。**2つの情報源が
+// 食い違い、片方 (verify.sh) が壊れていた** (どの実行でも 0 を返す数え方)。
+// 判定はここ1本に寄せ、verify.sh は実行だけを担う。
 check('LOOP', '並行レビューの指摘',
   reviewTotal === 0 && reviewMissing.length === 0,
-  reviewMissing.length ? ('未実行: ' + reviewMissing.join(', ')) : (reviewTotal + ' 件'));
+  reviewMissing.length ? ('未実行: ' + reviewMissing.join(', '))
+    : (reviewTotal ? (reviewTotal + ' 件 — ' + reviewWho.join(', ')) : '0 件'));
 
 // 網羅率の下限。
 //
@@ -217,6 +226,38 @@ try {
 check('PREMISE', 'バックログの前提', premiseFail.length === 0,
   premiseFail.length ? premiseFail.join(' / ') : '全項目の前提が成り立っている');
 
+// SILENT: **失敗が見えない書き方**を機械が弾く。
+//
+// 同じ型を3回踏んだ:
+//   1. 指摘の数え方が、どの実行でも必ず 0 を返した (R69)
+//   2. step が終了コードを握り潰し、|| exit 1 が発火しなかった (R74)
+//   3. レビュアーの出力とエラーを捨てた (R75)
+//
+// **どれも「検査器が自分の失敗を報告できない」形。**
+// 人の注意力で防ぐのは3回失敗した。機械が弾く。
+//
+// 検査するのは tools/review/ の中だけ。gate.js 自身は判定者なので対象外。
+const silentBad = [];
+try {
+  const revDir = path.join(ROOT, 'tools', 'review');
+  fs.readdirSync(revDir).filter((f) => /\.(sh|js|py)$/.test(f)).forEach((f) => {
+    if (f === 'gate.js') return;
+    const src = fs.readFileSync(path.join(revDir, f), 'utf8');
+    src.split('\n').forEach((line, i) => {
+      const t = line.trim();
+      if (t.startsWith('#') || t.startsWith('//')) return;
+      if (/>\s*\/dev\/null\s+2>&1/.test(t)) {
+        silentBad.push(f + ':' + (i + 1) + ' 出力とエラーを両方捨てている');
+      }
+      if (/grep\s+-c[A-Za-z]*\s+.*(Blocker|Major|Minor|Nit)/.test(t)) {
+        silentBad.push(f + ':' + (i + 1) + ' 標準出力を数えて判定している');
+      }
+    });
+  });
+} catch (e) { silentBad.push('走査できない: ' + e.message); }
+check('SILENT', '失敗が見える書き方', silentBad.length === 0,
+  silentBad.length ? silentBad.slice(0, 4).join(' / ')
+    : '検査器が自分の失敗を隠す書き方は無い');
 // VERSION: 版が中身を識別できているか。
 //
 // 画面に版を出した (B30) が、**それが何を識別しているか**は測っていなかった。
