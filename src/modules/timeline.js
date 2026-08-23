@@ -211,6 +211,38 @@ window.MA.modules.timeline = (function() {
   }
 
   // ── UI ──
+  // movePeriodToSection: ピリオドを別のセクションへ移す (FEAT-903)。
+  //
+  // timeline は `section 名前` の**見出し行**で区切る。ただしピリオドは
+  // **1行とは限らない** — `2020 : 開始` の次に `     : 資金調達` という
+  // 継続行が続く形があり、1行だけ動かすと継続行が取り残されて**別のピリオドの
+  // 一部として読まれる**。だから次の要素の直前までを範囲として動かす。
+  //
+  // モジュール内の `move: false`(上下移動を UI から出さない判断)は、
+  // 述語がこの継続行をピリオド行と誤判定することが理由で、こちらは
+  // 述語ではなく**解析が返す要素の行**を使うので同じ罠は踏まない。
+  //
+  // 実測: 空になったセクションを残しても図は描けるので畳まない。
+  function movePeriodToSection(text, lineNum, targetName) {
+    var p = parseTimeline(text);
+    var heads = [], target = 0, starts = [];
+    p.elements.forEach(function(e) {
+      if (typeof e.line === 'number') starts.push(e.line);
+      if (e.kind !== 'section') return;
+      heads.push(e.line);
+      if (String(e.id) === String(targetName)) target = e.line;
+    });
+    if (targetName && !target) return text;
+    starts.sort(function(a, b) { return a - b; });
+    var lines = text.split('\n');
+    var end = lines.length;
+    for (var i = 0; i < starts.length; i++) {
+      if (starts[i] > lineNum) { end = starts[i] - 1; break; }
+    }
+    while (end > lineNum && !lines[end - 1].trim()) end--;
+    return window.MA.textUpdater.moveLineIntoBlock(text, lineNum, heads, target, end);
+  }
+
   function renderProps(selData, parsedData, propsEl, ctx) {
     if (!propsEl) return;
     var escHtml = window.MA.htmlUtils.escHtml;
@@ -371,7 +403,15 @@ window.MA.modules.timeline = (function() {
 
         propsEl.innerHTML =
           P.panelHeaderHtml(per.period) +
-          '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">セクション: ' + escHtml(per.parentId || 'top') + '</div>' +
+          // FEAT-903: 読むだけだったセクション名を、選び直せる欄にする。
+          P.selectFieldHtml('セクション', 'tl-edit-p-section', (function() {
+            var opts = [];
+            parsedData.elements.forEach(function(e) {
+              if (e.kind !== 'section') return;
+              opts.push({ value: e.id, label: e.id, selected: per.parentId === e.id });
+            });
+            return opts;
+          })()) +
           P.fieldHtml('Period', 'tl-edit-p-period', per.period) +
           '<div style="margin-bottom:8px;">' +
             '<label style="display:block;font-size:10px;color:var(--text-secondary);margin-bottom:2px;">Events</label>' +
@@ -387,6 +427,11 @@ window.MA.modules.timeline = (function() {
           });
 
         var perLine = per.line;
+        P.bindEvent('tl-edit-p-section', 'change', function() {
+          window.MA.history.pushHistory();
+          ctx.setMmdText(movePeriodToSection(ctx.getMmdText(), perLine, this.value));
+          ctx.onUpdate();
+        });
         document.getElementById('tl-edit-p-period').addEventListener('change', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(updatePeriod(ctx.getMmdText(), perLine, 'period', this.value));
@@ -449,6 +494,7 @@ window.MA.modules.timeline = (function() {
     displayName: 'Timeline',
     detect: function(text) { return window.MA.parserUtils.detectDiagramType(text) === 'timeline'; },
     parse: parseTimeline,
+    movePeriodToSection: movePeriodToSection,
     parseTimeline: parseTimeline,
     template: function() {
       return [

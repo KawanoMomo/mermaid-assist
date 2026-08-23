@@ -132,6 +132,24 @@ window.MA.modules.journey = (function() {
     return lines.join('\n');
   }
 
+  // moveTaskToSection: タスクを別のセクションへ移す (FEAT-903)。
+  //
+  // journey は `section 名前` の**見出し行**で区切り、その下に並ぶ行が中身になる。
+  // 括弧も `end` も無いので、付け替えは「行を目当ての見出しの塊の末尾へ動かす」。
+  // 実測: 空になったセクションを残しても図は描ける (c4/block の空の入れ物とは違う)
+  // ので、畳まない。利用者が作った見出しを勝手に消さない。
+  function moveTaskToSection(text, lineNum, targetName) {
+    var p = parseJourney(text);
+    var heads = [], target = 0;
+    p.elements.forEach(function(e) {
+      if (e.kind !== 'section') return;
+      heads.push(e.line);
+      if (String(e.id) === String(targetName)) target = e.line;
+    });
+    if (targetName && !target) return text;
+    return window.MA.textUpdater.moveLineIntoBlock(text, lineNum, heads, target);
+  }
+
   function renderProps(selData, parsedData, propsEl, ctx) {
     if (!propsEl) return;
     var escHtml = window.MA.htmlUtils.escHtml;
@@ -256,7 +274,16 @@ window.MA.modules.journey = (function() {
         if (!t) { propsEl.innerHTML = '<p style="color:var(--text-secondary);font-size:11px;">タスクが見つかりません</p>'; return; }
         propsEl.innerHTML =
           P.panelHeaderHtml(t.text) +
-          '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">セクション: ' + escHtml(t.parentId || '?') + '</div>' +
+          // FEAT-903: 読むだけだったセクション名を、選び直せる欄にする。
+          // いまのセクションが選ばれた状態で出るので、現在地も読める。
+          P.selectFieldHtml('セクション', 'jr-edit-t-section', (function() {
+            var opts = [];
+            parsedData.elements.forEach(function(e) {
+              if (e.kind !== 'section') return;
+              opts.push({ value: e.id, label: e.id, selected: t.parentId === e.id });
+            });
+            return opts;
+          })()) +
           P.fieldHtml('ラベル', 'jr-edit-t-text', t.text) +
           P.fieldHtml('Score', 'jr-edit-t-score', String(t.score)) +
           P.fieldHtml('Actors (カンマ区切り)', 'jr-edit-t-actors', t.actors.join(', ')) +
@@ -275,6 +302,11 @@ window.MA.modules.journey = (function() {
         document.getElementById('jr-edit-t-actors').addEventListener('change', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(updateTask(ctx.getMmdText(), tLine, 'actors', this.value));
+          ctx.onUpdate();
+        });
+        P.bindEvent('jr-edit-t-section', 'change', function() {
+          window.MA.history.pushHistory();
+          ctx.setMmdText(moveTaskToSection(ctx.getMmdText(), tLine, this.value));
           ctx.onUpdate();
         });
         P.bindEvent('jr-edit-t-delete', 'click', function() {
@@ -351,6 +383,7 @@ window.MA.modules.journey = (function() {
       connect: function(text) { return text; },
     },
     setTitle: setTitle, addSection: addSection, addTask: addTask,
+    moveTaskToSection: moveTaskToSection,
     deleteElement: deleteElement, updateSection: updateSection, updateTask: updateTask,
   };
 })();

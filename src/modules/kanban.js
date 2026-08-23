@@ -143,6 +143,23 @@ window.MA.modules.kanban = (function() {
     return lines.join('\n');
   }
 
+  // moveCardToColumn: カードを別の列へ移す (FEAT-903)。
+  //
+  // kanban は列名の**見出し行**で区切り、その下に並ぶ行が中身になる。
+  // 括弧も `end` も無いので、付け替えは「行を目当ての列の塊の末尾へ動かす」。
+  // 実測: 空になった列を残しても図は描けるので畳まない (c4/block とは違う)。
+  function moveCardToColumn(text, lineNum, targetName) {
+    var p = parseKanban(text);
+    var heads = [], target = 0;
+    p.elements.forEach(function(e) {
+      if (e.kind !== 'column') return;
+      heads.push(e.line);
+      if (String(e.id) === String(targetName)) target = e.line;
+    });
+    if (targetName && !target) return text;
+    return window.MA.textUpdater.moveLineIntoBlock(text, lineNum, heads, target);
+  }
+
   function renderProps(selData, parsedData, propsEl, ctx) {
     if (!propsEl) return;
     var escHtml = window.MA.htmlUtils.escHtml;
@@ -257,7 +274,15 @@ window.MA.modules.kanban = (function() {
         if (!card) { propsEl.innerHTML = '<p>カードが見つかりません</p>'; return; }
         propsEl.innerHTML =
           P.panelHeaderHtml(card.text) +
-          '<div style="margin-bottom:8px;color:var(--text-secondary);font-size:11px;">Column: ' + escHtml(card.parentId || '?') + '</div>' +
+          // FEAT-903: 読むだけだった列名を、選び直せる欄にする。
+          P.selectFieldHtml('Column', 'kb-edit-c-column', (function() {
+            var opts = [];
+            parsedData.elements.forEach(function(e) {
+              if (e.kind !== 'column') return;
+              opts.push({ value: e.id, label: e.id, selected: card.parentId === e.id });
+            });
+            return opts;
+          })()) +
           P.fieldHtml('ラベル', 'kb-edit-c-text', card.text) +
           P.fieldHtml('Meta', 'kb-edit-c-meta', card.meta || '') +
           P.dangerButtonHtml('kb-edit-c-delete', 'カード削除');
@@ -270,6 +295,11 @@ window.MA.modules.kanban = (function() {
         document.getElementById('kb-edit-c-meta').addEventListener('change', function() {
           window.MA.history.pushHistory();
           ctx.setMmdText(updateCard(ctx.getMmdText(), ln, 'meta', this.value));
+          ctx.onUpdate();
+        });
+        P.bindEvent('kb-edit-c-column', 'change', function() {
+          window.MA.history.pushHistory();
+          ctx.setMmdText(moveCardToColumn(ctx.getMmdText(), ln, this.value));
           ctx.onUpdate();
         });
         P.bindEvent('kb-edit-c-delete', 'click', function() {
@@ -290,6 +320,7 @@ window.MA.modules.kanban = (function() {
     displayName: 'Kanban',
     detect: function(text) { return window.MA.parserUtils.detectDiagramType(text) === 'kanban'; },
     parse: parseKanban,
+    moveCardToColumn: moveCardToColumn,
     parseKanban: parseKanban,
     template: function() {
       return [

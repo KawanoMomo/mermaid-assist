@@ -82,4 +82,67 @@ test.describe('FEAT-903 パネルで親を変えられる', () => {
     expect(iA).toBeLessThan(iEnd);               // end より前 = グループの中
     expect(await page.locator('#status-parse').textContent()).toBe('OK');
   });
+
+  test('journey: タスクを別のセクションへ移す', async ({ page }) => {
+    const doc = ['journey', '  title 旅', '  section 準備', '    調べる: 5: 私',
+      '  section 実行', '    作る: 3: 私'].join(NL);
+    await load(page, doc);
+    await page.locator('.jr-select-task').first().click();
+    await page.waitForTimeout(700);
+    const sel = page.locator('#jr-edit-t-section');
+    await expect(sel).toHaveCount(1);
+    expect(await sel.inputValue()).toBe('準備');   // 現在地が読める
+
+    await sel.selectOption('実行');
+    await page.waitForTimeout(1400);
+
+    const L = (await editorText(page)).split(NL);
+    const iTask = L.findIndex(l => l.indexOf('調べる') >= 0);
+    const iSec2 = L.findIndex(l => l.indexOf('section 実行') >= 0);
+    expect(iTask).toBeGreaterThan(iSec2);
+    expect(await page.locator('#status-parse').textContent()).toBe('OK');
+  });
+
+  test('kanban: カードを別の列へ移す', async ({ page }) => {
+    const doc = ['kanban', '    Todo', '        [調べる]', '    Done', '        [出す]'].join(NL);
+    await load(page, doc);
+    await page.locator('.kb-select-card').first().click();
+    await page.waitForTimeout(700);
+    const sel = page.locator('#kb-edit-c-column');
+    await expect(sel).toHaveCount(1);
+    expect(await sel.inputValue()).toBe('Todo');
+
+    await sel.selectOption('Done');
+    await page.waitForTimeout(1400);
+
+    const L = (await editorText(page)).split(NL);
+    const iCard = L.findIndex(l => l.indexOf('[調べる]') >= 0);
+    const iDone = L.findIndex(l => l.trim() === 'Done');
+    expect(iCard).toBeGreaterThan(iDone);
+    expect(await page.locator('#status-parse').textContent()).toBe('OK');
+  });
+
+  test('timeline: 継続行つきのピリオドを別のセクションへ移す', async ({ page }) => {
+    const doc = ['timeline', '  title 年表', '  section 前期',
+      '    2020 : 開始', '         : 資金調達', '    2021 : 拡大',
+      '  section 後期', '    2022 : 上場'].join(NL);
+    await load(page, doc);
+    await page.locator('.tl-select-period').first().click();
+    await page.waitForTimeout(700);
+    const sel = page.locator('#tl-edit-p-section');
+    await expect(sel).toHaveCount(1);
+    expect(await sel.inputValue()).toBe('前期');
+
+    await sel.selectOption('後期');
+    await page.waitForTimeout(1400);
+
+    const after = await editorText(page);
+    const L = after.split(NL);
+    const i2020 = L.findIndex(l => l.indexOf('2020') >= 0);
+    const iSec2 = L.findIndex(l => l.indexOf('section 後期') >= 0);
+    expect(i2020).toBeGreaterThan(iSec2);
+    // 継続行が取り残されていない
+    expect(L[i2020 + 1].indexOf('資金調達')).toBeGreaterThan(-1);
+    expect(await page.locator('#status-parse').textContent()).toBe('OK');
+  });
 });

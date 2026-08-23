@@ -40,6 +40,72 @@ window.MA.textUpdater = (function() {
     return result.split(CR + LF).join(LF).split(LF).join(CR + LF);
   }
 
+  // moveLineIntoBlock: 見出し行で区切る図種で、1行を別の見出しの下へ移す。
+  //
+  // FEAT-903。journey / kanban / timeline は `section 名前` や列名の**見出し行**で
+  // 区切り、その下に並ぶ行がその見出しの中身になる。括弧も `end` も無いので、
+  // 付け替えは「行を、目当ての見出しの塊の末尾へ動かす」ことになる。
+  //
+  //   headerLines    すべての見出し行 (1-based、昇順でなくてよい)
+  //   targetHeader   移す先の見出し行 (1-based)。0 なら見出しの外 (文書の末尾)
+  //   endLine        動かす最後の行 (1-based、省略すると lineNum と同じ)
+  //
+  // 動かすのは lineNum〜endLine と、**直上の説明コメント** (UI-083 と同じ約束)。
+  // endLine が要るのは timeline で、ピリオドが継続行 (`: イベント`) を持つため。
+  // 実測: `2020 : 開始` の次に `     : 資金調達` が続く形があり、1行だけ動かすと
+  // 継続行が取り残されて**別のピリオドの一部として読まれる**。
+  // 見出しそのものを動かす用途には使わない (中身を連れて行かないため)。
+  function moveLineIntoBlock(text, lineNum, headerLines, targetHeader, endLine) {
+    var lines = text.split('\n');
+    if (lineNum < 1 || lineNum > lines.length) return text;
+    var heads = (headerLines || []).slice().sort(function(a, b) { return a - b; });
+    if (targetHeader && heads.indexOf(targetHeader) === -1) return text;
+    if (heads.indexOf(lineNum) !== -1) return text;   // 見出しは動かさない
+
+    var notes = notesAbove(text, lineNum);
+    var from = notes.start;
+    var to = (typeof endLine === 'number' && endLine >= lineNum) ? endLine : lineNum;
+    if (to > lines.length) to = lines.length;
+    var block = lines.slice(from - 1, to);
+    var oldIndent = lines[lineNum - 1].match(/^(\s*)/)[1] || '';
+
+    var insertAt, newIndent;
+    if (targetHeader) {
+      // 次の見出しの直前まで = この見出しの塊
+      var next = 0;
+      for (var i = 0; i < heads.length; i++) {
+        if (heads[i] > targetHeader) { next = heads[i]; break; }
+      }
+      var end = next ? next - 1 : lines.length;
+      while (end > targetHeader && lines[end - 1].trim() === '') end--;
+      insertAt = end;
+      // すでに中身があるならその字下げに合わせる
+      newIndent = (lines[targetHeader - 1].match(/^(\s*)/)[1] || '') + '    ';
+      for (var c = targetHeader; c < end; c++) {
+        if (lines[c] && lines[c].trim()) { newIndent = lines[c].match(/^(\s*)/)[1] || newIndent; break; }
+      }
+    } else {
+      insertAt = lines.length;
+      while (insertAt > 0 && lines[insertAt - 1].trim() === '') insertAt--;
+      newIndent = oldIndent;
+    }
+
+    lines.splice(from - 1, to - from + 1);
+    if (insertAt > from - 1) insertAt -= (to - from + 1);
+    if (insertAt < 0) insertAt = 0;
+    // 字下げを付け直す。**相対的な深さは保つ** — timeline の継続行
+    // (`     : 資金調達`) は本体より深く置かれており、揃えて潰すと
+    // 見た目が変わって Git 差分に出る。
+    var shifted = block.map(function(l) {
+      if (!l.trim()) return l;
+      var ind = l.match(/^(\s*)/)[1] || '';
+      var extra = ind.length > oldIndent.length ? ind.slice(oldIndent.length) : '';
+      return newIndent + extra + l.slice(ind.length);
+    });
+    lines.splice.apply(lines, [insertAt, 0].concat(shifted));
+    return lines.join('\n');
+  }
+
   // notesAbove: lineNum に付いた説明 (直上のコメント) の範囲を返す。
   // 付け替えは行を動かす操作なので、**説明も一緒に運ぶ**には範囲が要る
   // (消すだけなら stripNotesAbove で足りる)。
@@ -239,6 +305,7 @@ window.MA.textUpdater = (function() {
     deleteLine: deleteLine,
     stripNotesAbove: stripNotesAbove,
     notesAbove: notesAbove,
+    moveLineIntoBlock: moveLineIntoBlock,
     matchEol: matchEol,
     swapLines: swapLines,
     swapLinesWithNotes: swapLinesWithNotes,
