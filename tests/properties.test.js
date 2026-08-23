@@ -363,18 +363,13 @@ describe('listItemHtml: 支援技術に届く名前', function() {
     expect(P.selectFieldHtml('親境界', 'x-parent', [])).toContain('for="x-parent"');
   });
 
-  test('W7: 行の title には補足も入る', function() {
-    // `(in 親ID)` は行末にあるので真っ先に切れる。名前だけでは足りない。
-    var html = P.listItemHtml({ label: 'core0 ("メインCPUコア")', sublabel: '(in cpu_group)', deleteClass: 'x' });
-    var m = html.match(/<div title="([^"]*)"/);
-    expect(m).not.toBeNull();
-    expect(m[1]).toContain('core0');
-    expect(m[1]).toContain('cpu_group');
-  });
 });
 
+// 「行の全文を title で読めるようにする」はここにまとめる。
+// 同じ内容の W7 が2つの describe に重複していた (重複 describe の整理が中途だった)。
 describe('一覧行の全文を title で読めるようにする', function() {
   test('W7: ラベルと補足が title に入る', function() {
+    // `(in 親ID)` は行末にあるので真っ先に切れる。名前だけでは足りない。
     var html = P.listItemHtml({ label: 'core0 ("メインCPUコア")', sublabel: '(in cpu_group)', deleteClass: 'x' });
     var m = html.match(/<div title="([^"]*)"/);
     expect(m).not.toBeNull();

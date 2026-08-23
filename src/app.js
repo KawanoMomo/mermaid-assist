@@ -778,6 +778,25 @@ function twoDigit(n) { return (n < 10 ? '0' : '') + n; }
 function savedMessage(d) {
   return '保存: ' + twoDigit(d.getHours()) + ':' + twoDigit(d.getMinutes());
 }
+// パネルの ✕ からも同じ言い方で結果を出すために公開する。
+//
+// これまで「N件削除 — Ctrl+Z で戻せます」はキーボード削除の経路にしか出て
+// おらず、一覧の ✕ を押したときは無言だった。同じ操作の結果が経路によって
+// 見え方が違う。さらに `✕N` の件数警告を持つのは C4 / flowchart / block / gantt
+// だけで、er・class・sequence・state・mindmap は `✕` のみなのに実際には
+// 3〜5行が消える (stateDiagram で `Idle` を消すと遷移3本が飛ぶ)。
+// 空になったコンテナを畳むようにしたぶん、無警告で消える量はさらに増えた。
+//
+// 押す前の警告は各モジュールが `✕N` で出す (持っているものだけ)。押した後の
+// 事実は、ここで全図種ぶん同じ形で出す。
+window.MA.reportDeleted = function(beforeText, afterText) {
+  var before = String(beforeText).split('\n').length;
+  var after = String(afterText).split('\n').length;
+  var removed = before - after;
+  if (removed <= 0) return;
+  showTransient(removed + ' 行を削除 — Ctrl+Z で戻せます');
+};
+
 function deletedMessage(n) {
   return n + '件削除 — Ctrl+Z で戻せます';
 }

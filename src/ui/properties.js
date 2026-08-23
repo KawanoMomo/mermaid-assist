@@ -434,11 +434,16 @@ window.MA.properties = (function() {
       var siblings = Array.prototype.slice.call(propsEl.querySelectorAll('.' + deleteClass));
       var pressedAt = siblings.indexOf(btn);
 
+      var beforeText = ctx.getMmdText();
       var newText = useEndLine
-        ? deleteFn(ctx.getMmdText(), ln, endLn)
-        : deleteFn(ctx.getMmdText(), ln, elId);
+        ? deleteFn(beforeText, ln, endLn)
+        : deleteFn(beforeText, ln, elId);
       ctx.setMmdText(newText);
       ctx.onUpdate();
+      // 何行消えたかをその場で言う。押す前の `✕N` を持たない図種
+      // (er / class / sequence / state / mindmap) でも、実際には3〜5行消える。
+      // 空になったコンテナを畳むようにしたぶん、無警告で消える量はさらに増えた。
+      if (window.MA.reportDeleted) window.MA.reportDeleted(beforeText, newText);
 
       // 作り直された後の一覧で、消した位置の次 → 無ければ前 → それも無ければ
       // 一覧そのもの、の順に置く。ctx.onUpdate() が同期でパネルを作り直す実装と

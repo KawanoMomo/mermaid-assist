@@ -32,8 +32,12 @@ const ROOT = process.argv[2];
 // 「名前を指すもの 1種」という嘘の集計になる (最初そうなっていた)。
 const NAMEISH = /^(name|text|title|id|label|ラベル|タイトル|名前|見出し|題)|(名|ID|name|Name|id)$/;
 const ALLOWED = ['ID', 'ラベル', 'タイトル'];
-// 「(1単語)」「(任意)」のような但し書きは付けてよい
-function core(s) { return s.replace(/\s*\(.*\)\s*$/, '').trim(); }
+// 「(1単語)」「（任意）」のような但し書きは付けてよい。
+//
+// 半角括弧だけを見ていたため、`Tech（Container 系のみ）` のように全角で書かれた
+// 但し書きが剥がれず、同じ `Tech` が2種として数えられていた (欄名の異なりが
+// 45 → 46 種に増えた)。日本語のUIで全角括弧を使うのは自然なので、両方剥がす。
+function core(s) { return s.replace(/\s*[（(][^（()）]*[)）]\s*$/, '').trim(); }
 
 const findings = [];
 const counts = {};
