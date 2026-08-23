@@ -206,8 +206,23 @@ describe('listItemHtml: 削除ボタンの警告表示', function() {
   });
 
   test('deleteTitle は title 属性になる', function() {
-    var html = P.listItemHtml({ label: 'a', deleteClass: 'x-del', deleteTitle: '2要素が消えます' });
-    expect(html).toContain('title="2要素が消えます"');
+    // deleteTitle が渡すのは動作の説明だけで、どの行かは listItemHtml が付ける。
+    var html = P.listItemHtml({ label: 'a', deleteClass: 'x-del', deleteTitle: '削除すると 2 要素が消えます' });
+    expect(html).toContain('title="「a」を削除すると 2 要素が消えます"');
+  });
+
+  test('deleteTitle を渡してもラベルが二重にならない', function() {
+    // 既定値に行ラベルを含めたうえで、その前にもう一度ラベルを前置していたため
+    // 「a」「a」を削除 と読み上げられていた。この関数を通る 41 か所のうち
+    // deleteTitle を渡すのは 5 か所だけなので、既定側が壊れると影響は全経路に及ぶ。
+    var withTitle = P.listItemHtml({ label: 'a', deleteClass: 'x-del', deleteTitle: '削除' });
+    var withoutTitle = P.listItemHtml({ label: 'a', deleteClass: 'x-del' });
+    [withTitle, withoutTitle].forEach(function(html) {
+      var m = html.match(/aria-label="([^"]*)"[^>]*>✕</);
+      expect(m).not.toBeNull();
+      expect(m[1]).toBe('「a」を削除');
+      expect(m[1].indexOf('「a」「a」')).toBe(-1);
+    });
   });
 
   // 以前はここで「省略すると title は出ない」を固定していた。
@@ -227,8 +242,9 @@ describe('listItemHtml: 削除ボタンの警告表示', function() {
       deleteLabel: '<img>', deleteTitle: '"><script>',
     });
     expect(html).toContain('&lt;img&gt;');
-    expect(html).toContain('title="&quot;&gt;&lt;script&gt;"');
+    expect(html).toContain('title="「a」を&quot;&gt;&lt;script&gt;"');
     expect(html).not.toContain('<img>');
+    expect(html).not.toContain('<script>');
   });
 
   test('deleteClass が無ければ削除ボタンごと出ない', function() {
@@ -276,11 +292,19 @@ describe('listItemHtml: 支援技術に届く名前', function() {
 
   test('W5: 編集ボタンも行ごとに違う名前を持つ', function() {
     // 「編集」が12個すべて同名だと、支援技術のボタン一覧では選べない。
-    var a = P.listItemHtml({ label: '受注', selectClass: 'x-sel' });
-    var b = P.listItemHtml({ label: '在庫', selectClass: 'x-sel' });
-    expect(a).toContain('受注');
-    expect(b).toContain('在庫');
-    expect(a === b).toBe(false);
+    //
+    // 見るのはボタンの aria-label だけ。行の文字列にラベルが出るのは aria-label と
+    // 無関係に当たり前なので、html 全体で contain していた版は selAria を空に
+    // しても通ってしまった (ミューテーションで SURVIVED)。
+    function ariaOf(label) {
+      var m = P.listItemHtml({ label: label, selectClass: 'x-sel' })
+        .match(/aria-label="([^"]*)"[^>]*>編集</);
+      return m && m[1];
+    }
+    expect(ariaOf('受注')).not.toBeNull();
+    expect(ariaOf('受注')).toContain('受注');
+    expect(ariaOf('在庫')).toContain('在庫');
+    expect(ariaOf('受注') === ariaOf('在庫')).toBe(false);
   });
 
   test('W6: ラベルと入力欄が for で結び付く', function() {

@@ -264,8 +264,38 @@ window.MA.modules.c4 = (function() {
   // (実測: ✕2 と出るのに実際は3個消える)。境界は必ず正確版へ回す実装も併用して
   // いたが、そちらは 200要素の図で 646ms かかり毎キーストロークの描画に耐えない。
   // 数え方そのものを削除と同じ規則で書けば、両方が同時に解ける。
+  // renderProps は一覧の行ごとに deletionImpactFrom を呼ぶので、同じ文書に対して
+  // 要素数ぶん呼ばれる。行分割と matchBraces をその都度やると O(n^2) になり、
+  // 500要素で 196ms かかった (閾値方式の 646ms を直したのに別経路で戻してしまう)。
+  // テキストが同じ間だけ1件記憶する。文字列は不変なので同一性の比較で足りる。
+  var braceMemoText = null;
+  var braceMemo = null;
+  function linesWithBraces(text) {
+    var s = String(text);
+    if (braceMemoText === s && braceMemo) return braceMemo;
+    var ls = s.split('\n');
+    var pairs = matchBraces(ls);
+    // for-in + parseInt を不動点ループの中で回すと効く。開き行の昇順で配列にしておく。
+    var pairList = [];
+    for (var k in pairs) {
+      if (Object.prototype.hasOwnProperty.call(pairs, k)) {
+        pairList.push([parseInt(k, 10), pairs[k]]);
+      }
+    }
+    pairList.sort(function (a, b) { return a[0] - b[0]; });
+    // 「その行に中身があるか」も1回だけ決めておく。境界の空判定で何度も引かれる。
+    var hasContent = [];
+    for (var m = 0; m < ls.length; m++) hasContent.push(!!stripComment(ls[m]));
+    braceMemoText = s;
+    braceMemo = { lines: ls, bracePairs: pairs, pairList: pairList, hasContent: hasContent };
+    return braceMemo;
+  }
+
   function deletionImpactFrom(parsed, el, text) {
-    var lines = String(text).split('\n');
+    var memo = linesWithBraces(text);
+    var lines = memo.lines;
+    var pairList = memo.pairList;
+    var hasContent = memo.hasContent;
     var removed = {};
     var i, j;
 
@@ -294,16 +324,25 @@ window.MA.modules.c4 = (function() {
         }
       }
 
-      // 中身が空になった境界は畳まれる。空判定は削除本体と同じく
-      // 「コメントを除いた実体行が1つも残らないこと」。
-      for (i = 0; i < parsed.elements.length; i++) {
-        var b = parsed.elements[i];
-        if (!b.isBoundary || !b.endLine || removed[b.line]) continue;
+      // 中身が空になった境界は畳まれる。畳む範囲は削除本体 (collapseEmptyBoundaries)
+      // と同じ matchBraces() から取る。
+      //
+      // ここを parsed.elements の isBoundary で回していたときは、ELEMENT_KINDS に
+      // 無い境界種別 — mermaid の正規構文である素の `Boundary(...)` や
+      // `Deployment_Node(...)` — がパーサから返らないため、それを跨ぐ連鎖でループが
+      // 止まり件数を過少申告していた (実測: ✕2 と出るのに文書全体が消える)。
+      // 削除がテキストの波括弧で数えるなら、こちらも同じ波括弧で数える。
+      // 内側から外側へ (開き行の降順で) 見る。内側が畳まれた結果として外側も空になる
+      // 連鎖が1回の走査で片付き、不動点ループの回数が入れ子の深さに比例しなくなる。
+      for (var pi = pairList.length - 1; pi >= 0; pi--) {
+        var o = pairList[pi][0];                // 0 起点の行 index
+        var closeIdx = pairList[pi][1];
+        if (removed[o + 1]) continue;           // 既に消えている
         var empty = true;
-        for (j = b.line + 1; j < b.endLine; j++) {
-          if (!removed[j] && stripComment(lines[j - 1] || '')) { empty = false; break; }
+        for (j = o + 1; j < closeIdx; j++) {
+          if (!removed[j + 1] && hasContent[j]) { empty = false; break; }
         }
-        if (empty) { markRange(b.line, b.endLine); changed = true; }
+        if (empty) { markRange(o + 1, closeIdx + 1); changed = true; }
       }
 
       if (!changed) break;
@@ -660,7 +699,13 @@ window.MA.modules.c4 = (function() {
       // resetting to Person/top-level every time makes the user re-pick each round.
       var kindOpts = ELEMENT_KINDS.map(function(k) { return { value: k, label: k, selected: k === lastAddKind }; });
       var relKindOpts = REL_KINDS.map(function(k) { return { value: k, label: k, selected: k === 'Rel' }; });
-      var elemIdOpts = els.map(function(e) { return { value: e.id, label: e.id + ' (' + e.kind + ')' }; });
+      // 境界は Rel の端点にできない。mermaid.parse は通るが mermaid.render が
+      // "Cannot read properties of undefined (reading 'x')" で落ち、存在しない id を
+      // 指したときと同じ壊れ方をする (囲む境界・兄弟の境界・境界間・Container_Boundary、
+      // 実機で確認したすべての形で NG)。選べるままにしておくと、2クリックで描画不能な
+      // 図ができあがるのに UI 側には何の警告も出ない。
+      var relEndpoints = els.filter(function(e) { return !e.isBoundary; });
+      var elemIdOpts = relEndpoints.map(function(e) { return { value: e.id, label: e.id + ' (' + e.kind + ')' }; });
       if (elemIdOpts.length === 0) elemIdOpts = [{ value: '', label: '（要素を先に追加）' }];
 
       var boundaries = els.filter(function(e) { return e.isBoundary; });

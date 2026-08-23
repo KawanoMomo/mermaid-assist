@@ -180,16 +180,22 @@ window.MA.properties = (function() {
     // button itself. The row's text is ellipsised at the panel width, so a warning
     // placed in the label is frequently invisible.
     var delLabel = opts.deleteLabel ? escHtml(opts.deleteLabel) : '✕';
-    // 記号だけのボタンは、何を消すのか読み取れない。deleteTitle を渡していない
-    // モジュールにも行のラベルから既定の説明を与える。ホバーとスクリーンリーダの
+    // 記号だけのボタンは、何を消すのか読み取れない。ホバーとスクリーンリーダの
     // 両方でここが唯一の手がかりになる。
-    var delTitleText = opts.deleteTitle || ('「' + String(opts.label) + '」を削除');
-    var delTitle = ' title="' + escHtml(delTitleText) + '"';
+    //
+    // deleteTitle が受け取るのは「削除」「削除すると 3 要素 / 2 リレーションが
+    // 消えます」のような**動作の説明だけ**で、どの行のものかは付けない。行の識別は
+    // ここで一度だけ足す。以前は deleteTitle を渡していない経路 (この関数を通る
+    // 41 か所のうち 36 か所) で既定値に行ラベルが入り、そこへさらに前置していたため
+    // 「A」「A」を削除 と二重に読み上げられていた。
+    var delPhrase = opts.deleteTitle || '削除';
+    var delDesc = '「' + String(opts.label) + '」を' + delPhrase;
+    var delTitle = ' title="' + escHtml(delDesc) + '"';
     // title は支援技術に届かない。button は中身のテキスト (`✕5` 等) が名前になり、
     // title はその後方互換のフォールバックでしかないため、`✕5` がある限り読み上げ
     // には現れない。カスケード削除の件数はここでしか警告していないので、
     // aria-label で名前そのものに入れる。
-    var delAria = ' aria-label="' + escHtml('「' + String(opts.label) + '」' + delTitleText) + '"';
+    var delAria = ' aria-label="' + escHtml(delDesc) + '"';
     var deleteBtn = opts.deleteClass ?
       '<button class="' + opts.deleteClass + '"' + dataAttrs + delTitle + delAria + ' style="background:var(--accent-red);color:#fff;border:none;padding:4px 8px;min-width:24px;min-height:24px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">' + delLabel + '</button>' : '';
     // 行に印を付ける。一覧の絞り込みはこの印を見て行を選ぶので、

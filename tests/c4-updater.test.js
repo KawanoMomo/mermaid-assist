@@ -745,6 +745,98 @@ describe('Q7: deletionImpactFrom は exact と一致する', function() {
     expect(fast.elements).toBe(2);
     expect(fast.relations).toBe(1);
   });
+
+  // ELEMENT_KINDS に無い境界種別。素の `Boundary(...)` と `Deployment_Node(...)` は
+  // mermaid の正規構文だがパーサが elements に返さないため、件数を parsed.elements で
+  // 数えていたときは、これを跨ぐ連鎖でループが止まって過少申告していた
+  // (✕2 と出るのに文書全体が消える)。削除本体は matchBraces でテキストの波括弧を
+  // 数えているので、こちらも同じ波括弧で数える。
+  //
+  // Rel の相手は境界ではなく通常の要素にしてある。`Rel(e11, b7, ...)` のように
+  // 境界の id を指す形は mermaid.parse は通るが mermaid.render が
+  // "Cannot read properties of undefined (reading 'x')" で落ちる (実機で確認)。
+  // 描画できない形をフィクスチャに固定すると、直したい欠陥ではなく mermaid の
+  // 制限をテストで守ってしまう。
+  var BARE_BOUNDARY = [
+    'C4Context',
+    '    title T',
+    '    System_Boundary(b7, "B7") {',
+    '        Boundary(b9, "B9", "grp") {',
+    '            Boundary(b10, "B10", "grp") {',
+    '                Person(e11, "P11", "desc")',
+    '            }',
+    '        }',
+    '    }',
+    '    System(out, "外部")',
+    '    Rel(e11, out, "r")',
+    ''
+  ].join('\n');
+
+  // Deployment_Node をただ入れ子にしただけでは、畳まれる境界の中に集計対象の要素が
+  // 無いので件数に差が出ず、欠陥を素通りさせる (実測: 上の欠陥を再現させても
+  // この形だけは通ってしまった)。集計される Container_Boundary を、
+  // Deployment_Node を跨がないと空にならない位置に置く。
+  var DEPLOY_NODE = [
+    'C4Deployment',
+    '    title T',
+    '    Deployment_Node(dc, "DC") {',
+    '        Container_Boundary(env, "本番環境") {',
+    '            Deployment_Node(host, "Host") {',
+    '                Container(app, "App", "Go")',
+    '            }',
+    '        }',
+    '    }',
+    '    System(ext, "外部")',
+    '    Rel(app, ext, "呼ぶ")',
+    ''
+  ].join('\n');
+
+  [BARE_BOUNDARY, DEPLOY_NODE].forEach(function(doc, di) {
+    test('Q7e-' + (di + 1) + ': ELEMENT_KINDS に無い境界を跨いでも exact と一致する', function() {
+      var p = c4.parseC4(doc);
+      expect(p.elements.length).toBeGreaterThan(0);
+      for (var i = 0; i < p.elements.length; i++) {
+        var e = p.elements[i];
+        var exact = c4.deletionImpact(doc, e);
+        var fast = c4.deletionImpactFrom(p, e, doc);
+        expect(fast.elements).toBe(exact.elements);
+        expect(fast.relations).toBe(exact.relations);
+      }
+    });
+  });
+
+  test('Q7f: 素の Boundary の連鎖でも件数が実際の削除と合う', function() {
+    var p = c4.parseC4(BARE_BOUNDARY);
+    var e11 = p.elements.filter(function(e) { return e.id === 'e11'; })[0];
+    var fast = c4.deletionImpactFrom(p, e11, BARE_BOUNDARY);
+    // e11 と、外側の System_Boundary(b7) が畳まれて 2 要素。b9 / b10 は
+    // parsed.elements に現れないので件数には入らないが、テキストからは消える。
+    expect(fast.elements).toBe(2);
+    expect(fast.relations).toBe(1);
+    // 実際に削除したとき、数えた件数と残るテキストが食い違わないこと。
+    var after = c4.deleteElementLine(BARE_BOUNDARY, e11.line);
+    expect(after.indexOf('Boundary(b9')).toBe(-1);
+    expect(after.indexOf('Boundary(b10')).toBe(-1);
+    expect(after.indexOf('System_Boundary(b7')).toBe(-1);
+    expect(after.indexOf('Rel(e11')).toBe(-1);
+    expect(after.indexOf('System(out')).toBeGreaterThan(-1);
+  });
+
+  test('Q7g: Deployment_Node を跨ぐ連鎖でも件数が実際の削除と合う', function() {
+    var p = c4.parseC4(DEPLOY_NODE);
+    var app = p.elements.filter(function(e) { return e.id === 'app'; })[0];
+    var fast = c4.deletionImpactFrom(p, app, DEPLOY_NODE);
+    // app と、host が畳まれた結果空になる env = 2 要素。dc も畳まれるが
+    // Deployment_Node は parsed.elements に現れないので件数には入らない。
+    expect(fast.elements).toBe(2);
+    expect(fast.relations).toBe(1);
+    var after = c4.deleteElementLine(DEPLOY_NODE, app.line);
+    expect(after.indexOf('Deployment_Node(host')).toBe(-1);
+    expect(after.indexOf('Container_Boundary(env')).toBe(-1);
+    expect(after.indexOf('Deployment_Node(dc')).toBe(-1);
+    expect(after.indexOf('Rel(app')).toBe(-1);
+    expect(after.indexOf('System(ext')).toBeGreaterThan(-1);
+  });
 });
 
 describe('境界内にリレーションがある場合の削除', function() {
