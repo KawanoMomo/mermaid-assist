@@ -295,8 +295,47 @@ window.MA.modules.classDiagram = (function() {
   // memberless class.
   //
   // `classId` is optional so the older single-argument callers keep working.
+  // 中身が無くなった namespace を畳む。mermaid は空の namespace を受理しない
+  // (`namespace N { }` は Parse error。コメントだけの中身も同じ。v11.13.0 で実測)。
+  // namespace に入れた唯一のクラスを消すと、それだけで図が描画不能になっていた。
+  //
+  // 範囲は parseClass() が返す groups から取る。ここで独自に `{` を数えると、
+  // 範囲を決める述語と一覧を作る述語が別物になり、ずれた瞬間に誤った行が消える
+  // (block / c4 で実際に起きた「述語の非対称」)。
+  function collapseEmptyNamespaces(text) {
+    var cur = text;
+    for (var guard = 0; guard < 200; guard++) {
+      var parsed = parseClass(cur);
+      var lines = cur.split('\n');
+      var target = null;
+      for (var i = 0; i < (parsed.groups || []).length; i++) {
+        var g = parsed.groups[i];
+        if (!g.endLine || g.endLine <= g.line) continue;   // 閉じていない namespace は触らない
+        var empty = true;
+        for (var j = g.line; j < g.endLine - 1; j++) {     // 本体だけを見る (0 起点)
+          var s = String(lines[j] || '').trim();
+          if (!s || s.indexOf('%%') === 0) continue;       // 空行とコメントは中身ではない
+          empty = false;
+          break;
+        }
+        if (empty) { target = g; break; }
+      }
+      if (!target) return cur;
+      // 中に残っているコメントは利用者が書いた文。畳む位置へ繰り上げる。
+      var kept = [];
+      var headIndent = String(lines[target.line - 1] || '').match(/^(\s*)/)[1];
+      for (var k = target.line; k < target.endLine - 1; k++) {
+        var ct = String(lines[k] || '').trim();
+        if (ct.indexOf('%%') === 0) kept.push(headIndent + ct);
+      }
+      lines.splice.apply(lines, [target.line - 1, target.endLine - target.line + 1].concat(kept));
+      cur = lines.join('\n');
+    }
+    return cur;
+  }
+
   function deleteClass(text, lineNum, classId) {
-    if (!classId) return window.MA.textUpdater.deleteLine(text, lineNum);
+    if (!classId) return collapseEmptyNamespaces(window.MA.textUpdater.deleteLine(text, lineNum));
     var lines = text.split('\n');
     var out = [];
     var skipToBrace = false;
@@ -316,7 +355,7 @@ window.MA.modules.classDiagram = (function() {
       if (mem && mem[1] === classId) continue;
       out.push(lines[i]);
     }
-    return out.join('\n');
+    return collapseEmptyNamespaces(out.join('\n'));
   }
 
   // Whether the line is a relation with classId at either end.
