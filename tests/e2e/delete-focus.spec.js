@@ -69,3 +69,79 @@ test.describe('削除した後もキーボードの居場所が残る', () => {
     expect(after.aria).toContain('"B"');
   });
 });
+
+test.describe('gantt: セクションを動かした後も居場所が残る', () => {
+  const DOC = ['gantt', '    title 開発計画', '    dateFormat YYYY-MM-DD',
+    '    section 設計', '    要件定義 :a1, 2026-04-01, 10d',
+    '    section 実装', '    コーディング :b1, after a1, 20d',
+    '    section 検証', '    単体試験 :c1, after b1, 8d', ''].join('\n');
+
+  async function setup(page) {
+    await load(page);
+    await page.selectOption('#diagram-type', 'gantt');
+    await page.waitForTimeout(600);
+    await page.fill('#editor', DOC);
+    await page.waitForTimeout(1500);
+  }
+
+  test('↑ を続けて押してもフォーカスが body へ落ちない', async ({ page }) => {
+    // 実測 (直す前): 押した直後に body へ飛び、同じ ↑ に戻るまで Tab 17回。
+    // 「検証を一番上へ」(↑2回) が `Enter → Tab×17 → Enter` になっていた。
+    await setup(page);
+    await page.evaluate(() => document.querySelectorAll('.prop-section-up')[2].focus());
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(800);
+    const one = await page.evaluate(() => ({
+      isBody: document.activeElement === document.body,
+      aria: document.activeElement.getAttribute('aria-label'),
+    }));
+    expect(one.isBody).toBe(false);
+    expect(one.aria).toContain('検証');
+
+    // 2回目で先頭に着く。先頭の ↑ は無効になるので、同じ行の別のボタンへ寄る。
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(800);
+    const two = await page.evaluate(() => ({
+      isBody: document.activeElement === document.body,
+      aria: document.activeElement.getAttribute('aria-label'),
+      text: document.getElementById('editor').value,
+    }));
+    expect(two.isBody).toBe(false);
+    expect(two.aria).toContain('検証');
+    // 実際に一番上へ動いている
+    expect(two.text.indexOf('section 検証') < two.text.indexOf('section 設計')).toBe(true);
+  });
+
+  test('先頭の ↑ と末尾の ↓ は無効になる', async ({ page }) => {
+    // 押しても無言で何も起きないボタンは、壊れているのか端にいるのか区別がつかない。
+    await setup(page);
+    const state = await page.evaluate(() => {
+      const ups = Array.prototype.slice.call(document.querySelectorAll('.prop-section-up'));
+      const downs = Array.prototype.slice.call(document.querySelectorAll('.prop-section-down'));
+      return { ups: ups.map(b => b.disabled), downs: downs.map(b => b.disabled) };
+    });
+    expect(state.ups[0]).toBe(true);
+    expect(state.ups[state.ups.length - 1]).toBe(false);
+    expect(state.downs[0]).toBe(false);
+    expect(state.downs[state.downs.length - 1]).toBe(true);
+  });
+
+  test('gantt のボタンにも名前と 24px の標的サイズがある', async ({ page }) => {
+    // gantt は共有の listItemHtml を通らないので、他の20図種に入れた a11y が
+    // ここだけ素通りしていた。実測 (直す前): 19x20.2px / aria-label は null。
+    await setup(page);
+    const btns = await page.evaluate(() => {
+      const sel = '.prop-section-up, .prop-section-down, .prop-section-delete, .prop-task-delete, .prop-task-select';
+      return Array.prototype.slice.call(document.querySelectorAll(sel)).map(b => {
+        const r = b.getBoundingClientRect();
+        return { aria: b.getAttribute('aria-label'), w: r.width, h: r.height };
+      });
+    });
+    expect(btns.length).toBeGreaterThan(0);
+    for (const b of btns) {
+      expect(b.aria).not.toBeNull();
+      expect(b.w >= 24).toBe(true);
+      expect(b.h >= 24).toBe(true);
+    }
+  });
+});

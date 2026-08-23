@@ -1156,13 +1156,31 @@ window.MA.modules.gantt = (function() {
               '" data-line="' + sec.line +
               '" style="display:flex;align-items:center;gap:4px;margin-bottom:4px;padding:3px 4px;background:var(--bg-tertiary);border-radius:3px;">' +
               '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + window.MA.htmlUtils.escHtml(sec.name) + '">' + window.MA.htmlUtils.escHtml(sec.name) + ' <span style="color:var(--text-secondary);font-size:10px;">(' + taskCount + ')</span></div>' +
-              '<button class="prop-section-up" data-section-line="' + sec.line + '" title="上のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:10px;padding:0;">↑</button>' +
-              '<button class="prop-section-down" data-section-line="' + sec.line + '" title="下のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);width:20px;height:20px;border-radius:3px;cursor:pointer;font-size:10px;padding:0;">↓</button>' +
+              // gantt は共有の listItemHtml を通らないので、他の20図種に入れた
+              // aria-label と 24px の標的サイズがここだけ素通りしていた。
+              // 実測: 共有ヘルパ経由が 24x29.7px / 名前あり に対し、gantt は
+              // 19x20.2px / 名前 null。**マージ前は全図種が同じ見た目だったのが、
+              // gantt だけ小さい**という新しい不揃いが生まれていた。
+              // WCAG 2.5.8 は 24x24 を要求する。
+              //
+              // 先頭 / 末尾では disabled にする。押しても無言で何も起きないボタンは
+              // 「壊れている」のか「端にいる」のか区別がつかない。
+              '<button class="prop-section-up" data-section-line="' + sec.line + '"' + (sli === 0 ? ' disabled' : '') +
+                ' aria-label="セクション「' + window.MA.htmlUtils.escHtml(sec.name) + '」を上へ移動"' +
+                ' title="上のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);min-width:24px;min-height:24px;border-radius:3px;cursor:' + (sli === 0 ? 'default' : 'pointer') + ';font-size:10px;padding:0;' + (sli === 0 ? 'opacity:.4;' : '') + '">↑</button>' +
+              '<button class="prop-section-down" data-section-line="' + sec.line + '"' + (sli === parsedData.sections.length - 1 ? ' disabled' : '') +
+                ' aria-label="セクション「' + window.MA.htmlUtils.escHtml(sec.name) + '」を下へ移動"' +
+                ' title="下のセクションと入れ替え" style="background:var(--bg-primary);border:1px solid var(--border);color:var(--text-primary);min-width:24px;min-height:24px;border-radius:3px;cursor:' + (sli === parsedData.sections.length - 1 ? 'default' : 'pointer') + ';font-size:10px;padding:0;' + (sli === parsedData.sections.length - 1 ? 'opacity:.4;' : '') + '">↓</button>' +
               // 巻き添えの件数をボタン自体に出す (block と同じ手)。
               // 以前はここだけ confirm を出していて、同じ画面のタスク ✕ は無言、
               // block は件数表示と、3通りの作法が混在していた。押す前に何が起きるかを
               // ボタンの文字で示し、確認は出さない (Undo で戻せる)。
-              '<button class="prop-section-delete" data-element-id="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-name="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-line="' + sec.line + '" data-task-count="' + taskCount + '" title="セクション「' + window.MA.htmlUtils.escHtml(sec.name) + '」と含まれるタスク' + taskCount + '件を削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;">✕' + (taskCount > 0 ? taskCount : '') + '</button>' +
+              '<button class="prop-section-delete" data-element-id="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-name="' + window.MA.htmlUtils.escHtml(sec.name) + '" data-section-line="' + sec.line + '" data-task-count="' + taskCount + '"' +
+                // `✕3` はボタンの中身なのでそれが名前になり、title は読み上げに
+                // 現れない。カスケードの警告がここでしか出ていないので名前に入れる。
+                ' aria-label="セクション「' + window.MA.htmlUtils.escHtml(sec.name) + '」を削除' +
+                (taskCount > 0 ? '（含まれるタスク ' + taskCount + ' 件も一緒に消えます）' : '') + '"' +
+                ' title="セクション「' + window.MA.htmlUtils.escHtml(sec.name) + '」と含まれるタスク' + taskCount + '件を削除" style="background:var(--accent-red);color:#fff;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap;min-width:24px;min-height:24px;">✕' + (taskCount > 0 ? taskCount : '') + '</button>' +
             '</div>';
 
           // セクションの下にタスクを並べる。
@@ -1179,8 +1197,10 @@ window.MA.modules.gantt = (function() {
             sectionListHtml +=
               '<div class="ma-list-row" style="display:flex;align-items:center;gap:4px;margin:0 0 3px 14px;padding:2px 4px;background:var(--bg-primary);border-radius:3px;">' +
                 '<div style="flex:1;font-size:11px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + tkLabel + '">' + tkLabel + '</div>' +
-                '<button class="prop-task-select" data-element-id="' + tkId + '" data-line="' + tk.line + '" title="「' + tkLabel + '」を選択" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">編集</button>' +
-                '<button class="prop-task-delete" data-element-id="' + tkId + '" data-line="' + tk.line + '" title="「' + tkLabel + '」を削除" style="background:var(--accent-red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
+                // 「編集」も「✕」も、どの行のものかがボタン名から分からない。
+                // 支援技術のボタン一覧では同名が並ぶだけで選べない (他の20図種と同じ扱い)。
+                '<button class="prop-task-select" data-element-id="' + tkId + '" data-line="' + tk.line + '" aria-label="「' + tkLabel + '」を編集" title="「' + tkLabel + '」を選択" style="background:var(--bg-tertiary);border:1px solid var(--border);color:var(--text-primary);padding:4px 8px;border-radius:3px;cursor:pointer;font-size:10px;min-height:24px;">編集</button>' +
+                '<button class="prop-task-delete" data-element-id="' + tkId + '" data-line="' + tk.line + '" aria-label="「' + tkLabel + '」を削除" style="background:var(--accent-red);color:#fff;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:10px;min-width:24px;min-height:24px;">✕</button>' +
               '</div>';
           }
         }
@@ -1398,9 +1418,45 @@ window.MA.modules.gantt = (function() {
             if (isNaN(ln)) return;
             var moved = window.MA.modules.gantt.moveSection(ctx.getMmdText(), ln, dir === 'up' ? -1 : 1);
             if (moved === ctx.getMmdText()) return; // at the edge — nothing to do
+            // 押した直後に activeElement が body へ飛んでいた。パネルは innerHTML で
+            // 作り直されるので、押したボタンごと DOM から消える。実測: 同じ ↑ に
+            // 戻るまで **Tab 17回**。「検証を一番上へ」(↑2回) が
+            // `Enter → Tab×17 → Enter` になり、キーボードでは実質使えない
+            // (WCAG 2.4.3)。動いた先のセクションの同じ向きのボタンへ移す。
+            var movedName = this.getAttribute('aria-label') || '';
             window.MA.history.pushHistory();
             ctx.setMmdText(moved);
             ctx.onUpdate();
+            if (typeof window.setTimeout === 'function') {
+              window.setTimeout(function() {
+                var again = propsEl.querySelectorAll('.prop-section-' + dir);
+                for (var k = 0; k < again.length; k++) {
+                  if (again[k].getAttribute('aria-label') === movedName && !again[k].disabled) {
+                    if (again[k].focus) again[k].focus();
+                    return;
+                  }
+                }
+                // 端まで動いて無効になった場合は、同じ行の逆向きのボタンへ寄せる。
+                // ここで「見つかったが disabled だから何もしない」で抜けると、
+                // 2回目の移動でフォーカスが body へ落ちる (実測でそうなっていた)。
+                var prefix = movedName.replace(/を(上|下)へ移動$/, '');
+                var other = propsEl.querySelectorAll('.prop-section-' + (dir === 'up' ? 'down' : 'up'));
+                for (var j = 0; j < other.length; j++) {
+                  var lb = other[j].getAttribute('aria-label') || '';
+                  if (lb.indexOf(prefix) === 0 && !other[j].disabled && other[j].focus) {
+                    other[j].focus();
+                    return;
+                  }
+                }
+                // それも無ければ同じ行の削除ボタン。一覧の中に留めるのが目的で、
+                // 押しやすい場所へ置くことではない。
+                var del = propsEl.querySelectorAll('.prop-section-delete');
+                for (var d = 0; d < del.length; d++) {
+                  var dl = del[d].getAttribute('aria-label') || '';
+                  if (dl.indexOf(prefix) === 0 && del[d].focus) { del[d].focus(); return; }
+                }
+              }, 0);
+            }
           });
         }
       });
