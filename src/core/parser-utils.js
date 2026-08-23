@@ -26,8 +26,20 @@ window.MA.parserUtils = (function() {
     if (firstNonEmpty.indexOf('quadrantChart') === 0) return 'quadrantChart';
     if (firstNonEmpty.indexOf('xychart-beta') === 0) return 'xychart-beta';
     if (firstNonEmpty.indexOf('sankey-beta') === 0) return 'sankey-beta';
-    if (firstNonEmpty.indexOf('C4Context') === 0) return 'C4Context';
-    if (firstNonEmpty.indexOf('C4Container') === 0) return 'C4Context';
+    // C4 の5つの variant はすべて c4 モジュールが扱う。ここで Context と Container
+    // しか見ていなかったので、`C4Component` / `C4Dynamic` / `C4Deployment` は
+    // **図種が判定できない**扱いになっていた。しかも Variant のプルダウンには
+    // この3つが並んでおり、選べるのに認識されない状態だった。
+    //
+    // 何が起きるか: 判定に失敗するとプロパティパネルが**前の文書のまま固まる**。
+    // プレビューは正しく描けていて、ステータスバーも左下も前の文書の内容を出すので、
+    // 異常を示すものが画面に一つも無い。その状態で一覧の ✕ を押すと、**前の文書の
+    // 行番号で今の文書の別の行が消える** (実測: 「System(sys, ...)」の ✕ を押すと
+    // 4行目の `Deployment_Node(ecu, ...) {` が消え、孤児の `}` が残って描画不能)。
+    // 帯は壊した場所でも原因でもない行を指す。
+    //
+    // 判定は parseC4 のヘッダ照合と同じ形で書く。片方だけ増えると同じことが起きる。
+    if (/^C4(Context|Container|Component|Dynamic|Deployment)/.test(firstNonEmpty)) return 'C4Context';
     if (firstNonEmpty.indexOf('packet-beta') === 0) return 'packet-beta';
     if (firstNonEmpty.indexOf('architecture-beta') === 0) return 'architecture-beta';
     if (firstNonEmpty.indexOf('kanban') === 0) return 'kanban';

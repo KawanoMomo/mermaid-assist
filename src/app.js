@@ -711,12 +711,30 @@ function focusPreview() {
   if (pane && pane.focus) { pane.setAttribute('tabindex', '-1'); pane.focus(); }
 }
 
+// ヘルプを開く直前にフォーカスがあった要素。閉じたときに戻す。
+var helpReturnFocus = null;
+
 function toggleShortcutHelp(force) {
   var box = document.getElementById('shortcut-help');
   if (!box) return;
   var show = (force === undefined) ? box.hasAttribute('hidden') : force;
-  if (show) box.removeAttribute('hidden');
-  else box.setAttribute('hidden', '');
+  if (show) {
+    // 開く前の居場所を覚えて、中へフォーカスを移す。
+    // 移さないと支援技術には「何も起きていない」ように見え、role="dialog" を
+    // 付けただけでは通知にならない。閉じたときに元へ戻すのは、Escape で
+    // 抜ける導線そのものを見失わせないため。
+    helpReturnFocus = document.activeElement;
+    box.removeAttribute('hidden');
+    var closeBtn = document.getElementById('shortcut-help-close');
+    if (closeBtn && closeBtn.focus) closeBtn.focus();
+    else if (box.focus) box.focus();
+  } else {
+    box.setAttribute('hidden', '');
+    if (helpReturnFocus && helpReturnFocus.focus && document.contains(helpReturnFocus)) {
+      helpReturnFocus.focus();
+    }
+    helpReturnFocus = null;
+  }
 }
 
 function twoDigit(n) { return (n < 10 ? '0' : '') + n; }
@@ -1005,7 +1023,10 @@ function applyListFilter() {
   if (!box) {
     var wrap = document.createElement('div');
     wrap.style.cssText = 'margin-bottom:6px;';
-    wrap.innerHTML = '<input id="ma-list-filter" type="text" placeholder="一覧を絞り込む (' +
+    // aria-label を明示する。無いと placeholder が唯一のアクセシブル名になり、
+    // 打ち始めた瞬間に名前ごと消える (支援技術には無名の入力欄として残る)。
+    wrap.innerHTML = '<input id="ma-list-filter" type="text" aria-label="一覧を絞り込む" ' +
+      'placeholder="一覧を絞り込む (' +
       rows.length + '件)" style="width:100%;background:var(--bg-tertiary);border:1px solid var(--border);' +
       'color:var(--text-primary);padding:3px 6px;border-radius:3px;font-size:12px;">' +
       '<div id="ma-list-filter-count" hidden style="font-size:10px;margin-top:2px;"></div>';
@@ -1199,7 +1220,27 @@ function renderProps() {
 }
 
 function renderPropsInner() {
-  if (!propsEl || !currentModule) return;
+  if (!propsEl) return;
+  // 図種を判定できないときにパネルを**前の文書のまま残していた**。
+  //
+  // 早期 return はパネルの DOM をそのままにするので、前の文書の一覧・行番号・
+  // ボタンが生きたまま残る。プレビューは新しい文書を正しく描き、ステータスバーも
+  // 前の文書の内容を出すので、異常を示すものが画面に一つも無い。その状態で ✕ を
+  // 押すと、**前の文書の行番号で今の文書の別の行が消える** (実測: C4Deployment の
+  // 図で「System(sys, ...)」の ✕ を押すと `Deployment_Node(ecu, ...) {` が消え、
+  // 孤児の `}` が残って描画不能になった)。
+  //
+  // 操作できるものを残さず、判定できないことをそのまま出す。
+  if (!currentModule) {
+    propsEl.innerHTML =
+      '<div style="padding:8px;font-size:11px;color:var(--text-secondary);line-height:1.6;">' +
+      '図の種類を判定できませんでした。<br>' +
+      '1行目の図種宣言（<code>flowchart TD</code> など）を確認してください。<br><br>' +
+      '判定できない間は、前の図の一覧をそのまま出すと<strong>別の行を消してしまう</strong>ため、' +
+      '編集用の一覧は表示しません。' +
+      '</div>';
+    return;
+  }
   // 図種による場合分けは不要になった。gantt も他の20図種と同じ
   // 4引数契約 (selData, parsedData, propsEl, ctx) で呼ぶ。
   {
@@ -2970,8 +3011,12 @@ function init() {
     } else if (e.key === 'Escape' &&
                document.getElementById('shortcut-help') &&
                !document.getElementById('shortcut-help').hasAttribute('hidden')) {
+      // ここで focusPreview() を呼ぶと、toggleShortcutHelp が戻した「開く前の
+      // 居場所」を上書きしてしまう (実測: エディタから F1 → Escape で
+      // #preview-container に着地し、打っていた場所へ戻れない)。
+      // 戻し先は toggleShortcutHelp が持っているので、そちらに任せる。
+      e.preventDefault();
       toggleShortcutHelp(false);
-      focusPreview();
     } else if (e.key === 'Escape' && inEditor) {
       // エディタから図へ戻る (UI-054)。
       //

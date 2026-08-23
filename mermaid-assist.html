@@ -37,6 +37,16 @@ input[type="date"] {
   color-scheme: dark;
 }
 
+/* placeholder の色を指定しないと Chromium の既定 (rgb(117,117,117)) が使われ、
+   この地 (rgb(33,38,45)) に対して 3.30:1 しかない。WCAG 1.4.3 (AA) は 12px の
+   文字に 4.5:1 を要求する。--text-secondary なら 4.95:1 で満たす。
+   一覧の絞り込み欄は placeholder に件数を出しているので、読めないと
+   「何件から絞っているか」が分からないまま打ち始めることになる。 */
+input::placeholder, textarea::placeholder {
+  color: var(--text-secondary);
+  opacity: 1;   /* Firefox は既定で薄くするので戻す */
+}
+
 /* ── Reset / Base ──────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -735,10 +745,17 @@ html, body {
   </div><!-- /#main -->
 
   <!-- ── Shortcut help (? キー) ────────────────────────────────── -->
-  <div id="shortcut-help" hidden>
+  <!-- role="dialog" + aria-modal と、開いたときのフォーカス移動 (app.js) は
+       キーボードトラップの「標準以外の方法なら利用者に通知」(WCAG 2.1.2) を
+       成立させるために要る。エディタは Tab を字下げに使う (ADR-011) ので、
+       抜ける方法は Escape だけ。それはこのヘルプに書いてあるが、role が無く
+       開いてもフォーカスが移らないと、**支援技術の利用者はヘルプが開いたことに
+       気づけない** (実測: role: null / aria-modal: null / 開いた後の
+       activeElement は TEXTAREA#editor のまま)。通知されている前提が崩れる。 -->
+  <div id="shortcut-help" role="dialog" aria-modal="true" aria-labelledby="shortcut-help-title" tabindex="-1" hidden>
     <div id="shortcut-help-inner">
       <div id="shortcut-help-head">
-        <span>キーボードショートカット</span>
+        <span id="shortcut-help-title">キーボードショートカット</span>
         <button id="shortcut-help-close" title="閉じる (Escape)">✕</button>
       </div>
       <table id="shortcut-help-table">
@@ -765,7 +782,13 @@ html, body {
   </div>
 
   <!-- ── Status bar ──────────────────────────────────────────────────────── -->
-  <div id="statusbar">
+  <!-- role="status" — 削除や件数の変化を支援技術に伝える唯一の経路。
+       これが無いと `[aria-live]` が画面に0件で、削除しても「1件と関連2件を削除 —
+       Ctrl+Z で戻せます」も、要素数の変化も**まったく読み上げられない**
+       (CDP のツリー 6,441 ノード中 live 保持ノード 0件を実測)。
+       押した直後にフォーカスが body へ落ちる既存の挙動と合わさると、
+       支援技術の利用者は削除できたかどうかを判定できない。 -->
+  <div id="statusbar" role="status" aria-live="polite">
     <span id="status-parse">Ready</span>
     <span id="status-info"></span>
     <!-- 版の刻印。
