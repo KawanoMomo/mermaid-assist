@@ -131,7 +131,10 @@ describe('テストフレームワーク自身の健全性', function() {
 // これが無いと、誰かが move: true に戻しても CI が気づかない。
 // 実際に敵対レビューのミューテーション検査で「8箇所すべて true に戻しても
 // 385 passed」だったため、縮退が担保されていなかった。
-describe('move が有効なのは flowchart のノードだけ', function() {
+// 見出しは「flowchart のノードだけ」だったが、G1 で class.js が契約経路
+// (operations.moveUp) に載せ替えられて再び有効になっている。中のテストは更新
+// されていたのに見出しだけが古い主張のまま残っていた。
+describe('move を出すのは flowchart のノードと class のクラスだけ', function() {
   var fsMod = require('fs');
   var pathMod = require('path');
   var srcDir = pathMod.resolve(__dirname, '..', 'src', 'modules');

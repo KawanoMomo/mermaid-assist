@@ -464,9 +464,9 @@ async function refresh(skipRender) {
     previewSvgEl.style.transform = 'none';
     previewSvgEl.innerHTML =
       '<div style="max-width:680px;padding:16px;overflow-wrap:anywhere;white-space:normal;">' +
-        (cause ? '<p style="color:var(--accent-red);margin:0 0 12px 0;font-size:13px;line-height:1.6;">' +
+        (cause ? '<p style="color:var(--accent-red-text);margin:0 0 12px 0;font-size:13px;line-height:1.6;">' +
           window.MA.htmlUtils.escHtml(cause) + '</p>' : '') +
-        '<p style="color:var(--accent-red);margin:0;font-family:var(--font-mono);font-size:12px;line-height:1.5;">Render error:<br>' +
+        '<p style="color:var(--accent-red-text);margin:0;font-family:var(--font-mono);font-size:12px;line-height:1.5;">Render error:<br>' +
           String(e).replace(/</g, '&lt;') + '</p>' +
       '</div>';
     statusParseEl.textContent = 'Error';

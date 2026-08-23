@@ -16,10 +16,13 @@
   --text-secondary: #8b949e;
   --accent:       #7c8cf8;
   --accent-green: #7ee787;
-  /* 白文字とのコントラストが 3.48:1 しかなく、WCAG AA (4.5:1) に届いていなかった。
-     一番押してはいけないボタンが一番読みにくい状態だったので暗くする (4.98:1)。
-     危険色としても暗い赤の方が自然に読める。 */
+  /* 赤は「白文字を載せる地」と「暗い地に置く文字」の両方に使われており、必要な
+     明るさが正反対になる。1色で兼ねていたので、地としては白文字が 3.48:1 で
+     読めず、暗くすると今度は文字として 3.06:1 まで落ちた。役割ごとに分ける。
+       --accent-red      : ボタンの地。白文字に対して 4.98:1
+       --accent-red-text : 暗い地に置く文字。最悪ケース (bg-tertiary) で 6.04:1 */
   --accent-red:   #d32f2f;
+  --accent-red-text: #ff7b72;
   --accent-orange: #ffa657;
   --font-mono: 'IBM Plex Mono', 'Consolas', monospace;
   --font-sans: 'Noto Sans JP', 'Segoe UI', sans-serif;
@@ -532,7 +535,7 @@ html, body {
 }
 
 #status-parse { color: var(--accent-green); }
-#status-parse.error { color: var(--accent-red); }
+#status-parse.error { color: var(--accent-red-text); }
 #status-info  { color: var(--text-secondary); margin-left: auto; }
 /* 版はステータス行の右端に小さく置く。縦には増やさない。 */
 /* 未保存の印。版の隣に置く。目に入る必要があるので薄くしない。 */
@@ -541,7 +544,7 @@ html, body {
 #status-file { color: var(--text-secondary); font-size: 11px; margin-left: 12px;
   max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   display: inline-block; vertical-align: bottom; }
-#status-dirty { color: var(--accent-red); font-size: 11px; margin-left: 12px;
+#status-dirty { color: var(--accent-red-text); font-size: 11px; margin-left: 12px;
                 white-space: nowrap; }
 #status-version { color: var(--text-secondary); opacity: .7; font-size: 11px;
                   margin-left: 12px; white-space: nowrap; }
