@@ -1,3 +1,4 @@
+- TICKET-releaser-20261109-0248-3: 台本 primary 手順 5・6(レビュー指摘 10 件を直した後の Fit と部分拡大、保存した .mmd の差分 10 行・CRLF のまま・開き直して保存しても同じバイト列)を scenario primary-5 / primary-6 が守るようになった
 - TICKET-releaser-20261109-0248-2: flowchart のエッジのラベルを直してもラベルが積み重ならず(`--> |新| |旧|` にならない)、行の中はラベルの字だけが変わるようになった。別のノードのラベルを続けて直しても Undo 1 回で直前の 1 件だけが戻る。台本 primary 手順 4 を scenario primary-4 が守る
 - TICKET-releaser-20261109-0248-1: 台本 primary 手順 3(接頭辞を共有する ID と同名ラベルが混ざる CRLF の flowchart で ID 改名 3 件)を scenario primary-3 が守るようになった
 - releaser: 版を 1.18.0 に揃えた(VERSION・package.json・package-lock.json・画面の版表示)
