@@ -379,16 +379,12 @@ async function refresh(skipRender) {
         updateZoomLabel();
       } else if (thisRender === 1 || pendingAutoFit) {
         pendingAutoFit = false;
-        var previewContainer = document.getElementById('preview-container');
-        var containerW = previewContainer.clientWidth - 32;
-        var containerH = previewContainer.clientHeight - 32;
         // Both axes. Width alone blew up tall diagrams: a flowchart TD is narrow
         // and long, so fitting its width scaled it to 294% and pushed the last
         // node off the bottom of the pane — "fit" that needs scrolling to read.
-        var fitZoom = Math.min(containerW / naturalW,
-          containerH > 0 ? containerH / naturalH : Infinity);
-        fitZoom = Math.max(0.25, Math.min(3.0, fitZoom));
-        zoom = Math.round(fitZoom * 100) / 100;
+        // Opening a document may still enlarge a small one (up to 300%) so it is
+        // not a speck; the Fit button does not (see fitZoomFor).
+        zoom = fitZoomFor(document.getElementById('preview-container'), naturalW, naturalH, 3.0);
       }
     }
 
@@ -1309,9 +1305,37 @@ function zoomToFit() {
   var previewContainer = document.getElementById('preview-container');
   if (!svgEl || !previewContainer) return;
   var naturalW = parseFloat(svgEl.getAttribute('width')) || 800;
-  var containerW = previewContainer.clientWidth - 32;
-  var fitZoom = containerW / naturalW;
-  setZoom(Math.round(fitZoom * 100) / 100);
+  var naturalH = parseFloat(svgEl.getAttribute('height')) || 400;
+  setZoom(fitZoomFor(previewContainer, naturalW, naturalH, FIT_MAX_ZOOM));
+  // The drawing is anchored top-left; a fit that leaves the pane scrolled to
+  // where the user was zoomed in shows an empty corner instead of the whole.
+  previewContainer.scrollTop = 0;
+  previewContainer.scrollLeft = 0;
+}
+
+// Fit = the whole drawing in the pane: the smaller of the width and the height
+// ratios, never larger than maxZoom.
+//
+// The button used the width ratio alone. A flowchart TD chain is narrow and
+// long, so "fit" scaled a 111-node chain to 300% (374 x 34530 natural) and left
+// two nodes on screen (1366x768) — the opposite of what draw.io / Mermaid Live
+// Editor mean by fit. The button never enlarges (FIT_MAX_ZOOM = 1): fitting a
+// 3-node diagram to the pane at 300% is "zoom in", which has its own button.
+//
+// The floor is setZoom's 25%, the smallest zoom any entry point allows. Measured
+// on that 111-node chain: whole-drawing fit would need 1.9%, at which a node is
+// about 1px tall; at 25% the 16px labels are 4px — the shape of the flow and where
+// each node sits are visible, the text is not. Fit stops there, at the top of
+// the drawing, and the width always fits; reading is + / Ctrl+wheel from there.
+var FIT_MAX_ZOOM = 1.0;
+function fitZoomFor(container, naturalW, naturalH, maxZoom) {
+  var containerW = container.clientWidth - 32;
+  var containerH = container.clientHeight - 32;
+  var z = Math.min(containerW / naturalW,
+    containerH > 0 ? containerH / naturalH : Infinity);
+  z = Math.max(0.25, Math.min(maxZoom, z));
+  // Round down: rounding 0.996 up to 1.00 would push the edge 1-2px past the pane.
+  return Math.floor(z * 100) / 100;
 }
 
 // ── File Open / Save ───────────────────────────────────────────────────────
