@@ -1,1 +1,2 @@
+- TICKET-human-20261108-1500-2: 版の正本を VERSION にし(1.17.0。package.json・package-lock.json・画面は `node scripts/version.js set` で揃う)、ステータス行の版の隣に「コードの指紋」(#12 桁)が出て、同じ版でも中身が違えば分かるようになった
 - TICKET-human-20261108-1500-1: scripts/build.ps1・test.ps1・verify.ps1 で準備・unit + render・Playwright(台本の scenario と e2e、summary.json)を 1 コマンドずつ回せるようになり、junior-1 / primary-2 / reviewer-3 の scenario が入った

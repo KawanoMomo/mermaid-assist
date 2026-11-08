@@ -115,6 +115,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify.ps1 -Scenario
   期待は G1(押した対象だけが変わる)と G2(mermaid が実際に描ける)。直接回すなら
   `npx playwright test --config playwright.scenarios.config.js`
 
+### 版とコードの指紋
+
+版の正本は `VERSION`。`package.json`・`package-lock.json`・画面の版表示(ステータス行の `v1.17.0`)はそこから導く。
+
+```powershell
+node scripts/version.js              # 4 箇所が揃っているか(ずれを名指しして exit 1)
+node scripts/version.js set 1.18.0   # VERSION を変えて残りを揃える(リリースのとき。続けてコミットとタグ)
+node scripts/version.js fingerprint  # 画面の版の隣に出る「コードの指紋」を取る
+```
+
+ステータス行の `#xxxxxxxxxxxx` は、読み込まれたコードそのものから取った指紋です。版が同じでも中身が違えば変わります。
+不具合を報告するときは版と指紋の両方を添えてください。
+
 ## アーキテクチャ
 
 | 構成要素 | 役割 |
