@@ -1,0 +1,12 @@
+gantt
+    title 2週間の計画
+    dateFormat YYYY-MM-DD
+    section 設計
+    要件定義 :done, req, 2026-11-09, 2026-11-13
+    仕様レビュー :rv, 2026-11-13, 2d
+    section 実装
+    実装A :active, ia, 2026-11-16, 2026-11-20
+    実装B :ib, after ia, 3d
+    section 試験
+    結合テスト :crit, done, k6, 2026-11-25, 2026-11-27
+    受入 :k7, after k6, 2d

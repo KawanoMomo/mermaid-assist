@@ -32,6 +32,57 @@
   "text": "gantt\n    dateFormat YYYY-MM-DD\n    axisFormat %m/%d\n    section S\n    検証 :v1, 2026-06-01, 5d\n    設計 :design, 2026-03-01, 5d\n    実装 :impl, after design, 10d\n"
  },
  {
+  "name": "gantt-multitag-label/before",
+  "text": "gantt\n    dateFormat YYYY-MM-DD\n    axisFormat %m/%d\n    section S\n    結合テスト :crit, done, k6, 2026-11-25, 2026-11-27\n    出荷判定 :active, crit, milestone, m9, 2026-11-30, 0d\n    受入 :done, crit, k7, after k6, 2d\n"
+ },
+ {
+  "name": "gantt-multitag-label/after",
+  "text": "gantt\n    dateFormat YYYY-MM-DD\n    axisFormat %m/%d\n    section S\n    結合テスト2 :crit, done, k6, 2026-11-25, 2026-11-27\n    出荷判定 :active, crit, milestone, m9, 2026-11-30, 0d\n    受入 :done, crit, k7, after k6, 2d\n",
+  "expectPresent": [
+   "結合テスト2",
+   "出荷判定",
+   "受入"
+  ]
+ },
+ {
+  "name": "gantt-multitag-label3/before",
+  "text": "gantt\n    dateFormat YYYY-MM-DD\n    axisFormat %m/%d\n    section S\n    結合テスト :crit, done, k6, 2026-11-25, 2026-11-27\n    出荷判定 :active, crit, milestone, m9, 2026-11-30, 0d\n    受入 :done, crit, k7, after k6, 2d\n"
+ },
+ {
+  "name": "gantt-multitag-label3/after",
+  "text": "gantt\n    dateFormat YYYY-MM-DD\n    axisFormat %m/%d\n    section S\n    結合テスト :crit, done, k6, 2026-11-25, 2026-11-27\n    出荷 :active, crit, milestone, m9, 2026-11-30, 0d\n    受入 :done, crit, k7, after k6, 2d\n",
+  "expectPresent": [
+   "結合テスト",
+   "出荷",
+   "受入"
+  ]
+ },
+ {
+  "name": "gantt-multitag-id/before",
+  "text": "gantt\n    dateFormat YYYY-MM-DD\n    axisFormat %m/%d\n    section S\n    結合テスト :crit, done, k6, 2026-11-25, 2026-11-27\n    出荷判定 :active, crit, milestone, m9, 2026-11-30, 0d\n    受入 :done, crit, k7, after k6, 2d\n"
+ },
+ {
+  "name": "gantt-multitag-id/after",
+  "text": "gantt\n    dateFormat YYYY-MM-DD\n    axisFormat %m/%d\n    section S\n    結合テスト :crit, done, it, 2026-11-25, 2026-11-27\n    出荷判定 :active, crit, milestone, m9, 2026-11-30, 0d\n    受入 :done, crit, k7, after it, 2d\n"
+ },
+ {
+  "name": "gantt-multitag-crit-off/before",
+  "text": "gantt\n    dateFormat YYYY-MM-DD\n    axisFormat %m/%d\n    section S\n    結合テスト :crit, done, k6, 2026-11-25, 2026-11-27\n    出荷判定 :active, crit, milestone, m9, 2026-11-30, 0d\n    受入 :done, crit, k7, after k6, 2d\n"
+ },
+ {
+  "name": "gantt-multitag-crit-off/after",
+  "text": "gantt\n    dateFormat YYYY-MM-DD\n    axisFormat %m/%d\n    section S\n    結合テスト :done, k6, 2026-11-25, 2026-11-27\n    出荷判定 :active, crit, milestone, m9, 2026-11-30, 0d\n    受入 :done, crit, k7, after k6, 2d\n"
+ },
+ {
+  "name": "gantt-multitag-end/before",
+  "text": "gantt\n    dateFormat YYYY-MM-DD\n    axisFormat %m/%d\n    section S\n    結合テスト :crit, done, k6, 2026-11-25, 2026-11-27\n    出荷判定 :active, crit, milestone, m9, 2026-11-30, 0d\n    受入 :done, crit, k7, after k6, 2d\n"
+ },
+ {
+  "name": "gantt-multitag-end/after",
+  "text": "gantt\n    dateFormat YYYY-MM-DD\n    axisFormat %m/%d\n    section S\n    結合テスト :crit, done, k6, 2026-11-25, 2026-11-28\n    出荷判定 :active, crit, milestone, m9, 2026-11-30, 0d\n    受入 :done, crit, k7, after k6, 2d\n",
+  "allowRectChange": true
+ },
+ {
   "name": "gitgraph-rename/before",
   "text": "gitGraph\n  commit\n  branch dev\n  checkout dev\n  commit\n  checkout main\n  merge dev\n"
  },
