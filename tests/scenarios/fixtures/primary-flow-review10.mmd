@@ -1,0 +1,12 @@
+flowchart TD
+    Start[開始] --> Init[初期化]
+    Init --> Spi[SPI 初期化]
+    Spi --> SpiDrv[SpiDrv]
+    SpiDrv --> SpiDrvInit[SpiDrv 初期化]
+    SpiDrvInit --> Uart[UART 初期化]
+    Uart --> UartTx[UART 送信]
+    UartTx --> Check{送信可?}
+    Check -->|はい| Send[送信]
+    Check -->|いいえ| Wait[待機]
+    Wait --> Check
+    Send --> Done[終了]
