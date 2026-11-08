@@ -1871,6 +1871,10 @@ function init() {
   // Selection initialization
   window.MA.selection.init(function() {
     sel = window.MA.selection.getSelected();
+    // 選択が変われば、ラベル欄の束ねはそこで終わる。パネルの再描画で
+    // フォーカスは同じ id の欄(別の要素のラベル欄)へ持ち越されるので、
+    // focusout だけでは切れず、別の要素の編集まで 1 つの Undo に束ねていた。
+    window.MA.history.setCoalesceMode(null, 0);
     renderProps();
     rebuildOverlay();
   });

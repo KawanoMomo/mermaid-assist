@@ -92,6 +92,24 @@ describe('pushHistoryCoalesced', function() {
     expect(s.get()).toBe('A');
   });
 
+  // ラベル欄の束ね(setCoalesceMode)は欄の id を tag にする。欄の id は要素によらず
+  // 同じ(sel-node-label)なので、束ねを終えた後に別の要素のラベルを直すと、
+  // 前の要素の編集と同じまとまりに吸い込まれ、Undo 1 回で 2 要素ぶん戻っていた。
+  test('HC-8: 束ねを終えたら、同じ tag の次の編集は別エントリ', function() {
+    var s = setup();
+    H.setCoalesceMode('live-label:sel-node-label', 600000);
+    H.pushHistory(); s.set('A+x');
+    H.pushHistory(); s.set('A+xy');      // 同じ欄の打鍵は 1 つにまとまる
+    H.setCoalesceMode(null, 0);          // 選択が変わった / 欄を離れた
+    H.setCoalesceMode('live-label:sel-node-label', 600000);
+    H.pushHistory(); s.set('A+xy+z');    // 別の要素のラベル欄
+    H.setCoalesceMode(null, 0);
+    H.undo();
+    expect(s.get()).toBe('A+xy');
+    H.undo();
+    expect(s.get()).toBe('A');
+  });
+
   test('HC-7: reset で履歴が消える', function() {
     var s = setup();
     H.pushHistory(); s.set('AB');
