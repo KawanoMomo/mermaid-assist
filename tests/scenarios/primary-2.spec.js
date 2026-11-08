@@ -73,3 +73,51 @@ test('primary-2: flowchart の ID 改名が参照に伝播し、接頭辞を巻�
   H.record(testInfo, 'renderMs', ms);
   H.record(testInfo, 'diffLines', d.lines);
 });
+
+// 同じ手順を、ラベル定義が参照より後ろにある図(primary の flow-1 の書き方)で。
+// SpiDrv は `Spi[SPI 初期化] --> SpiDrv` で先に参照され、次の行で定義される。
+// 以前はこの参照行に旧 ID をラベルとして書き足していた(`--> QspiDrv[SpiDrv]`、
+// 押していない字が増える二重定義)。期待: 差分 4 行が ID の置換だけ。
+test('primary-2: 定義より前に参照がある図でも、改名は ID の置換だけ', async ({ page }, testInfo) => {
+  const src = fs.readFileSync(path.join(H.FIXTURES, 'primary-flow-spi-late.mmd'), 'utf8').replace(/\r?\n/g, CRLF);
+  const inPath = testInfo.outputPath('primary-flow-spi-late.mmd');
+  fs.writeFileSync(inPath, src);
+
+  await H.openApp(page);
+  await H.openFixture(page, inPath);
+  await expect(page.locator('#diagram-type')).toHaveValue('flowchart');
+  const before = await H.editorText(page);
+
+  await page.locator('#overlay-layer [data-element-id="SpiDrv"]').first().click({ force: true });
+  const idField = page.locator('#sel-node-id');
+  await expect(idField).toHaveValue('SpiDrv');
+
+  const ms = await H.timedRender(page, async () => {
+    await idField.fill('QspiDrv');
+    await idField.press('Enter');
+  });
+  const after = await H.editorText(page);
+  const d = H.lineDiff(before, after);
+
+  expect(d.removed).toEqual([
+    '    Spi[SPI 初期化] --> SpiDrv',
+    '    SpiDrv[SpiDrv] --> SpiDrvInit',
+    '    Check -->|いいえ| SpiDrv',
+    '    style SpiDrv fill:#eef',
+  ]);
+  expect(d.added).toEqual([
+    '    Spi[SPI 初期化] --> QspiDrv',
+    '    QspiDrv[SpiDrv] --> SpiDrvInit',
+    '    Check -->|いいえ| QspiDrv',
+    '    style QspiDrv fill:#eef',
+  ]);
+  // 同名ラベル「SpiDrv」は定義行の 1 か所だけ
+  expect(after.match(/\[SpiDrv\]/g)).toHaveLength(1);
+
+  expect(ms).not.toBeNull();
+  await expect(page.locator('#status-parse')).toHaveText(/OK/);
+  await page.screenshot({ path: testInfo.outputPath('primary-2-late-renamed.png') });
+
+  H.record(testInfo, 'renderMs', ms);
+  H.record(testInfo, 'diffLines', d.lines);
+});

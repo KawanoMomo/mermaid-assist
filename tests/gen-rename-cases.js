@@ -29,6 +29,16 @@ pair('c4-rename', t, M.c4.updateElement(t, 3, 'id', 'customer'));
 t = 'flowchart TD\n    A[開始]\n    B[処理]\n    A --> B\n    B -.-> A\n';
 pair('flowchart-rename', t, M.flowchart.updateNode(t, 2, 'id', 'Start'));
 
+// ラベル定義より前の行で参照されているノード。改名で参照行にラベルを書き足さないこと。
+// 書き足しは描画に出ない(mermaid は後の定義を採る)ので、定義行を消した図で比べる:
+// 書き足していれば旧 ID「N10」がラベルとして現れる。
+t = 'flowchart TD\n    N9[処理9] --> N10\n    N10[処理10] --> N11\n';
+pair('flowchart-rename-bare-ref', t, M.flowchart.updateNode(t, 2, 'id', 'M10', 'N10'));
+pair('flowchart-rename-bare-ref-nodef',
+  'flowchart TD\n    N9[処理9] --> N10\n',
+  M.flowchart.updateNode(t, 2, 'id', 'M10', 'N10').split('\n').slice(0, 2).join('\n') + '\n',
+  { expectAbsent: ['N10'], expectPresent: ['処理9', 'M10'] });
+
 t = 'architecture-beta\n  group g(cloud)[Cloud]\n  service api(server)[API] in g\n' +
     '  service db(database)[DB] in g\n  api:R -- L:db\n';
 pair('architecture-rename', t, M.architectureBeta.updateElement(t, 3, 'id', 'gateway'));

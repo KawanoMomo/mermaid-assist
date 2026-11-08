@@ -16,6 +16,29 @@
   "text": "flowchart TD\n    Start[開始]\n    B[処理]\n    Start --> B\n    B -.-> Start\n"
  },
  {
+  "name": "flowchart-rename-bare-ref/before",
+  "text": "flowchart TD\n    N9[処理9] --> N10\n    N10[処理10] --> N11\n"
+ },
+ {
+  "name": "flowchart-rename-bare-ref/after",
+  "text": "flowchart TD\n    N9[処理9] --> M10\n    M10[処理10] --> N11\n"
+ },
+ {
+  "name": "flowchart-rename-bare-ref-nodef/before",
+  "text": "flowchart TD\n    N9[処理9] --> N10\n"
+ },
+ {
+  "name": "flowchart-rename-bare-ref-nodef/after",
+  "text": "flowchart TD\n    N9[処理9] --> M10\n",
+  "expectAbsent": [
+   "N10"
+  ],
+  "expectPresent": [
+   "処理9",
+   "M10"
+  ]
+ },
+ {
   "name": "architecture-rename/before",
   "text": "architecture-beta\n  group g(cloud)[Cloud]\n  service api(server)[API] in g\n  service db(database)[DB] in g\n  api:R -- L:db\n"
  },
