@@ -531,6 +531,68 @@ window.MA.modules.gantt = (function() {
     return out;
   }
 
+  // 期間が逆転したタスク — 終了日が開始日より前のもの。
+  //
+  // mermaid は警告を出さずバーを幅 0 で描くので、図からタスクが消えたように見え、
+  // ステータスは「OK」のまま。パネルの開始日欄だけを後ろへ動かすと黙って作れる
+  // (ドラッグは期間を保って両端を動かすので作らない)。本文は書いたとおりに残し、
+  // 名指しして知らせるだけにする。
+  //
+  // 開始は書かれた日付か、`after` の指す先の終わり(複数なら一番遅いもの)。
+  // 終わりが書かれた日付のときだけ比べる(期間指定は逆転しない)。
+  // 開始を決められないもの(宙に浮いた依存など)は別の指摘に任せて数えない。
+  function invertedSpans(parsedData) {
+    var out = [];
+    if (!parsedData || !parsedData.tasks) return out;
+    var tasks = parsedData.tasks;
+    var addDays = window.MA.dateUtils.addDays;
+    var ends = {};
+    var starts = [];
+    // after は後ろのタスクも指せるので、解決が進まなくなるまで回す
+    for (var pass = 0; pass <= tasks.length; pass++) {
+      var progressed = false;
+      for (var i = 0; i < tasks.length; i++) {
+        if (starts[i]) continue;
+        var t = tasks[i];
+        var start = null;
+        if (t.startDate && isDate(t.startDate)) {
+          start = t.startDate;
+        } else if (t.after) {
+          var deps = String(t.after).split(/\s+/).filter(Boolean);
+          var all = deps.length > 0;
+          var latest = null;
+          deps.forEach(function(dep) {
+            if (!ends[dep]) { all = false; return; }
+            if (!latest || ends[dep] > latest) latest = ends[dep];
+          });
+          if (all) start = latest;
+        }
+        if (!start) continue;
+        var end = start;
+        if (t.endDate && isDate(t.endDate)) {
+          end = t.endDate;
+        } else {
+          var tok = (t.endDate && !isDate(t.endDate)) ? t.endDate
+            : (t.startDate && !isDate(t.startDate)) ? t.startDate : null;
+          var d = tok ? durationDays(tok) : null;
+          if (d !== null) end = addDays(start, d);
+        }
+        starts[i] = start;
+        if (t.id) ends[t.id] = end;
+        progressed = true;
+      }
+      if (!progressed) break;
+    }
+    for (var k = 0; k < tasks.length; k++) {
+      var tk = tasks[k];
+      if (!starts[k] || !tk.endDate || !isDate(tk.endDate)) continue;
+      if (tk.endDate < starts[k]) {
+        out.push({ label: tk.label, id: tk.id, line: tk.line, start: starts[k], end: tk.endDate });
+      }
+    }
+    return out;
+  }
+
   // Returns null when no task has a resolvable anchor date.
   function resolveSpan(parsedData) {
     if (!parsedData || !parsedData.tasks || !parsedData.tasks.length) return null;
@@ -1884,6 +1946,7 @@ window.MA.modules.gantt = (function() {
     sanitizeAfterDependencies: sanitizeAfterDependencies,
     addSection: addSection, moveSection: moveSection, resolveSpan: resolveSpan,
     danglingAfter: danglingAfter,
+    invertedSpans: invertedSpans,
     deleteSection: deleteSection,
     updateGlobalSetting: updateGlobalSetting,
     removeGlobalSetting: removeGlobalSetting,

@@ -519,6 +519,16 @@ function ganttStatusText(parsedData) {
     info += ' | 依存先が無い: ' + head +
       (dangling.length > 2 ? ' ほか' + (dangling.length - 2) + '件' : '');
   }
+  // 終了日が開始日より前のタスクは幅 0 で描かれ、図から消えたように見える。
+  // 同じ形(名指し・先頭 2 件・ほか N 件)で出す。本文は書き換えない。
+  var inverted = window.MA.modules.gantt.invertedSpans(parsedData);
+  if (inverted.length) {
+    var invHead = inverted.slice(0, 2).map(function(d) {
+      return '「' + d.label + '」(' + d.start + ' 開始 / ' + d.end + ' 終了)';
+    }).join(', ');
+    info += ' | 終了日が開始日より前: ' + invHead +
+      (inverted.length > 2 ? ' ほか' + (inverted.length - 2) + '件' : '');
+  }
   return info;
 }
 
