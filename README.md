@@ -90,6 +90,31 @@ npx playwright test
 npm run test:all
 ```
 
+### 確かめる入口(`scripts/`)
+
+PowerShell から呼ぶ 3 本。どれも終了コード 0 が緑。
+
+```powershell
+# 準備: node_modules が無いときだけ npm ci、src/ と mermaid-assist.html の構文と参照ファイルを確認
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build.ps1
+
+# unit (node tests/run-tests.js) + render-oracle (npm run test:render)
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test.ps1
+
+# Playwright: 台本の scenario (tests/scenarios) と既存の e2e (tests/e2e)
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify.ps1 -Scenarios tests\scenarios -Out C:\abs\out
+```
+
+- `verify.ps1 -Scenarios` にフォルダを渡すと scenario 全部と `tests/e2e` 全部を回す。ファイル
+  (`tests\scenarios\primary-2.spec.js`、複数はカンマ区切り)を渡すとその scenario だけを回す
+  (`-E2E` で e2e も、`-NoE2E` でフォルダでも e2e を外す)
+- `<Out>\summary.json` に passed / failed / total、scenario ごとの結果、`renderMs`(操作から描画までの ms)、
+  `diffLines`(1 操作で Mermaid 本文の動いた行数)を出す。スクリーンショットと保存した `.mmd` は `<Out>\artifacts\`
+- scenario はペルソナ台本の 1 手順と 1 対 1(`tests/scenarios/{persona}-{手順}.spec.js`、共有の手は
+  `tests/scenarios/_helpers.js`、図は `tests/scenarios/fixtures/` の小さい `.mmd`)。
+  期待は G1(押した対象だけが変わる)と G2(mermaid が実際に描ける)。直接回すなら
+  `npx playwright test --config playwright.scenarios.config.js`
+
 ## アーキテクチャ
 
 | 構成要素 | 役割 |

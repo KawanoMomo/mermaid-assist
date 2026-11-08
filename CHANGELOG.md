@@ -1,0 +1,1 @@
+- TICKET-human-20261108-1500-1: scripts/build.ps1・test.ps1・verify.ps1 で準備・unit + render・Playwright(台本の scenario と e2e、summary.json)を 1 コマンドずつ回せるようになり、junior-1 / primary-2 / reviewer-3 の scenario が入った

@@ -31,7 +31,9 @@ const http = require('http');
 const { chromium } = require('playwright');
 
 const ROOT = path.resolve(__dirname, '..');
-const PORT = 9517;
+// 0 = 空いているポートを OS が選ぶ。固定ポートだと同じ機械で 2 本同時に回すと
+// 後の方が EADDRINUSE で落ちる(自律ループでは builder と releaser が並ぶ)。
+const PORT = Number(process.env.RENDER_ORACLE_PORT || 0);
 
 function createServer() {
   return http.createServer((req, res) => {
@@ -53,7 +55,8 @@ function createServer() {
 
 async function runCases(cases) {
   const server = createServer();
-  await new Promise(r => server.listen(PORT, r));
+  await new Promise(r => server.listen(PORT, '127.0.0.1', r));
+  const port = server.address().port;
   const browser = await chromium.launch();
   const results = [];
   try {
@@ -61,7 +64,7 @@ async function runCases(cases) {
       const c = cases[i];
       // ケース間の状態漏れを断つため毎回新しいページを開く (冒頭の注意書き参照)
       const page = await browser.newPage();
-      await page.goto('http://127.0.0.1:' + PORT + '/');
+      await page.goto('http://127.0.0.1:' + port + '/');
       await page.waitForFunction(() => typeof window.mermaid !== 'undefined');
       await page.evaluate(() => window.mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' }));
       const r = await page.evaluate(async ({ text, id }) => {
