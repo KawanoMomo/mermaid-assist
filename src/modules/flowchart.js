@@ -741,8 +741,20 @@ window.MA.modules.flowchart = (function() {
     var leftRaw = trimmed.slice(0, edgePos).trim();
     var rest = trimmed.slice(edgePos + edgeType.length);
     var curLabel = '';
-    var lblMatch = rest.match(/^\|([^|]*)\|\s*(.*)$/);
-    if (lblMatch) { curLabel = lblMatch[1]; rest = lblMatch[2]; }
+    // ラベルは矢印に続けて `-->|x|` とも、空白を挟んで `--> |x|` とも書ける
+    // (addEdge 自身が後者で書く)。空白を許さないと既存のラベルを読めず、
+    // 直すたびに `--> |新| |旧|` とラベルが積み重なっていた。
+    var lblMatch = rest.match(/^(\s*)\|([^|]*)\|\s*(.*)$/);
+    if (lblMatch) { curLabel = lblMatch[2]; rest = lblMatch[3]; }
+
+    // ラベルだけを直すときは、行の中のラベルの字だけを置き換える。
+    // 組み直すと矢印の前後の空白(`-->|x|` → `--> |x| `)まで書き換わり、
+    // 押していない字が差分に出る。
+    if (field === 'label' && lblMatch && value) {
+      var lblStart = lines[idx].indexOf(trimmed) + edgePos + edgeType.length + lblMatch[1].length + 1;
+      lines[idx] = lines[idx].slice(0, lblStart) + value + lines[idx].slice(lblStart + curLabel.length);
+      return lines.join('\n');
+    }
     var rightRaw = rest.trim();
     if (rightRaw.endsWith(';')) rightRaw = rightRaw.slice(0, -1).trim();
 

@@ -32,6 +32,10 @@ window.MA.history = (function() {
   function setCoalesceMode(tag, windowMs) {
     coalesceTag = tag;
     coalesceWindowMs = windowMs || 0;
+    // 束ねを終えたら、続く編集は同じ tag でも別の Undo 単位。
+    // lastTag を残すと、別の要素の同じ欄(ラベル欄の id は要素によらず同じ)を
+    // 直したときに前の要素の編集に吸い込まれ、Undo 1 回で 2 要素ぶん戻っていた。
+    if (!tag) lastTag = null;
   }
 
   function pushHistory() {
