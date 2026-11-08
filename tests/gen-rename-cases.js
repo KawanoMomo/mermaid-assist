@@ -40,6 +40,21 @@ t = 'gantt\n    dateFormat YYYY-MM-DD\n    axisFormat %m/%d\n    section S\n' +
     '    検証 :v1, 2026-06-01, 5d\n    設計 :t1, 2026-03-01, 5d\n    実装 :impl, after t1, 10d\n';
 pair('gantt-rename', t, M.gantt.updateTaskField(t, 6, 'id', 'design'));
 
+// 状態タグを 2 つ・3 つ持つタスク。先頭 1 つしか読まないと、ラベルを直しただけで
+// 終了日が消え、mermaid は `Invalid date:k6` で図全体を拒む。押していない欄は
+// 描画にも出ないので、バー位置と描画テキストで固定する。
+t = 'gantt\n    dateFormat YYYY-MM-DD\n    axisFormat %m/%d\n    section S\n' +
+    '    結合テスト :crit, done, k6, 2026-11-25, 2026-11-27\n' +
+    '    出荷判定 :active, crit, milestone, m9, 2026-11-30, 0d\n' +
+    '    受入 :done, crit, k7, after k6, 2d\n';
+pair('gantt-multitag-label', t, M.gantt.updateTaskField(t, 5, 'label', '結合テスト2'),
+  { expectPresent: ['結合テスト2', '出荷判定', '受入'] });
+pair('gantt-multitag-label3', t, M.gantt.updateTaskField(t, 6, 'label', '出荷'),
+  { expectPresent: ['結合テスト', '出荷', '受入'] });
+pair('gantt-multitag-id', t, M.gantt.updateTaskField(t, 5, 'id', 'it'));
+pair('gantt-multitag-crit-off', t, M.gantt.updateTaskField(t, 5, 'status-off', 'crit'));
+pair('gantt-multitag-end', t, M.gantt.updateTaskDates(t, 5, null, '2026-11-28'), { allowRectChange: true });
+
 t = 'gitGraph\n  commit\n  branch dev\n  checkout dev\n  commit\n  checkout main\n  merge dev\n';
 // gitgraph は commit ハッシュを毎回ランダムに振るのでテキストは一致しない
 pair('gitgraph-rename', t, M.gitGraph.updateBranch(t, 3, 'feature'), { allowTextChange: true });
