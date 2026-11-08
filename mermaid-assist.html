@@ -528,6 +528,9 @@ html, body {
 /* 版はステータス行の右端に小さく置く。縦には増やさない。 */
 #status-version { color: var(--text-secondary); opacity: .7; font-size: 11px;
                   margin-left: 12px; white-space: nowrap; }
+/* 版の隣のコードの指紋 (src/core/build-id.js が入れる)。版より目立たせない。 */
+#status-build { color: var(--text-secondary); opacity: .55; font-size: 10px;
+                margin-left: 6px; white-space: nowrap; }
 
 /* ── Scrollbar Styling ─────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -749,7 +752,10 @@ html, body {
          1つも見つからなかった)、どの版かの特定に調査の大半を費やした。
          単一HTMLでビルド工程が無いので値は直書きし、VERSION との一致は
          テストで固定する (人が2箇所を揃え続けるのは必ず失敗する)。 -->
-    <span id="status-version" title="MermaidAssist の版。不具合を報告するときはこの番号を添えてください">v1.2.0</span>
+    <span id="status-version" title="MermaidAssist の版。不具合を報告するときはこの番号を添えてください">v1.17.0</span>
+    <!-- 版が同じでも中身は違い得る (E13)。コードそのものから取った指紋を並べる。
+         値は scripts/version.js fingerprint と同じ計算 (src/core/build-id.js)。 -->
+    <span id="status-build"></span>
     <button id="status-help" title="キーボードショートカットを開く (F1 / 図・パネルでは ?)">F1 ショートカット</button>
   </div>
 
@@ -806,6 +812,7 @@ html, body {
 <script src="src/modules/kanban.js"></script>
 <script src="src/modules/radar.js"></script>
 <script src="src/app.js"></script>
+<script src="src/core/build-id.js"></script>
 <!-- mermaid.js: loaded after main script; available by DOMContentLoaded -->
 <script src="lib/mermaid.min.js"></script>
 </body>
