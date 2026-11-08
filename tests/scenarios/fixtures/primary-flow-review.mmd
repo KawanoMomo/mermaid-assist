@@ -1,0 +1,13 @@
+flowchart TD
+    Start[開始] --> Spi
+    Spi[SPI 初期化]
+    SpiDrv[SpiDrv]
+    SpiDrvInit[SpiDrv 初期化]
+    Uart[UART 初期化]
+    UartTx[UART 送信]
+    Spi --> SpiDrv
+    SpiDrv --> SpiDrvInit
+    SpiDrvInit --> Uart
+    Uart --> UartTx
+    UartTx -->|完了| Done[終了]
+    style Spi fill:#eef
