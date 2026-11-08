@@ -1,0 +1,9 @@
+flowchart TD
+    Start[開始] --> Spi
+    Spi[SPI 初期化] --> SpiDrv
+    SpiDrv[SpiDrv] --> SpiDrvInit
+    SpiDrvInit[SpiDrv 初期化] --> Check{送信可?}
+    Check -->|はい| Send[送信]
+    Check -->|いいえ| SpiDrv
+    Send --> Done[終了]
+    style SpiDrv fill:#eef

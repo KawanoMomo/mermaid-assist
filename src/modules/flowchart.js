@@ -163,6 +163,32 @@ window.MA.modules.flowchart = (function() {
     }
   }
 
+  // 0-based index of a line (other than skipIdx) that gives `id` a shape — its
+  // label definition. -1 when the node is only ever referenced bare.
+  //
+  // The parser puts a node on the line where it first appears, which is often a
+  // bare reference (`N9[処理9] --> N10`) above the definition (`N10[処理10] --> N11`).
+  // Treating that bare reference as "no label" made an id rename write the old id
+  // back as a label (`--> M10[N10]`): a second definition nobody asked for, which
+  // surfaces as the label as soon as the real definition line is deleted.
+  function findNodeDefinition(lines, id, skipIdx) {
+    for (var j = 0; j < lines.length; j++) {
+      if (j === skipIdx) continue;
+      var trimmed = lines[j].trim();
+      if (!trimmed || trimmed.indexOf('%%') === 0) continue;
+      if (/^(flowchart|graph)\s+/.test(trimmed) || trimmed === 'end') continue;
+      if (/^(classDef|subgraph|direction|linkStyle|class|style|click)\b/.test(trimmed)) continue;
+      var parts = splitEdgeLine(trimmed);
+      var refs = parts
+        ? [splitNodeRef(parts.left.replace(/\s+$/, '')), splitNodeRef(parts.right.replace(/^\s+/, ''))]
+        : [splitNodeRef(trimmed.replace(/;\s*$/, ''))];
+      for (var k = 0; k < refs.length; k++) {
+        if (refs[k].id.trim() === id && refs[k].shape) return j;
+      }
+    }
+    return -1;
+  }
+
   function parseFlowchart(text) {
     var result = {
       meta: { direction: 'TD' },
@@ -601,6 +627,18 @@ window.MA.modules.flowchart = (function() {
       if (!m) return text;
       var nid = m[1];
       var oldId = nid;
+      if (!m[2]) {
+        // A bare reference whose label lives on another line: see findNodeDefinition.
+        var defIdx0 = findNodeDefinition(lines, nid, idx);
+        if (defIdx0 !== -1) {
+          if (field === 'id') {
+            lines[idx] = indent + value + trimmed.slice(nid.length);
+            if (value !== oldId) renameNodeRefs(lines, oldId, value, idx);
+            return lines.join('\n');
+          }
+          if (field === 'label' || field === 'shape') return updateNode(text, defIdx0 + 1, field, value, nid);
+        }
+      }
       var sh = m[2] ? parseNodeShape(m[2]) : null;
       var label = sh ? sh.label : nid;
       var shape = sh ? sh.shape : 'rect';
@@ -645,6 +683,18 @@ window.MA.modules.flowchart = (function() {
     }
 
     var target = side === 'left' ? l : r;
+    var bareWithDef = false;
+    if (!target.shape) {
+      // A bare reference whose label is defined on another line: renaming writes
+      // only the new id here (no `[旧ID]` label), and a label / shape edit goes to
+      // the defining line — mermaid takes that one, so writing here would neither
+      // show nor stay alone. See findNodeDefinition.
+      var defIdx = findNodeDefinition(lines, target.id.trim(), idx);
+      if (defIdx !== -1) {
+        if (field === 'label' || field === 'shape') return updateNode(text, defIdx + 1, field, value, target.id.trim());
+        bareWithDef = true;
+      }
+    }
     var shapeInfo = target.shape ? parseNodeShape(target.shape) : null;
     var curId = target.id;
     var curLabel = shapeInfo ? shapeInfo.label : curId;
@@ -656,7 +706,7 @@ window.MA.modules.flowchart = (function() {
     else return text;
 
     target.id = newId;
-    target.shape = buildShape(curShape, curLabel);
+    if (!bareWithDef) target.shape = buildShape(curShape, curLabel);
 
     lines[idx] = indent + l.id + l.shape + leftPad + parts.edge + parts.labelPart +
                  rightLead + r.id + r.shape + parts.tail;
